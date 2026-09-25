@@ -50,6 +50,30 @@ function toggleWorked(ref: WeekdayRef, worked: boolean) {
   const rest = props.modelValue.filter((d) => d.ref !== ref)
   emitReplace(worked ? [...rest, { ref, day: weekdayLabel(ref), start: DEFAULT_START, end: DEFAULT_END, breaks: [] }] : rest)
 }
+
+// --- copy-hours shortcuts — entering the same start/end 7 times one day at
+// a time is the single biggest friction point operators hit here. Source is
+// always Monday: worked, its hours; otherwise the same defaults a freshly
+// toggled-on day gets. Applying keeps a target day's own breaks (only hours
+// are being synced, not the whole day config) and marks every target worked.
+function sourceHours(): { start: string; end: string } {
+  const mon = dayOf('mon')
+  return mon ? { start: mon.start, end: mon.end } : { start: DEFAULT_START, end: DEFAULT_END }
+}
+function applyHoursTo(targets: WeekdayRef[]) {
+  const { start, end } = sourceHours()
+  const targetSet = new Set<WeekdayRef>(targets)
+  const untouched = props.modelValue.filter((d) => !targetSet.has(d.ref))
+  const applied = targets.map((ref) => ({ ref, day: weekdayLabel(ref), start, end, breaks: dayOf(ref)?.breaks ?? [] }))
+  emitReplace([...untouched, ...applied])
+}
+const WEEKDAYS_MON_FRI: WeekdayRef[] = ['mon', 'tue', 'wed', 'thu', 'fri']
+function applyToWeekdays() {
+  applyHoursTo(WEEKDAYS_MON_FRI)
+}
+function applyToAllDays() {
+  applyHoursTo(WEEKDAY_ORDER)
+}
 function patchDay(ref: WeekdayRef, patch: Partial<Omit<ScheduleDay, 'ref'>>) {
   const day = dayOf(ref)
   if (!day) return
@@ -100,6 +124,28 @@ function warningFor(ref: WeekdayRef): string {
 
 <template>
   <div class="space-y-2" data-testid="schedule-editor">
+    <div class="flex items-center gap-2 flex-wrap">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        class="h-7 text-xs"
+        data-testid="schedule-apply-weekdays"
+        @click="applyToWeekdays"
+      >
+        {{ t('kb.schedule.applyWeekdays') }}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        class="h-7 text-xs"
+        data-testid="schedule-apply-all-days"
+        @click="applyToAllDays"
+      >
+        {{ t('kb.schedule.applyAllDays') }}
+      </Button>
+    </div>
     <div
       v-for="ref in WEEKDAY_ORDER"
       :key="ref"

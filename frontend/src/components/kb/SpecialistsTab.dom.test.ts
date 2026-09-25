@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
@@ -87,8 +87,15 @@ describe('SpecialistsTab — active/archived filtering', () => {
   })
 })
 
-describe('SpecialistsTab — archive/restore is an instant PATCH, no confirmation', () => {
-  it('toggling the status switch calls PATCH /kb/specialists/:ref/status with no window.confirm', async () => {
+describe('SpecialistsTab — archive/restore: optimistic toggle behind a 5s undo window', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('toggling flips the switch immediately, shows an undo toast, and defers the PATCH', async () => {
     const { wrapper, pg } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'active' })])
     const { api } = await import('@/api/client')
     vi.mocked(api.patch).mockResolvedValueOnce(specialist({ ref: 'alina-kim', sales_status: 'inactive' }))
@@ -97,41 +104,84 @@ describe('SpecialistsTab — archive/restore is an instant PATCH, no confirmatio
     const statusSwitch = wrapper.find('[data-testid="specialist-status-switch-alina-kim"]')
     expect(statusSwitch.exists()).toBe(true)
     await statusSwitch.trigger('click')
-    await flushPromises()
 
+    // Optimistic + undoable: nothing written yet, but the toast is up and
+    // the switch already reflects the new state.
     expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(api.patch).not.toHaveBeenCalled()
+    expect(pg.live?.specialists[0].sales_status).toBe('active')
+    const toast = wrapper.find('[data-testid="specialist-undo-toast"]')
+    expect(toast.exists()).toBe(true)
+    expect(toast.text()).toContain('Алина Ким')
+
+    await vi.advanceTimersByTimeAsync(5000)
+
+    // Undo window elapsed with no undo click: now it commits.
     expect(api.patch).toHaveBeenCalledWith('/kb/specialists/alina-kim/status', { sales_status: 'inactive' })
+    expect(pg.live?.specialists[0].sales_status).toBe('inactive')
+    expect(wrapper.find('[data-testid="specialist-undo-toast"]').exists()).toBe(false)
     // setSpecialistStatus splices the row in place (see playground.ts's own
     // doc comment) — pg.live still holds it, just no longer active, so the
-    // default Active filter drops it from view immediately, no reload.
-    expect(pg.live?.specialists[0].sales_status).toBe('inactive')
+    // default Active filter drops it from view once committed.
     expect(wrapper.find('[data-testid="specialist-row"]').exists()).toBe(false)
 
     nativeConfirm.mockRestore()
   })
 
-  it('restoring from the Archived filter calls PATCH with sales_status: "active"', async () => {
+  it('clicking Отменить within the window cancels the toggle — no PATCH ever fires', async () => {
+    const { wrapper, pg } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'active' })])
+    const { api } = await import('@/api/client')
+
+    await wrapper.find('[data-testid="specialist-status-switch-alina-kim"]').trigger('click')
+    expect(wrapper.find('[data-testid="specialist-undo-toast"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="specialist-undo-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="specialist-undo-toast"]').exists()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.patch).not.toHaveBeenCalled()
+    expect(pg.live?.specialists[0].sales_status).toBe('active')
+  })
+
+  it('restoring from the Archived filter, once the window elapses, calls PATCH with sales_status: "active"', async () => {
     const { wrapper } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'inactive' })])
     const { api } = await import('@/api/client')
     vi.mocked(api.patch).mockResolvedValueOnce(specialist({ ref: 'alina-kim', sales_status: 'active' }))
     await wrapper.find('[data-testid="specialists-filter-archived"]').trigger('click')
 
     await wrapper.find('[data-testid="specialist-status-switch-alina-kim"]').trigger('click')
-    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
 
     expect(api.patch).toHaveBeenCalledWith('/kb/specialists/alina-kim/status', { sales_status: 'active' })
   })
 
-  it('a failed PATCH shows an inline error instead of throwing, and the row stays put', async () => {
+  it('a failed PATCH (once committed) shows an inline error instead of throwing, and the row stays put', async () => {
     const { wrapper } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'active' })])
     const { api, ApiError } = await import('@/api/client')
     vi.mocked(api.patch).mockRejectedValueOnce(new ApiError('SERVER_ERROR', 500, 'Не удалось сохранить изменение.'))
 
     await wrapper.find('[data-testid="specialist-status-switch-alina-kim"]').trigger('click')
-    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
 
     expect(wrapper.text()).toContain('Не удалось сохранить изменение.')
     expect(wrapper.findAll('[data-testid="specialist-row"]')).toHaveLength(1)
+  })
+
+  it('toggling a different row immediately commits whatever was still pending', async () => {
+    const { wrapper } = mountTab([
+      specialist({ ref: 'alina-kim', sales_status: 'active' }),
+      specialist({ ref: 'diana-nur', full_name: 'Диана Нур', sales_status: 'active' }),
+    ])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValue(specialist({ ref: 'alina-kim', sales_status: 'inactive' }))
+
+    await wrapper.find('[data-testid="specialist-status-switch-alina-kim"]').trigger('click')
+    expect(api.patch).not.toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="specialist-status-switch-diana-nur"]').trigger('click')
+    await flushPromises()
+
+    expect(api.patch).toHaveBeenCalledWith('/kb/specialists/alina-kim/status', { sales_status: 'inactive' })
   })
 })
 
@@ -148,5 +198,16 @@ describe('SpecialistsTab — roster columns', () => {
   it('shows the fallback booking badge when the specialist has no booking_url of their own', () => {
     const { wrapper } = mountTab([specialist({ booking_url: '' })])
     expect(wrapper.text()).toContain('Основная салона')
+  })
+
+  it('distinguishes a personal booking link from the salon fallback with a titled icon, not just badge color', () => {
+    const { wrapper } = mountTab([specialist()])
+    expect(wrapper.find('[title="Персональная ссылка на запись"]').exists()).toBe(true)
+  })
+
+  it('renders both the desktop table and a mobile card-stack from the same rows', () => {
+    const { wrapper } = mountTab([specialist()])
+    expect(wrapper.find('[data-testid="specialists-card-stack"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="specialist-card"]')).toHaveLength(1)
   })
 })

@@ -138,6 +138,7 @@ export default {
       experience: 'Experience',
       bookingUrl: 'Online booking link',
       bookingUrlFallback: "Salon's main link",
+      bookingUrlPersonal: 'Personal booking link',
       schedule: 'Work schedule',
       duration: 'Duration',
       durationMinutes: '{n} min',
@@ -250,6 +251,8 @@ export default {
       errBreakOrder: 'Break start must be before its end',
       errBreakOutside: 'The break must fall within the shift',
       errBreakOverlap: 'Breaks must not overlap',
+      applyWeekdays: 'Copy to weekdays (Mon–Fri)',
+      applyAllDays: 'Apply to all days',
     },
     // archive.* — the Active/Archived segmented filter and the instant
     // status toggle on SpecialistsTab.vue/ServicesTab.vue — same "no
@@ -261,11 +264,14 @@ export default {
       filterActive: 'Active',
       filterArchived: 'Archived',
       toggleAria: "Toggle the record's active status",
+      toastChanged: '"{name}": status changed to "{status}".',
+      undo: 'Undo',
     },
     // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue's
     // own copy beyond the shared kb.fields.*/kb.serviceType.* vocabulary.
     services: {
       addonNotStandalone: 'Not sold on its own',
+      categoryCount: '{n} services',
       noCategory: 'Uncategorized',
     },
     // specialists.columns.* — SpecialistsTab.vue's roster table headers,

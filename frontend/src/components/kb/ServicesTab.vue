@@ -33,6 +33,7 @@ interface ServiceNode {
 interface CategoryGroup {
   category: string
   bases: ServiceNode[]
+  count: number
 }
 
 const filteredRows = computed(() => {
@@ -63,7 +64,11 @@ const tree = computed<CategoryGroup[]>(() => {
     list.push({ row: base, children: childrenByParent.get(base.ref) ?? [] })
     byCategory.set(category, list)
   }
-  return [...byCategory.entries()].map(([category, groupBases]) => ({ category, bases: groupBases }))
+  return [...byCategory.entries()].map(([category, groupBases]) => ({
+    category,
+    bases: groupBases,
+    count: groupBases.reduce((sum, b) => sum + 1 + b.children.length, 0),
+  }))
 })
 
 const specialistsByRef = computed(() => {
@@ -129,7 +134,10 @@ async function toggleStatus(row: ServiceRow) {
     <p v-if="!tree.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyServices') }}</p>
 
     <div v-for="group in tree" :key="group.category" class="rounded-lg border border-border overflow-hidden" data-testid="service-category-group">
-      <div class="bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">{{ group.category }}</div>
+      <div class="bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+        {{ group.category }}
+        <span class="font-normal text-muted-foreground/70" data-testid="service-category-count">· {{ t('kb.services.categoryCount', { n: group.count }) }}</span>
+      </div>
 
       <div v-for="node in group.bases" :key="node.row.ref" class="border-t border-border first:border-t-0" data-testid="service-base-row">
         <div class="flex items-center gap-3 px-3 py-2.5 flex-wrap">
@@ -159,11 +167,14 @@ async function toggleStatus(row: ServiceRow) {
         </div>
 
         <div
-          v-for="child in node.children"
+          v-for="(child, idx) in node.children"
           :key="child.ref"
-          class="flex items-center gap-3 pl-8 pr-3 py-2 border-t border-border/60 bg-muted/10 flex-wrap"
+          class="flex items-center gap-2 pl-4 pr-3 py-2 border-t border-border/60 bg-muted/10 flex-wrap"
           data-testid="service-child-row"
         >
+          <span class="font-mono text-xs text-muted-foreground/50 shrink-0 select-none" aria-hidden="true">
+            {{ idx === node.children.length - 1 ? '└─' : '├─' }}
+          </span>
           <div class="flex-1 min-w-[160px]">
             <div class="flex items-center gap-1.5 flex-wrap">
               <Badge variant="outline" class="text-[10px]">{{ t('kb.serviceType.' + child.service_type) }}</Badge>

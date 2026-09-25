@@ -143,6 +143,7 @@ export default {
       experience: 'Стаж',
       bookingUrl: 'Ссылка на онлайн-запись',
       bookingUrlFallback: 'Основная салона',
+      bookingUrlPersonal: 'Персональная ссылка на запись',
       schedule: 'Расписание работы',
       duration: 'Длительность',
       durationMinutes: '{n} мин',
@@ -255,6 +256,8 @@ export default {
       errBreakOrder: 'Начало перерыва должно быть раньше его окончания',
       errBreakOutside: 'Перерыв должен быть в пределах смены',
       errBreakOverlap: 'Перерывы не должны пересекаться',
+      applyWeekdays: 'Скопировать на будни (Пн–Пт)',
+      applyAllDays: 'Применить ко всем дням',
     },
     // archive.* — the Активные/В архиве segmented filter and the instant
     // status toggle on SpecialistsTab.vue/ServicesTab.vue — same "no
@@ -266,11 +269,14 @@ export default {
       filterActive: 'Активные',
       filterArchived: 'В архиве',
       toggleAria: 'Переключить активность записи',
+      toastChanged: '«{name}»: статус изменён на «{status}».',
+      undo: 'Отменить',
     },
     // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue's
     // own copy beyond the shared kb.fields.*/kb.serviceType.* vocabulary.
     services: {
       addonNotStandalone: 'Не продается отдельно',
+      categoryCount: '{n} услуг',
       noCategory: 'Без категории',
     },
     // specialists.columns.* — SpecialistsTab.vue's roster table headers,

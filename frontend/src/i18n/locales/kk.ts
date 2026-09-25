@@ -145,6 +145,7 @@ export default {
       experience: 'Тәжірибесі',
       bookingUrl: 'Онлайн жазылу сілтемесі',
       bookingUrlFallback: 'Салонның негізгі сілтемесі',
+      bookingUrlPersonal: 'Жеке жазылу сілтемесі',
       schedule: 'Ауысым кестесі',
       duration: 'Ұзақтығы',
       durationMinutes: '{n} мин',
@@ -250,6 +251,8 @@ export default {
       errBreakOrder: 'Үзілістің басталуы оның аяқталуынан ерте болуы керек',
       errBreakOutside: 'Үзіліс ауысым уақыты ішінде болуы керек',
       errBreakOverlap: 'Үзілістер бір-бірімен қабаттаспауы керек',
+      applyWeekdays: 'Жұмыс күндеріне көшіру (Дс–Жм)',
+      applyAllDays: 'Барлық күндерге қолдану',
     },
     // archive.* — Белсенді/Мұрағатта сегментті сүзгісі және
     // SpecialistsTab.vue/ServicesTab.vue-дегі лезде ауыстырғыш — растауды
@@ -260,11 +263,14 @@ export default {
       filterActive: 'Белсенді',
       filterArchived: 'Мұрағатта',
       toggleAria: 'Жазбаның белсенділік күйін ауыстыру',
+      toastChanged: '«{name}»: мәртебесі «{status}» болып өзгертілді.',
+      undo: 'Болдырмау',
     },
     // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue
     // компоненттерінің ортақ kb.fields.*/kb.serviceType.* сөздігінен тыс мәтіні.
     services: {
       addonNotStandalone: 'Жеке сатылмайды',
+      categoryCount: '{n} қызмет',
       noCategory: 'Санатсыз',
     },
     // specialists.columns.* — SpecialistsTab.vue кестесінің баған атаулары,

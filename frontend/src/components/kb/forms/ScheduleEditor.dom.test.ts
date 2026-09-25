@@ -54,6 +54,71 @@ describe('ScheduleEditor — toggling a weekday', () => {
   })
 })
 
+describe('ScheduleEditor — copy-hours shortcuts', () => {
+  it('applying to weekdays copies Monday\'s hours to Tue–Fri, worked or not, leaving Sat/Sun untouched', async () => {
+    const seeded: Schedule = [
+      { ref: 'mon', day: 'Понедельник', start: '11:00', end: '20:00', breaks: [] },
+      { ref: 'sat', day: 'Суббота', start: '09:00', end: '15:00', breaks: [] },
+    ]
+    const wrapper = mountEditor(seeded)
+
+    await wrapper.find('[data-testid="schedule-apply-weekdays"]').trigger('click')
+
+    const schedule = lastEmitted(wrapper)
+    expect(schedule.map((d) => d.ref)).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat'])
+    for (const ref of ['mon', 'tue', 'wed', 'thu', 'fri']) {
+      const day = schedule.find((d) => d.ref === ref)!
+      expect(day.start).toBe('11:00')
+      expect(day.end).toBe('20:00')
+    }
+    // Saturday was never a target — its own hours survive unchanged.
+    const sat = schedule.find((d) => d.ref === 'sat')!
+    expect(sat.start).toBe('09:00')
+    expect(sat.end).toBe('15:00')
+  })
+
+  it('applying to all days copies Monday\'s hours to every day of the week', async () => {
+    const seeded: Schedule = [{ ref: 'mon', day: 'Понедельник', start: '08:00', end: '17:00', breaks: [] }]
+    const wrapper = mountEditor(seeded)
+
+    await wrapper.find('[data-testid="schedule-apply-all-days"]').trigger('click')
+
+    const schedule = lastEmitted(wrapper)
+    expect(schedule).toHaveLength(7)
+    for (const day of schedule) {
+      expect(day.start).toBe('08:00')
+      expect(day.end).toBe('17:00')
+    }
+  })
+
+  it('falls back to the default hours when Monday is not worked yet', async () => {
+    const wrapper = mountEditor([])
+
+    await wrapper.find('[data-testid="schedule-apply-all-days"]').trigger('click')
+
+    const schedule = lastEmitted(wrapper)
+    expect(schedule).toHaveLength(7)
+    expect(schedule[0].start).toMatch(/^\d{2}:\d{2}$/)
+    expect(new Set(schedule.map((d) => d.start)).size).toBe(1) // every day got the same source hours
+  })
+
+  it('preserves an existing target day\'s own breaks — only hours are synced', async () => {
+    const seeded: Schedule = [
+      { ref: 'mon', day: 'Понедельник', start: '10:00', end: '19:00', breaks: [] },
+      { ref: 'wed', day: 'Среда', start: '09:00', end: '18:00', breaks: [{ start: '13:00', end: '14:00' }] },
+    ]
+    const wrapper = mountEditor(seeded)
+
+    await wrapper.find('[data-testid="schedule-apply-weekdays"]').trigger('click')
+
+    const schedule = lastEmitted(wrapper)
+    const wed = schedule.find((d) => d.ref === 'wed')!
+    expect(wed.start).toBe('10:00')
+    expect(wed.end).toBe('19:00')
+    expect(wed.breaks).toEqual([{ start: '13:00', end: '14:00' }])
+  })
+})
+
 describe('ScheduleEditor — breaks', () => {
   it('adding a break seeds it from the shift hours', async () => {
     const seeded: Schedule = [{ ref: 'wed', day: 'Среда', start: '10:00', end: '19:00', breaks: [] }]
