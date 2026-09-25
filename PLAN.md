@@ -1,53 +1,143 @@
-# Unified GHCR Server Image
+# Minimal Beauty-Salon KB Extension
 
 ## Summary
 
-Create `ghcr.io/yerassyldanay/xchats` as a self-contained, multi-architecture server image containing the Go service and embedded Vue bundle. Release publishing switches from the two component packages to this unified package, while the existing two-container Compose development workflow remains unchanged.
+Implement the salon vertical strictly as a knowledge-base extension:
 
-## Implementation Changes
+1. Extend `ai_contacts`.
+2. Add `ai_specialists` and `ai_services`.
+3. Render salon prompt blocks.
+4. Register deterministic fact and media tokens.
+5. Extend existing KB APIs, draft import, and MCP tools.
 
-- Add a non-desktop `go:embed` asset definition using the existing `backend/internal/desktop/dist` mirror. The Docker build copies `frontend/dist` there before compiling; ordinary backend development remains API-only when `index.html` is absent.
-- Add a reusable HTTP handler that:
-  - Sends `/xchats/`, `/mcp`, `/mcp/`, `/oauth/`, `/telegram/`, `/meta/`, `/.well-known/`, `/healthz`, `/readyz`, and `/playground/review-handoff` to Gin unchanged, including SSE.
-  - Serves real static assets with correct MIME types and `GET`/`HEAD` support.
-  - Falls back to `index.html` for Vue history routes.
-  - Preserves prerendered blog directory indexes, real blog 404 responses, HTML cache policy, and applicable Nginx security headers.
-- Use the unified handler for both the HTTP listener and embedded tunnel in server builds. Desktop builds retain their Wails middleware, cookie jar, and realtime transport without linking Wails/Cgo into the server binary.
-- Add a root `Dockerfile` and `.dockerignore`:
-  - Node 24 frontend stage: `npm ci && npm run build`.
-  - Go 1.27 stage: copy the built SPA, cross-compile with `CGO_ENABLED=0`, `TARGETOS`/`TARGETARCH`, `-trimpath`, stripped symbols, and the existing `VERSION` linker value.
-  - Distroless Debian 12 non-root runtime exposing `8080`, declaring `/data`, and ensuring UID 65532 can write the initial named volume.
-- Add an image-specific `/config.yaml` with database, WhatsApp state, blobs, settings, and credentials rooted beneath `/data`. Set only `XCHATS_CONFIG`, `XCHATS_ALLOW_FILE_CREDENTIALS`, `XCHATS_DATA_DIR`, and `XCHATS_CONFIG_DIR` as image defaults so mounted YAML values are not shadowed by Docker environment defaults.
-- Support custom configuration by replacing the baked file:
-  `-v /absolute/path/config.yaml:/config.yaml:ro`.
-  Environment variables continue to override YAML through the existing configuration precedence.
-- Update CI to build the root image when backend, frontend, image config, or root Docker inputs change; retain current component-image CI checks because local Compose still uses their Dockerfiles.
-- Change `release.yml` to publish only `ghcr.io/yerassyldanay/xchats` for `linux/amd64` and `linux/arm64`, with provenance and tags `vX.Y.Z`, `X.Y.Z`, `X.Y`, `X`, and `latest`. Per the selected policy, prereleases also update `latest`. Buildx produces one multi-platform manifest using its standard target-platform arguments. [Docker multi-platform guidance](https://docs.docker.com/build/building/multi-platform/), [metadata-action tagging](https://github.com/docker/metadata-action)
-- Keep the existing desktop/source release assets and atomic release gate unchanged. Authenticate to GHCR with the scoped `GITHUB_TOKEN`, `packages: write`, and existing attestation permissions. [GitHub GHCR publishing guidance](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)
-- Add minimal documentation for the pull/run command, tag scheme, `/data` persistence, custom `/config.yaml` mount, production origin/cookie overrides, and the manual first-push package visibility step. Do not change Compose or source-development instructions.
+Do not change channels, inbox, debounce, automation, draft dispatch, SSE, CRM, or the response JSON contract.
 
-## Interfaces
+Assessment: 9/10 for the agreed scope. Date-based slot expiry and automatic portfolio attachment would be needed for 10/10, but both are explicitly deferred.
 
-- Container: port `8080`, persistent volume `/data`, optional configuration mount `/config.yaml`.
-- Registry: `ghcr.io/yerassyldanay/xchats:<tag>`.
-- HTTP API schemas and endpoint paths remain unchanged; only non-API paths gain embedded static/SPA handling.
-- Existing `xchats-backend` and `xchats-frontend` packages remain available at their old versions but receive no new release tags.
+## Data Model and Authoring
 
-## Test Plan
+Create additive SQLite migration `0020_salon_kb.up.sql`.
 
-- Unit-test backend-path classification, including exact `/mcp`, Meta routes, health/readiness, OAuth, webhooks, and review handoff.
-- Test static files, MIME types, `HEAD`, non-GET rejection, Vue deep-link fallback, missing-bundle development fallback, blog indexes/404s, cache headers, and API responses never becoming SPA HTML.
-- Run frontend typecheck/tests/build and Go tests with `CGO_ENABLED=0`; verify the default dependency graph contains no Wails/WebView packages.
-- CI-build both target architectures and smoke-test the amd64 image using the documented command:
-  - `/healthz`, `/`, a hashed asset, and a Vue deep link succeed.
-  - `/mcp` and representative webhook/API paths reach Gin rather than the SPA.
-  - The non-root process initializes and reopens the same named `/data` volume.
-  - A bind-mounted config using a different internal port/storage path demonstrably changes runtime behavior.
-- Record final compressed image size and target approximately 35 MB without making an architecture-sensitive byte limit a release blocker.
+### `ai_contacts`
 
-## Assumptions
+Add:
 
-- Current repository pins—Node 24 and Go 1.27—supersede the older handover versions.
-- Local Compose, its component Dockerfiles, Makefile commands, and two-service behavior remain intact.
-- The first successful push creates the GHCR package; the owner then makes it public manually.
-- Applied skills: `multi-stage-dockerfile` for image structure/security, `golang-patterns` for HTTP composition, `golang-continuous-integration` for publishing controls, and `vue-best-practices` to confirm no Vue component changes are required.
+- `booking_url TEXT NOT NULL DEFAULT ''`
+- `available_spots TEXT NOT NULL DEFAULT ''`
+
+Tokens:
+
+- `{{contact.main.booking}}`
+- `{{contact.main.available_spots}}`
+
+### `ai_specialists`
+
+Use repository conventions: UUID `id` primary key plus `UNIQUE (organization_id, ref)`, not a globally unique `ref`.
+
+Fields:
+
+- `id`, `organization_id`, `ref`
+- `name`, `title`, `experience`
+- `work_days`, `shift_start`, `shift_end`
+- `available_spots`, `booking_url`
+- `portfolio_images TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(portfolio_images))`
+- `sales_status`, `created_at`, `updated_at`
+
+### `ai_services`
+
+Fields:
+
+- `id`, `organization_id`, `ref`
+- `parent_ref` nullable
+- `service_type`: `base | variant | addon`
+- `category`, `name`, `price`
+- `duration INTEGER` representing minutes
+- `description`
+- `specialist_refs TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(specialist_refs))`
+- `sales_status`, `created_at`, `updated_at`
+
+Validation:
+
+- Refs follow the existing pattern `[a-z0-9][a-z0-9_-]*`; dots are forbidden because dots separate token segments. Use `manicure-french`, not `manicure.french`.
+- Base services have no parent.
+- Variants and add-ons require an existing base parent in the same organization.
+- Only one hierarchy level is allowed.
+- Add-ons cannot be presented as standalone services.
+- Every `specialist_ref` must resolve to an active specialist in the same organization.
+- Duration must be positive when present.
+- Specialist deletion is rejected while an active service references that specialist.
+
+Extend the existing live/draft KB views, import synthesis, and cache loading with `specialists` and `services`. Add matching REST and MCP operations:
+
+- `kb_specialist_upsert`, `kb_specialist_delete`
+- `kb_service_upsert`, `kb_service_delete`
+- Existing KB read/search tools recognize both new entity types.
+
+No Vue forms are added; administrators use existing KB API/import/MCP workflows.
+
+## Prompt and Token Implementation
+
+Add `aiprompt.Specialist` and `aiprompt.Service` types, extend `Contacts`, `KB`, and `PromptInput`, and load the new rows through the existing repository.
+
+Add a versioned `salon-kb@v1` frame with `%%SERVICES%%` and `%%SPECIALISTS%%` slots. Select it automatically when contacts contain salon booking/availability data or the KB has specialists/services; otherwise retain `shop-kb@v7` unchanged.
+
+Register facts:
+
+- `contact.main.booking`
+- `contact.main.available_spots`
+- `specialist.<ref>.work_days`
+- `specialist.<ref>.shift_start`
+- `specialist.<ref>.shift_end`
+- `specialist.<ref>.available_spots`
+- `specialist.<ref>.booking`
+- `service.<ref>.price`
+- `service.<ref>.duration`
+
+Register media token:
+
+- `specialists.<ref>.portfolio`
+
+The media token maps internally to `portfolio_images`; material IDs and storage locations never enter the prompt.
+
+Resolution rules:
+
+- `specialist.<ref>.booking` resolves to the specialist URL when present, otherwise to `contact.main.booking`.
+- If neither URL exists, the token is absent and any attempted use fails closed.
+- Specialist availability never falls back to general salon availability.
+- Blank exact fields produce no token.
+- Prices, durations, schedules, URLs, and available spots appear only as placeholders in the prompt.
+- Service and specialist names/descriptions may appear as trusted prose.
+- `duration` resolves as an integer; the model adds the appropriate minutes unit.
+
+Prompt rules:
+
+- Quote available spots only through the corresponding token.
+- Do not infer an unlisted time, alternative slot, or appointment confirmation.
+- Direct booking requests to the resolved booking URL.
+- Never state that the client has been booked.
+- Ask for the base service when an add-on is requested alone.
+- Match specialists to services only through validated `specialist_refs`.
+- Keep the existing response schema and language behavior unchanged.
+
+## Test Plan and Assumptions
+
+Tests:
+
+- Migration and schema-contract tests for both tables and contact columns.
+- Organization isolation, ref validation, JSON-array validation, parent rules, and specialist-reference validation.
+- Live and staged KB CRUD, publish, delete, import, and MCP tests.
+- Prompt snapshots for service hierarchy, specialist roster, schedules, spots, booking links, and empty fields.
+- Catalog/substitution tests for every new token.
+- Booking fallback tests: specialist URL, salon fallback, and both missing.
+- Media-catalog tests for valid, missing, cross-organization, and wrong-type portfolio materials.
+- Regression tests proving non-salon organizations still render the byte-pinned shop frame.
+- Eval cases for prices, durations, add-ons, specialist schedules, listed/unlisted spots, portfolio requests, and booking-link handoff.
+
+Assumptions:
+
+- V1 supports one salon location per organization; the earlier multi-branch design is dropped.
+- Available spots are manually maintained text with no date or expiry enforcement. The stored value remains authoritative until an operator updates or clears it.
+- No calendar synchronization or appointment creation is included.
+- No frontend changes are included.
+- The existing RU/KK response contract remains unchanged; the earlier English expansion is deferred.
+- Portfolio tokens are registered and validated, but automatic attachment delivery is not added: the current response engine validates `media_files_to_send` and then drops the resolved media before draft persistence. Changing that would require the reply-dispatch work explicitly excluded from this scope.
