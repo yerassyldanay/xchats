@@ -35,10 +35,11 @@ var targetTypeToTool = map[string]string{
 	"topics": "kb_topic_upsert", "products": "kb_product_upsert", "tariffs": "kb_tariff_upsert",
 	"contacts": "kb_contacts_upsert", "policies": "kb_policies_upsert", "tariff_info": "kb_tariff_info_upsert",
 	"delivery_zones": "kb_delivery_zone_upsert",
+	"specialists":    "kb_specialist_upsert", "services": "kb_service_upsert",
 }
 
 // allowedToolsForTarget returns the tool set a synthesis prompt may use:
-// all six content tools for "auto" (the model picks), or exactly one for an
+// every content tool for "auto" (the model picks), or exactly one for an
 // explicit target_type.
 func allowedToolsForTarget(targetType string) []string {
 	if tool, ok := targetTypeToTool[targetType]; ok {

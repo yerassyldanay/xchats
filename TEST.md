@@ -30,16 +30,18 @@ INSERT INTO ai_contacts (
 
 ### 1.2. `ai_specialists`
 
-| ref | full_name | title | experience | work_days | shift_start | shift_end | booking_url | portfolio_images | sales_status |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `alina-kim` | Алина Ким | Топ-стилист / Колорист | 7 лет | `["вт","ср","чт","пт","сб"]` | `10:00` | `19:00` | `https://xpayment.kz/book/aura-alina` | `["specialists/alina/airtouch-1.jpg","specialists/alina/blonde-2.jpg"]` | `active` |
-| `diana-nur` | Диана Нур | Мастер ногтевого сервиса | 4 года | `["пн","ср","пт","вс"]` | `11:00` | `20:00` | `""` *(falls back to salon)* | `["specialists/diana/french-1.jpg","specialists/diana/smart-pedi.jpg"]` | `active` |
-| `elena-volkova` | Елена Волкова | Lash & Brow мастер | 5 лет | `["чт","пт","сб","вс"]` | `10:00` | `18:00` | `https://xpayment.kz/book/aura-elena` | `["specialists/elena/lamination-1.jpg"]` | `active` |
-| `kamila-sadykova`| Камила Садыкова | Младший мастер-парикмахер | 1.5 года | `["пн","вт","ср"]` | `12:00` | `21:00` | `""` *(falls back to salon)* | `[]` | `active` |
+`schedule` is a single JSON column (not separate `work_days`/`shift_start`/`shift_end` columns — those don't exist; see migration `0020_salon_kb.up.sql`), an array of `{"ref","day","start","end","breaks"}` objects, one per worked weekday (`ref` is the authoritative `mon`..`sun` key; `day` is a display label only). The table below shows each specialist's schedule as a Пн–Вс summary for readability — the SQL below has the real JSON.
+
+| ref | full_name | title | experience | schedule (summary) | booking_url | portfolio_images | sales_status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `alina-kim` | Алина Ким | Топ-стилист / Колорист | 7 лет | Вт,Ср,Чт,Пт,Сб 10:00–19:00 | `https://xpayment.kz/book/aura-alina` | `["specialists/alina/airtouch-1.jpg","specialists/alina/blonde-2.jpg"]` | `active` |
+| `diana-nur` | Диана Нур | Мастер ногтевого сервиса | 4 года | Пн,Ср,Пт,Вс 11:00–20:00 | `""` *(falls back to salon)* | `["specialists/diana/french-1.jpg","specialists/diana/smart-pedi.jpg"]` | `active` |
+| `elena-volkova` | Елена Волкова | Lash & Brow мастер | 5 лет | Чт,Пт,Сб,Вс 10:00–18:00 | `https://xpayment.kz/book/aura-elena` | `["specialists/elena/lamination-1.jpg"]` | `active` |
+| `kamila-sadykova`| Камила Садыкова | Младший мастер-парикмахер | 1.5 года | Пн,Вт,Ср 12:00–21:00 | `""` *(falls back to salon)* | `[]` | `active` |
 
 ```sql
 INSERT INTO ai_specialists (
-    id, organization_id, ref, full_name, title, experience, work_days, shift_start, shift_end, booking_url, portfolio_images, sales_status, created_at, updated_at
+    id, organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, created_at, updated_at
 ) VALUES 
 (
     's0000000-0000-0000-0000-000000000001',
@@ -48,9 +50,7 @@ INSERT INTO ai_specialists (
     'Алина Ким',
     'Топ-стилист / Колорист',
     '7 лет',
-    '["вт","ср","чт","пт","сб"]',
-    '10:00',
-    '19:00',
+    '[{"ref":"tue","day":"Вторник","start":"10:00","end":"19:00","breaks":[]},{"ref":"wed","day":"Среда","start":"10:00","end":"19:00","breaks":[]},{"ref":"thu","day":"Четверг","start":"10:00","end":"19:00","breaks":[]},{"ref":"fri","day":"Пятница","start":"10:00","end":"19:00","breaks":[]},{"ref":"sat","day":"Суббота","start":"10:00","end":"19:00","breaks":[]}]',
     'https://xpayment.kz/book/aura-alina',
     '["specialists/alina/airtouch-1.jpg","specialists/alina/blonde-2.jpg"]',
     'active',
@@ -63,9 +63,7 @@ INSERT INTO ai_specialists (
     'Диана Нур',
     'Мастер ногтевого сервиса',
     '4 года',
-    '["пн","ср","пт","вс"]',
-    '11:00',
-    '20:00',
+    '[{"ref":"mon","day":"Понедельник","start":"11:00","end":"20:00","breaks":[]},{"ref":"wed","day":"Среда","start":"11:00","end":"20:00","breaks":[]},{"ref":"fri","day":"Пятница","start":"11:00","end":"20:00","breaks":[]},{"ref":"sun","day":"Воскресенье","start":"11:00","end":"20:00","breaks":[]}]',
     '',
     '["specialists/diana/french-1.jpg","specialists/diana/smart-pedi.jpg"]',
     'active',
@@ -78,9 +76,7 @@ INSERT INTO ai_specialists (
     'Елена Волкова',
     'Lash & Brow мастер',
     '5 лет',
-    '["чт","пт","сб","вс"]',
-    '10:00',
-    '18:00',
+    '[{"ref":"thu","day":"Четверг","start":"10:00","end":"18:00","breaks":[]},{"ref":"fri","day":"Пятница","start":"10:00","end":"18:00","breaks":[]},{"ref":"sat","day":"Суббота","start":"10:00","end":"18:00","breaks":[]},{"ref":"sun","day":"Воскресенье","start":"10:00","end":"18:00","breaks":[]}]',
     'https://xpayment.kz/book/aura-elena',
     '["specialists/elena/lamination-1.jpg"]',
     'active',
@@ -93,9 +89,7 @@ INSERT INTO ai_specialists (
     'Камила Садыкова',
     'Младший мастер-парикмахер',
     '1.5 года',
-    '["пн","вт","ср"]',
-    '12:00',
-    '21:00',
+    '[{"ref":"mon","day":"Понедельник","start":"12:00","end":"21:00","breaks":[]},{"ref":"tue","day":"Вторник","start":"12:00","end":"21:00","breaks":[]},{"ref":"wed","day":"Среда","start":"12:00","end":"21:00","breaks":[]}]',
     '',
     '[]',
     'active',
@@ -123,6 +117,8 @@ INSERT INTO ai_specialists (
     └── [addon]   botox-lashes (Ботокс для ресниц Lash Plex) — 4 000 ₸, 15 мин [elena-volkova]
 ```
 
+`parent_ref` is `NOT NULL DEFAULT ''` (migration `0020_salon_kb.up.sql`) — a base service's `parent_ref` is the empty string `''`, never SQL `NULL`.
+
 ```sql
 INSERT INTO ai_services (
     id, organization_id, ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, created_at, updated_at
@@ -132,7 +128,7 @@ INSERT INTO ai_services (
     'v0000000-0000-0000-0000-000000000001',
     'org-beauty-aura-001',
     'haircut-women',
-    NULL,
+    '',
     'base',
     'Волосы',
     'Женская стрижка',
@@ -177,7 +173,7 @@ INSERT INTO ai_services (
     'v0000000-0000-0000-0000-000000000004',
     'org-beauty-aura-001',
     'coloring-airtouch',
-    NULL,
+    '',
     'base',
     'Волосы',
     'Сложное окрашивание Airtouch',
@@ -208,7 +204,7 @@ INSERT INTO ai_services (
     'v0000000-0000-0000-0000-000000000006',
     'org-beauty-aura-001',
     'manicure-gel',
-    NULL,
+    '',
     'base',
     'Ногти',
     'Комбинированный маникюр + гель-покрытие',
@@ -254,7 +250,7 @@ INSERT INTO ai_services (
     'v0000000-0000-0000-0000-000000000009',
     'org-beauty-aura-001',
     'lash-lamination',
-    NULL,
+    '',
     'base',
     'Брови и ресницы',
     'Ламинирование и окрашивание ресниц',
@@ -371,33 +367,30 @@ Category E: Portfolio Media Tokens & Booking Fallbacks
 #### Scenario C1: Within Shift Time (Tuesday 14:00 with Alina Kim)
 * **Customer Input:** *"Алина Ким во вторник в 14:00 работает? Хочу к ней на стрижку."*
 * **Shift Evaluation:**
-  - Tuesday is in `["вт","ср","чт","пт","сб"]` $\rightarrow$ MATCH.
-  - 14:00 is within `10:00 - 19:00` $\rightarrow$ WITHIN SHIFT.
-* **Required Tokens (`requires`):**
-  - `{{specialist.alina-kim.shift_start}}`
-  - `{{specialist.alina-kim.shift_end}}`
+  - Tuesday is one of Alina's worked days (Вт,Ср,Чт,Пт,Сб — see `ai_specialists.schedule`) $\rightarrow$ MATCH.
+  - 14:00 is within `10:00–19:00` $\rightarrow$ WITHIN SHIFT.
+* **Required Tokens (`requires`):** *(the registered per-day token — `aiprompt/registry.go`'s `scheduleFactColumns`, not a nonexistent `shift_start`/`shift_end` pair)*
+  - `{{specialist.alina-kim.schedule_tue}}`
   - `{{specialist.alina-kim.booking}}`
 * **Strict Invariants (`forbid_phrases`):**
   - *"Время 14:00 свободно"*
   - *"Вы записаны на 14:00"*
   - *"Записал вас"*
 * **Expected Intent:**
-  - Confirms Alina works on Tuesdays from `{{specialist.alina-kim.shift_start}}` to `{{specialist.alina-kim.shift_end}}`.
+  - Confirms Alina works Tuesdays using `{{specialist.alina-kim.schedule_tue}}` (renders "Вторник: 10:00–19:00").
   - Provides the personal booking link `{{specialist.alina-kim.booking}}`.
   - Asks the client to open the link to check real-time open slots.
 
 #### Scenario C2: Non-Working Day (Sunday with Alina Kim)
 * **Customer Input:** *"Можно записаться к Алине Ким в воскресенье?"*
 * **Shift Evaluation:**
-  - Sunday is NOT in `["вт","ср","чт","пт","сб"]` $\rightarrow$ OUTSIDE SCHEDULE.
-* **Required Tokens (`requires`):**
-  - `{{specialist.alina-kim.work_days}}`
-  - `{{specialist.alina-kim.shift_start}}`
-  - `{{specialist.alina-kim.shift_end}}`
+  - Sunday is NOT one of Alina's worked days (Вт,Ср,Чт,Пт,Сб) $\rightarrow$ OUTSIDE SCHEDULE.
+* **Required Tokens (`requires`):** *(`{{specialist.alina-kim.schedule_sun}}` does not resolve at all for an off day — `catalog.go`'s `scheduleFactValue` returns it absent, not a blank/error value — so the model needs the full-week token instead)*
+  - `{{specialist.alina-kim.schedule}}`
   - `{{specialist.alina-kim.booking}}`
 * **Expected Intent:**
   - States that Alina does not work on Sundays.
-  - Quotes her working schedule (`вт-сб, 10:00-19:00`).
+  - Quotes her working schedule from `{{specialist.alina-kim.schedule}}` (renders "Вторник: 10:00–19:00; Среда: 10:00–19:00; Четверг: 10:00–19:00; Пятница: 10:00–19:00; Суббота: 10:00–19:00").
   - Provides her booking link to select a working day.
 
 #### Scenario C3: Outside Shift Hours (Friday 20:30 with Alina Kim)
@@ -405,11 +398,10 @@ Category E: Portfolio Media Tokens & Booking Fallbacks
 * **Shift Evaluation:**
   - Friday matches, but 20:30 > 19:00 $\rightarrow$ OUTSIDE WORKING HOURS.
 * **Required Tokens (`requires`):**
-  - `{{specialist.alina-kim.shift_start}}`
-  - `{{specialist.alina-kim.shift_end}}`
+  - `{{specialist.alina-kim.schedule_fri}}`
   - `{{specialist.alina-kim.booking}}`
 * **Expected Intent:**
-  - States that Alina's shift ends at `{{specialist.alina-kim.shift_end}}` (19:00), so 20:30 is outside her working hours.
+  - States that Alina's Friday shift is `{{specialist.alina-kim.schedule_fri}}` (renders "Пятница: 10:00–19:00"), so 20:30 is outside her working hours.
   - Shares the booking link.
 
 #### Scenario C4: Partial Shift Overlap (Friday 18:30 - 20:00)
@@ -437,7 +429,7 @@ Category E: Portfolio Media Tokens & Booking Fallbacks
 * **Strict Invariants:**
   - Forbidden phrases: `"Да, свободно"`, `"Время свободно"`, `"Есть окно на 12:00"`.
 * **Expected Intent:**
-  - States that Diana works tomorrow during her shift hours (`{{specialist.diana-nur.shift_start}}` - `{{specialist.diana-nur.shift_end}}`).
+  - States that Diana works tomorrow during her shift hours — `{{specialist.diana-nur.schedule_mon}}` / `{{specialist.diana-nur.schedule_wed}}` / `{{specialist.diana-nur.schedule_fri}}` / `{{specialist.diana-nur.schedule_sun}}`, whichever weekday "tomorrow" resolves to (Diana works Пн,Ср,Пт,Вс — `{{specialist.diana-nur.schedule}}` for the full week).
   - Explains that live availability changes in real-time, so the client should check open slots via `{{specialist.diana-nur.booking}}`.
 
 ---

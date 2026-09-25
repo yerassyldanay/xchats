@@ -446,6 +446,76 @@ func TestRunSynthesis_ExplicitTargetDropsForeignToolCall(t *testing.T) {
 	}
 }
 
+// TestRunSynthesis_ExplicitSpecialistsTargetDropsForeignToolCall and
+// TestRunSynthesis_ExplicitServicesTargetDropsForeignToolCall are
+// TestRunSynthesis_ExplicitTargetDropsForeignToolCall's salon-vertical
+// counterparts — target_type="specialists"/"services" restricts synthesis
+// to kb_specialist_upsert/kb_service_upsert alone, the same closed-vocabulary
+// contract every other explicit target already enforces.
+func TestRunSynthesis_ExplicitSpecialistsTargetDropsForeignToolCall(t *testing.T) {
+	resp := `{"calls":[
+		{"tool":"kb_service_upsert","args":{"ref":"wrong-type","changes":{"service_type":"base","name":"Не тот тип"}}},
+		{"tool":"kb_specialist_upsert","args":{"ref":"alina-kim","changes":{"full_name":"Алина Ким","sales_status":"active"}}}
+	],"notes":"","unmapped":[]}`
+	client := &scriptedClient{responses: []string{resp}}
+	svc, kb, orgID, _ := newTestService(t, client)
+
+	runID, _ := seedRun(t, kb, orgID, uuid.Nil, "specialists", []seedMaterial{
+		{handle: "evidence.1", text: "Алина Ким, топ-стилист"},
+	})
+	svc.maybeSynthesize(context.Background(), orgID, runID)
+
+	st := synthesisState(t, kb, orgID, runID)
+	if st == nil || st.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("Synthesis = %+v, want built", st)
+	}
+	if len(st.Applied) != 1 || st.Applied[0].Tool != "kb_specialist_upsert" {
+		t.Fatalf("Applied = %+v, want only the specialist call", st.Applied)
+	}
+	if len(st.Dropped) != 1 || st.Dropped[0].Tool != "kb_service_upsert" {
+		t.Fatalf("Dropped = %+v, want the service call dropped for target mismatch", st.Dropped)
+	}
+	v, err := kb.DraftOnly(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Services) != 0 {
+		t.Fatalf("draft services = %+v, want none — target_type=specialists must exclude kb_service_upsert", v.Services)
+	}
+}
+
+func TestRunSynthesis_ExplicitServicesTargetDropsForeignToolCall(t *testing.T) {
+	resp := `{"calls":[
+		{"tool":"kb_specialist_upsert","args":{"ref":"wrong-type","changes":{"full_name":"Не тот тип","sales_status":"active"}}},
+		{"tool":"kb_service_upsert","args":{"ref":"haircut-women","changes":{"service_type":"base","category":"Волосы","name":"Женская стрижка","price":"10 000 ₸"}}}
+	],"notes":"","unmapped":[]}`
+	client := &scriptedClient{responses: []string{resp}}
+	svc, kb, orgID, _ := newTestService(t, client)
+
+	runID, _ := seedRun(t, kb, orgID, uuid.Nil, "services", []seedMaterial{
+		{handle: "evidence.1", text: "Женская стрижка, 10 000 тенге"},
+	})
+	svc.maybeSynthesize(context.Background(), orgID, runID)
+
+	st := synthesisState(t, kb, orgID, runID)
+	if st == nil || st.Status != kbstore.SynthesisBuilt {
+		t.Fatalf("Synthesis = %+v, want built", st)
+	}
+	if len(st.Applied) != 1 || st.Applied[0].Tool != "kb_service_upsert" {
+		t.Fatalf("Applied = %+v, want only the service call", st.Applied)
+	}
+	if len(st.Dropped) != 1 || st.Dropped[0].Tool != "kb_specialist_upsert" {
+		t.Fatalf("Dropped = %+v, want the specialist call dropped for target mismatch", st.Dropped)
+	}
+	v, err := kb.DraftOnly(context.Background(), orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Specialists) != 0 {
+		t.Fatalf("draft specialists = %+v, want none — target_type=services must exclude kb_specialist_upsert", v.Specialists)
+	}
+}
+
 // TestRunSynthesis_TariffInfoUpsertLands proves the org-wide tariff_info
 // singleton is reachable through the exact same synthesis seam as every
 // other content type — required test scenario "MCP/import round trips" for
