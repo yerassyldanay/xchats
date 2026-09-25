@@ -257,6 +257,7 @@ func (s *Server) handleKBPatchContacts(c *gin.Context) {
 		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+		BookingURL: req.BookingURL, Schedule: req.Schedule,
 		Media: kbstore.ContactsMedia{
 			ContactCardImage:      req.ContactCardImage.ptr(),
 			LocationMapImage:      req.LocationMapImage.ptr(),
@@ -354,6 +355,218 @@ func (s *Server) handleKBDeleteZone(c *gin.Context) {
 		return
 	}
 	s.kbLiveChanged(c, orgID)
+}
+
+// --- specialists / services (salon vertical, PLAN.md) -----------------------
+
+func (s *Server) handleKBUpsertSpecialist(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req specialistReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
+		return
+	}
+	portfolio, ok := s.validateMediaList(c, "portfolio_images", &req.PortfolioImages)
+	if !ok {
+		return
+	}
+	if err := s.kb.PutLiveSpecialist(ctx(c), orgID, currentUser(c).ID, kbstore.SpecialistInput{
+		Ref: req.Ref, FullName: req.FullName, Title: req.Title, Experience: req.Experience,
+		Schedule: req.Schedule, BookingURL: req.BookingURL, SalesStatus: req.SalesStatus,
+		Media: kbstore.SpecialistMedia{PortfolioImages: portfolio},
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+func (s *Server) handleKBDeleteSpecialist(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteLiveSpecialist(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+// salesStatusReq is the status-only archive/restore endpoints' whole body
+// (handleKBSpecialistStatus/handleKBServiceStatus) — a direct, immediate
+// live write with no confirmation step and no draft/approve involvement
+// (PLAN.md: "no hard-delete UI is introduced" — archive/restore is just
+// this status flip).
+type salesStatusReq struct {
+	SalesStatus string `json:"sales_status"`
+}
+
+// handleKBSpecialistStatus flips a specialist's sales_status (archive/
+// restore), leaving every other field exactly as it currently is: read the
+// current live row, write it back via PutLiveSpecialist with only
+// SalesStatus changed. validateSpecialist (inside PutLiveSpecialist) is the
+// enum's actual gate — an invalid value surfaces as the usual 422 via
+// kbFail, not a separate check here.
+//
+// Response shape: the payload is the single updated SpecialistRow (not the
+// whole live view) — the frontend's setSpecialistStatus (stores/
+// playground.ts) splices this one row back into its own already-loaded
+// `live.specialists` array in place, exactly like campaignTemplates.ts's
+// own archive()/restore() do for a single row.
+func (s *Server) handleKBSpecialistStatus(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req salesStatusReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad status")
+		return
+	}
+	ref := c.Param("ref")
+	found, exists := s.findLiveSpecialist(c, orgID, ref)
+	if !exists {
+		return
+	}
+	if err := s.kb.PutLiveSpecialist(ctx(c), orgID, currentUser(c).ID, kbstore.SpecialistInput{
+		Ref: found.Ref, FullName: found.FullName, Title: found.Title, Experience: found.Experience,
+		Schedule: found.Schedule, BookingURL: found.BookingURL, SalesStatus: req.SalesStatus,
+		Media: kbstore.SpecialistMedia{PortfolioImages: &found.PortfolioImages},
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.invalidateKBCache(orgID)
+	updated, exists := s.findLiveSpecialist(c, orgID, ref)
+	if !exists {
+		return
+	}
+	s.hub.Broadcast("kb.row.changed", gin.H{})
+	ok(c, updated)
+}
+
+// findLiveSpecialist reads the org's live view and returns the one
+// specialist row matching ref, or fails the request with 404/ErrNotFound
+// and returns exists=false. Shared by handleKBSpecialistStatus's before/
+// after reads — there is no dedicated "get one live row" store method (no
+// other entity has one either; every existing caller that needs one row
+// already reads the whole LiveView and filters, e.g. kbLiveChanged's own
+// epilogue).
+func (s *Server) findLiveSpecialist(c *gin.Context, orgID uuid.UUID, ref string) (kbstore.SpecialistRow, bool) {
+	view, err := s.kb.LiveView(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return kbstore.SpecialistRow{}, false
+	}
+	for i := range view.Specialists {
+		if view.Specialists[i].Ref == ref {
+			return view.Specialists[i], true
+		}
+	}
+	fail(c, http.StatusNotFound, ErrNotFound, "specialist not found")
+	return kbstore.SpecialistRow{}, false
+}
+
+func (s *Server) handleKBUpsertService(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req serviceReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
+		return
+	}
+	if err := s.kb.PutLiveService(ctx(c), orgID, currentUser(c).ID, kbstore.ServiceInput{
+		Ref: req.Ref, ParentRef: req.ParentRef, ServiceType: req.ServiceType, Category: req.Category,
+		Name: req.Name, Price: req.Price, Duration: req.Duration, Description: req.Description,
+		SpecialistRefs: req.SpecialistRefs, SalesStatus: req.SalesStatus,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+func (s *Server) handleKBDeleteService(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteLiveService(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbLiveChanged(c, orgID)
+}
+
+// handleKBServiceStatus is handleKBSpecialistStatus's twin. Because the
+// write goes through PutLiveService, flipping a base service from active to
+// inactive here also atomically cascades to its active children — see
+// PutLiveService's own doc comment (live.go) — exactly the archive/restore
+// UI flow PLAN.md describes ("Archiving a base service atomically archives
+// its active children; restoring children is explicit"). The response
+// payload is still just the ONE service named by :ref, not its cascaded
+// children — findLiveService's own doc comment explains why a whole-view
+// response is wrong here; the frontend re-syncs the rest of the roster from
+// the realtime kb.row.changed broadcast this handler still sends.
+func (s *Server) handleKBServiceStatus(c *gin.Context) {
+	orgID, proceed := s.kbWrite(c)
+	if !proceed {
+		return
+	}
+	var req salesStatusReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, ErrValidation, "bad status")
+		return
+	}
+	ref := c.Param("ref")
+	found, exists := s.findLiveService(c, orgID, ref)
+	if !exists {
+		return
+	}
+	if err := s.kb.PutLiveService(ctx(c), orgID, currentUser(c).ID, kbstore.ServiceInput{
+		Ref: found.Ref, ParentRef: found.ParentRef, ServiceType: found.ServiceType, Category: found.Category,
+		Name: found.Name, Price: found.Price, Duration: found.Duration, Description: found.Description,
+		SpecialistRefs: found.SpecialistRefs, SalesStatus: req.SalesStatus,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.invalidateKBCache(orgID)
+	updated, exists := s.findLiveService(c, orgID, ref)
+	if !exists {
+		return
+	}
+	s.hub.Broadcast("kb.row.changed", gin.H{})
+	ok(c, updated)
+}
+
+// findLiveService is findLiveSpecialist's twin for ai_services — see its
+// doc comment. Response shape: the payload is the single updated ServiceRow
+// (not the whole live view) — the frontend's setServiceStatus (stores/
+// playground.ts) splices this one row back into its own already-loaded
+// `live.services` array in place. A base service's cascaded children are
+// NOT included in this response; the same kb.row.changed broadcast every
+// other live write already sends tells open clients to re-fetch the whole
+// roster (loadLive), which is where they pick up the cascaded rows.
+func (s *Server) findLiveService(c *gin.Context, orgID uuid.UUID, ref string) (kbstore.ServiceRow, bool) {
+	view, err := s.kb.LiveView(ctx(c), orgID)
+	if err != nil {
+		s.kbFail(c, err)
+		return kbstore.ServiceRow{}, false
+	}
+	for i := range view.Services {
+		if view.Services[i].Ref == ref {
+			return view.Services[i], true
+		}
+	}
+	fail(c, http.StatusNotFound, ErrNotFound, "service not found")
+	return kbstore.ServiceRow{}, false
 }
 
 // --- config --------------------------------------------------------------------

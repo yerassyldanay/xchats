@@ -98,6 +98,8 @@ export default {
       topics: { singular: 'Тема', plural: 'Темы' },
       products: { singular: 'Товар', plural: 'Товары' },
       tariffs: { singular: 'Тариф', plural: 'Тарифы' },
+      specialists: { singular: 'Специалист', plural: 'Специалисты' },
+      services: { singular: 'Услуга', plural: 'Услуги' },
       delivery_zones: { singular: 'Зона доставки', plural: 'Зоны доставки' },
       contacts: { singular: 'Контакты', plural: 'Контакты' },
       policies: { singular: 'Политики', plural: 'Политики' },
@@ -135,6 +137,18 @@ export default {
       deliveryCost: 'Стоимость доставки',
       deliveryInDays: 'Срок доставки (дни)',
       notes: 'Примечание',
+      // Beauty-salon fields (specialists/services) -----------------------
+      fullName: 'Полное имя',
+      specialistTitle: 'Должность',
+      experience: 'Стаж',
+      bookingUrl: 'Ссылка на онлайн-запись',
+      bookingUrlFallback: 'Основная салона',
+      schedule: 'Расписание работы',
+      duration: 'Длительность',
+      durationMinutes: '{n} мин',
+      serviceType: 'Тип услуги',
+      parentService: 'Родительская услуга',
+      specialistRefs: 'Специалисты',
       phone: 'Телефон',
       website: 'Сайт',
       workingHours: 'График работы',
@@ -167,6 +181,7 @@ export default {
       businessCard: 'Визитка',
       map: 'Карта',
       legalDocuments: 'Реквизиты',
+      portfolio: 'Портфолио',
     },
     mediaStrip: {
       unavailable: 'Недоступно',
@@ -184,6 +199,9 @@ export default {
     pricingType: { fixed: 'Фиксированная', percentage: 'Процент', tiered: 'Пороговая' },
     zoneLevel: { city: 'Город', region: 'Регион', country: 'Страна' },
     availabilityStatus: { in_stock: 'В наличии', preorder: 'Под предзаказ', on_demand: 'Под заказ', unavailable: 'Недоступен' },
+    // serviceType mirrors ServiceRow.service_type — TEST.md §4.3's own
+    // bracket tags on a nested row, e.g. "[Вариант] Короткая стрижка".
+    serviceType: { base: 'Базовая услуга', variant: 'Вариант', addon: 'Доп. услуга' },
     state: { published: 'Опубликовано', new: 'Новый', changed: 'Изменён', to_delete: 'На удаление' },
     actions: { edit: 'Изменить', publish: 'Опубликовать', cancel: 'Отменить изменение', removeFromDraft: 'Удалить из черновика', delete: 'Удалить' },
     // facts.* — the repeatable ref/value/instruction editor (AdditionalFactsEditor.vue)
@@ -216,6 +234,58 @@ export default {
       empty: '— не задано —',
       publishSection: 'Опубликовать изменения ассистента',
       cancelAllSection: 'Отменить все изменения ассистента',
+    },
+    // schedule.* — ScheduleEditor.vue's own UI text: the 7-day (Monday-first)
+    // shift/break editor shared by ContactsForm (salon fallback hours) and
+    // SpecialistFormDialog (one master's shift).
+    schedule: {
+      weekday: {
+        mon: 'Понедельник', tue: 'Вторник', wed: 'Среда', thu: 'Четверг', fri: 'Пятница', sat: 'Суббота', sun: 'Воскресенье',
+      },
+      weekdayShort: { mon: 'Пн', tue: 'Вт', wed: 'Ср', thu: 'Чт', fri: 'Пт', sat: 'Сб', sun: 'Вс' },
+      dayOff: 'Выходной',
+      start: 'Начало',
+      end: 'Конец',
+      breaks: 'Перерыв',
+      breakStart: 'Начало перерыва',
+      breakEnd: 'Конец перерыва',
+      addBreak: 'Добавить перерыв',
+      removeBreak: 'Удалить перерыв',
+      errStartEnd: 'Начало смены должно быть раньше окончания',
+      errBreakOrder: 'Начало перерыва должно быть раньше его окончания',
+      errBreakOutside: 'Перерыв должен быть в пределах смены',
+      errBreakOverlap: 'Перерывы не должны пересекаться',
+    },
+    // archive.* — the Активные/В архиве segmented filter and the instant
+    // status toggle on SpecialistsTab.vue/ServicesTab.vue — same "no
+    // confirmation, just an instant toggle with a spinner" UX philosophy as
+    // campaigns.templates.archive/restore (stores/campaignTemplates.ts).
+    archive: {
+      active: 'Активен',
+      archived: 'В архиве',
+      filterActive: 'Активные',
+      filterArchived: 'В архиве',
+      toggleAria: 'Переключить активность записи',
+    },
+    // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue's
+    // own copy beyond the shared kb.fields.*/kb.serviceType.* vocabulary.
+    services: {
+      addonNotStandalone: 'Не продается отдельно',
+      noCategory: 'Без категории',
+    },
+    // specialists.columns.* — SpecialistsTab.vue's roster table headers,
+    // TEST.md §4.2's own column names verbatim (its Мастер/Ссылка на запись
+    // wording differs deliberately from the fuller kb.fields.bookingUrl used
+    // in the create/edit form — a table header and a form label read
+    // differently even for the same underlying field).
+    specialists: {
+      columns: {
+        master: 'Мастер',
+        workingDays: 'Рабочие дни',
+        shiftHours: 'Часы смены',
+        bookingUrl: 'Ссылка на запись',
+        status: 'Статус',
+      },
     },
     stats: { added: 'Добавлено', updated: 'Изменено', removed: 'Удалено', total: 'Всего' },
     draft: {
@@ -376,10 +446,14 @@ export default {
         contacts: 'Как клиенту связаться с человеком — телефон, email, часы работы.',
         policies: 'Возврат, гарантия и условия доставки, которые видит клиент.',
         tariff_info: 'Общие факты обо всех тарифах сразу (например пробный период), не привязанные к одному тарифу.',
+        specialists: 'Мастера салона: расписание смен, перерывы, портфолио и ссылка на онлайн-запись.',
+        services: 'Каталог услуг: базовые услуги, варианты и дополнительные услуги с ценами и длительностью.',
       },
       addTopic: 'Добавить тему',
       addProduct: 'Добавить товар',
       addTariff: 'Добавить тариф',
+      addSpecialist: 'Добавить специалиста',
+      addService: 'Добавить услугу',
       addZone: 'Добавить зону',
       editContacts: 'Изменить контакты',
       editPolicies: 'Изменить политики',
@@ -387,6 +461,8 @@ export default {
       emptyTopics: 'Тем пока нет.',
       emptyProducts: 'Товаров пока нет.',
       emptyTariffs: 'Тарифов пока нет.',
+      emptySpecialists: 'Специалистов пока нет.',
+      emptyServices: 'Услуг пока нет.',
       emptyZones: 'Зон доставки пока нет.',
       loading: 'Загрузка базы знаний…',
       promptTab: 'Промпт',
@@ -397,6 +473,7 @@ export default {
       materialsEmpty: 'Материалов пока нет.',
       materialsCreated: 'Создано:',
       materialsDownload: 'Скачать',
+      photosCount: '{n} фото',
     },
     forms: {
       save: 'Сохранить',
@@ -409,6 +486,10 @@ export default {
       editTariff: 'Изменить тариф',
       newZone: 'Новая зона доставки',
       editZone: 'Изменить зону доставки',
+      newSpecialist: 'Новый специалист',
+      editSpecialist: 'Изменить специалиста',
+      newService: 'Новая услуга',
+      editService: 'Изменить услугу',
       editContacts: 'Изменить контакты',
       editPolicies: 'Изменить политики',
       editTariffInfo: 'Изменить тарифную информацию',
@@ -417,6 +498,10 @@ export default {
       slugHint: 'напр. tariffs',
       ref: 'Артикул',
       refHint: 'напр. coffee-machine',
+      specialistRefHint: 'напр. alina-kim',
+      serviceRefHint: 'напр. strizhka-zhenskaya',
+      selectParentService: 'Выберите базовую услугу',
+      noActiveSpecialists: 'Нет активных специалистов.',
       tariffRef: 'Код тарифа',
       zoneRef: 'Ref зоны',
       staleTitle: 'Черновик изменился',

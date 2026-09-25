@@ -392,21 +392,109 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_contacts
 		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		 company_legal_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 company_legal_documents, booking_url, schedule)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
 			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
 			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
-			company_legal_documents=EXCLUDED.company_legal_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			company_legal_documents=EXCLUDED.company_legal_documents,
+			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
-		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments))); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments)), c.BookingURL, aiprompt.ScheduleColumn(c.Schedule)); err != nil {
 		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
+}
+
+// upsertSpecialistRow writes one ai_specialists row — upsertProductRow's own
+// shape (salon vertical, PLAN.md).
+func upsertSpecialistRow(ctx context.Context, tx execer, orgID uuid.UUID, sp DraftSpecialist) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_specialists
+		(organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
+			full_name=EXCLUDED.full_name, title=EXCLUDED.title, experience=EXCLUDED.experience,
+			schedule=EXCLUDED.schedule, booking_url=EXCLUDED.booking_url,
+			portfolio_images=EXCLUDED.portfolio_images, sales_status=EXCLUDED.sales_status,
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, sp.Ref, sp.FullName, sp.Title, sp.Experience, aiprompt.ScheduleColumn(sp.Schedule), sp.BookingURL,
+		dbx.UUIDArray(nonNilUUIDs(sp.PortfolioImages)), orDefault(sp.SalesStatus, "active")); err != nil {
+		return fmt.Errorf("insert specialist %s: %w", sp.Ref, err)
+	}
+	return nil
+}
+
+// upsertServiceRow writes one ai_services row — upsertProductRow's own
+// shape (salon vertical, PLAN.md). Duration binds directly as *int: nil
+// persists SQL NULL, a non-nil pointer persists that integer (both
+// directions confirmed against modernc.org/sqlite's database/sql support
+// for a **T scan/bind target).
+func upsertServiceRow(ctx context.Context, tx execer, orgID uuid.UUID, sv DraftService) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_services
+		(organization_id, ref, parent_ref, service_type, category, name, price, duration, description,
+		 specialist_refs, sales_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
+			parent_ref=EXCLUDED.parent_ref, service_type=EXCLUDED.service_type, category=EXCLUDED.category,
+			name=EXCLUDED.name, price=EXCLUDED.price, duration=EXCLUDED.duration, description=EXCLUDED.description,
+			specialist_refs=EXCLUDED.specialist_refs, sales_status=EXCLUDED.sales_status,
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, sv.Ref, sv.ParentRef, orDefault(sv.ServiceType, "base"), sv.Category, sv.Name, sv.Price, sv.Duration,
+		sv.Description, dbx.StringArray(nonNilStrings(sv.SpecialistRefs)), orDefault(sv.SalesStatus, "active")); err != nil {
+		return fmt.Errorf("insert service %s: %w", sv.Ref, err)
+	}
+	return nil
+}
+
+// loadSpecialistRows reads every specialist for the org, live-only (no
+// draft concept) — loadZoneRows' own shape (zones.go), used both by
+// mergedView (draft.go, the overlay base) and — via mergedView(blob=empty)
+// — by LiveView.
+func loadSpecialistRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]SpecialistRow, error) {
+	rows, err := db.Query(ctx, `SELECT ref, full_name, title, experience, schedule, booking_url, portfolio_images,
+		sales_status, updated_at
+		FROM ai_specialists WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SpecialistRow
+	for rows.Next() {
+		var sp SpecialistRow
+		if err := rows.Scan(&sp.Ref, &sp.FullName, &sp.Title, &sp.Experience, (*aiprompt.ScheduleColumn)(&sp.Schedule),
+			&sp.BookingURL, (*dbx.UUIDArray)(&sp.PortfolioImages), &sp.SalesStatus, &sp.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sp.ID = sp.Ref
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// loadServiceRows is loadSpecialistRows' twin for ai_services.
+func loadServiceRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ServiceRow, error) {
+	rows, err := db.Query(ctx, `SELECT ref, parent_ref, service_type, category, name, price, duration, description,
+		specialist_refs, sales_status, updated_at
+		FROM ai_services WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServiceRow
+	for rows.Next() {
+		var sv ServiceRow
+		if err := rows.Scan(&sv.Ref, &sv.ParentRef, &sv.ServiceType, &sv.Category, &sv.Name, &sv.Price, &sv.Duration,
+			&sv.Description, (*dbx.StringArray)(&sv.SpecialistRefs), &sv.SalesStatus, &sv.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sv.ID = sv.Ref
+		out = append(out, sv)
+	}
+	return out, rows.Err()
 }
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
@@ -437,6 +525,15 @@ func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPol
 func nonNilUUIDs(v []uuid.UUID) []uuid.UUID {
 	if v == nil {
 		return []uuid.UUID{}
+	}
+	return v
+}
+
+// nonNilStrings is nonNilUUIDs' twin for a text[] NOT NULL DEFAULT '{}'
+// column (ai_services.specialist_refs, dbx.StringArray).
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
 	}
 	return v
 }

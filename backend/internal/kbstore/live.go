@@ -3,6 +3,7 @@ package kbstore
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -238,6 +239,160 @@ func (s *Store) DeleteLiveProduct(ctx context.Context, orgID uuid.UUID, actor uu
 	return tx.Commit(ctx)
 }
 
+// PutLiveSpecialist upserts a specialist row directly into the live table.
+// Reads the row FOR UPDATE first (currentLiveSpecialistTx) and merges the
+// scalar fields (in.* is the full desired state — SpecialistInput's own doc
+// comment) and media (when provided; nil leaves existing media unchanged).
+// Validates ref/sales_status/schedule via validateSpecialist — the SAME
+// rule UpsertSpecialist and MCPUpsertSpecialist enforce.
+func (s *Store) PutLiveSpecialist(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in SpecialistInput) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	cur, err := currentLiveSpecialistTx(ctx, tx, orgID, in.Ref)
+	if err != nil {
+		return err
+	}
+	cur.Ref = in.Ref
+	cur.FullName, cur.Title, cur.Experience = in.FullName, in.Title, in.Experience
+	cur.Schedule = in.Schedule
+	cur.BookingURL = in.BookingURL
+	cur.SalesStatus = orDefault(in.SalesStatus, "active")
+	cur, err = validateSpecialist(cur)
+	if err != nil {
+		return err
+	}
+	refs := applySpecialistMedia(&cur, in.Media)
+	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
+		return err
+	}
+	if err := upsertSpecialistRow(ctx, tx, orgID, cur); err != nil {
+		return err
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "specialist:"+in.Ref); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func currentLiveSpecialistTx(ctx context.Context, tx dbtx, orgID uuid.UUID, ref string) (DraftSpecialist, error) {
+	sp := DraftSpecialist{Ref: ref}
+	err := tx.QueryRow(ctx, `SELECT full_name, title, experience, schedule, booking_url, portfolio_images, sales_status
+		FROM ai_specialists WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		Scan(&sp.FullName, &sp.Title, &sp.Experience, (*aiprompt.ScheduleColumn)(&sp.Schedule), &sp.BookingURL,
+			(*dbx.UUIDArray)(&sp.PortfolioImages), &sp.SalesStatus)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return DraftSpecialist{Ref: ref}, nil
+	}
+	return sp, err
+}
+
+// DeleteLiveSpecialist removes a live specialist row by ref.
+func (s *Store) DeleteLiveSpecialist(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM ai_specialists WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
+		return err
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "delete", "specialist:"+ref); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// PutLiveService upserts a service row directly into the live table.
+// Validates the full hierarchy contract via validateService, against the
+// LIVE-only current view (an empty *DraftBlob overlay — there is no pending
+// blob to consider on this direct write path, the same "empty blob" trick
+// liveView/LiveView use for the read side).
+//
+// Archive cascade (PLAN.md: "Archiving a base service atomically archives
+// its active children; restoring children is explicit"): when this write
+// flips a BASE service's sales_status from active to inactive, every
+// CURRENTLY-active live service whose parent_ref names this ref is also set
+// to inactive, atomically in the same transaction. Restoring the base
+// (inactive -> active) never touches children — only archiving cascades.
+// This is a live-write-path-only rule: UpsertService (draft.go) and
+// MCPUpsertService (mcp_write.go) stage a plain upsert with no cascade,
+// since a staged entry is still under human review (see ApproveVersioned's
+// own comment on this same point).
+func (s *Store) PutLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ServiceInput) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	prev, existed, err := currentLiveServiceTx(ctx, tx, orgID, in.Ref)
+	if err != nil {
+		return err
+	}
+	wasActive := existed && prev.SalesStatus == "active"
+
+	cur := DraftService{
+		Ref: in.Ref, ParentRef: in.ParentRef, ServiceType: orDefault(in.ServiceType, "base"),
+		Category: in.Category, Name: in.Name, Price: in.Price, Duration: in.Duration,
+		Description: in.Description, SpecialistRefs: in.SpecialistRefs, SalesStatus: orDefault(in.SalesStatus, "active"),
+	}
+	cur, err = s.validateService(ctx, tx, orgID, &DraftBlob{}, cur)
+	if err != nil {
+		return err
+	}
+	if err := upsertServiceRow(ctx, tx, orgID, cur); err != nil {
+		return err
+	}
+	if cur.ServiceType == "base" && wasActive && cur.SalesStatus == "inactive" {
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, cur.Ref); err != nil {
+			return err
+		}
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "service:"+in.Ref); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func currentLiveServiceTx(ctx context.Context, tx dbtx, orgID uuid.UUID, ref string) (DraftService, bool, error) {
+	sv := DraftService{Ref: ref}
+	err := tx.QueryRow(ctx, `SELECT parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status
+		FROM ai_services WHERE organization_id=$1 AND ref=$2`, orgID, ref).
+		Scan(&sv.ParentRef, &sv.ServiceType, &sv.Category, &sv.Name, &sv.Price, &sv.Duration, &sv.Description,
+			(*dbx.StringArray)(&sv.SpecialistRefs), &sv.SalesStatus)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return DraftService{Ref: ref}, false, nil
+	}
+	if err != nil {
+		return DraftService{}, false, err
+	}
+	return sv, true, nil
+}
+
+// DeleteLiveService removes a live service row by ref. Deliberately no
+// cascade: PLAN.md scopes the archive/restore cascade to a sales_status
+// flip (PutLiveService above), not to a hard delete — no hard-delete UI is
+// introduced at all (PLAN.md), so this exists only for symmetry with every
+// other entity's DeleteLive* method and for MCPDelete's eventual approve
+// step (applyDelete, draft.go).
+func (s *Store) DeleteLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM ai_services WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
+		return err
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "delete", "service:"+ref); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // PatchLiveContacts edits the org's live support-contact row — a true
 // singleton — starting from its current row (locked FOR UPDATE for this
 // transaction) so an omitted field stays unchanged and a concurrent patch
@@ -279,6 +434,16 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Instagram != nil {
 		cur.Instagram = *p.Instagram
 	}
+	if p.BookingURL != nil {
+		cur.BookingURL = *p.BookingURL
+	}
+	if p.Schedule != nil {
+		schedule, err := aiprompt.NormalizeSchedule(*p.Schedule)
+		if err != nil {
+			return fmt.Errorf("kbstore: contact: %w", err)
+		}
+		cur.Schedule = schedule
+	}
 	refs := applyContactsMedia(&cur, p.Media)
 	if err := validateMediaRefs(ctx, tx, orgID, refs); err != nil {
 		return err
@@ -297,11 +462,11 @@ func currentLiveContactTx(ctx context.Context, tx dbtx, orgID uuid.UUID) (DraftC
 	var legalInfo *string
 	err := tx.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		company_legal_documents
+		company_legal_documents, booking_url, schedule
 		FROM ai_contacts WHERE organization_id = $1`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
-			(*dbx.UUIDArray)(&c.CompanyLegalDocuments))
+			(*dbx.UUIDArray)(&c.CompanyLegalDocuments), &c.BookingURL, (*aiprompt.ScheduleColumn)(&c.Schedule))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftContact{}, nil
 	}

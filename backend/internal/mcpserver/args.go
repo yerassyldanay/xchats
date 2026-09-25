@@ -166,6 +166,30 @@ func optMaterialIDs(m map[string]json.RawMessage, key string) (*[]uuid.UUID, err
 	return &ids, nil
 }
 
+// optStringSlice: key absent → nil (unchanged); null → replace with an
+// empty array; a string array → that list, in order. optMaterialIDs' own
+// shape without UUID parsing — for a plain ref list (a service's
+// specialist_refs: this organization's own specialist refs, not material
+// ids).
+func optStringSlice(m map[string]json.RawMessage, key string) (*[]string, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, nil
+	}
+	if isJSONNull(raw) {
+		empty := []string{}
+		return &empty, nil
+	}
+	var strs []string
+	if err := json.Unmarshal(raw, &strs); err != nil {
+		return nil, fmt.Errorf("%s: expected an array of strings: %w", key, err)
+	}
+	if strs == nil {
+		strs = []string{}
+	}
+	return &strs, nil
+}
+
 // optAdditionalFacts: key absent → nil (unchanged); null or [] → replace
 // with an empty list (clears every virtual fact); an array of {ref, value,
 // instruction} objects → that list, in order — the same nil-means-
@@ -193,6 +217,68 @@ func optAdditionalFacts(m map[string]json.RawMessage, key string) (*[]aiprompt.A
 		facts = []aiprompt.AdditionalFact{}
 	}
 	return &facts, nil
+}
+
+// optIntPtr: key absent -> nil (unchanged); null -> a genuine clear (this
+// backs a nullable DB column — a service's duration, unspecified rather than
+// zero); a number -> that integer, parsed. The same three-state **T
+// contract optMaterialID uses for a nullable uuid.UUID field, applied here
+// to an int.
+func optIntPtr(m map[string]json.RawMessage, key string) (**int, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, nil
+	}
+	if isJSONNull(raw) {
+		var nilInt *int
+		return &nilInt, nil
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return nil, fmt.Errorf("%s: expected an integer: %w", key, err)
+	}
+	nPtr := &n
+	return &nPtr, nil
+}
+
+// parseSchedule decodes one salon-kb schedule value — a JSON array of
+// {ref, day, start, end, breaks:[{start,end}]} objects, aiprompt.
+// ScheduleDay's own wire shape — and runs aiprompt.NormalizeSchedule over
+// it, surfacing a normalization failure (duplicate weekday, malformed
+// HH:MM, overnight shift, a break outside the shift or overlapping another)
+// as this function's own error. Every write path stores the NORMALIZED
+// result, never the caller's raw input — the same discipline kbstore's
+// UpsertSpecialist/PutLiveSpecialist/MCPUpsertSpecialist apply.
+func parseSchedule(raw json.RawMessage) (aiprompt.Schedule, error) {
+	var days []aiprompt.ScheduleDay
+	if err := json.Unmarshal(raw, &days); err != nil {
+		return nil, fmt.Errorf("schedule: expected an array of {ref, day, start, end, breaks}: %w", err)
+	}
+	normalized, err := aiprompt.NormalizeSchedule(aiprompt.Schedule(days))
+	if err != nil {
+		return nil, fmt.Errorf("schedule: %w", err)
+	}
+	return normalized, nil
+}
+
+// optSchedule: key absent -> nil (unchanged); null -> a genuine clear (a
+// non-nil pointer to an empty Schedule); an array -> parseSchedule's
+// normalized result. The same nil-means-unchanged/non-nil-means-replace
+// pointer-to-slice convention optAdditionalFacts uses for a fact list.
+func optSchedule(m map[string]json.RawMessage, key string) (*aiprompt.Schedule, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, nil
+	}
+	if isJSONNull(raw) {
+		empty := aiprompt.Schedule{}
+		return &empty, nil
+	}
+	schedule, err := parseSchedule(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &schedule, nil
 }
 
 // optExpectedVersion reads the common expected_draft_version?  top-level

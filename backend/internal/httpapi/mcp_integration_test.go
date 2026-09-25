@@ -506,8 +506,8 @@ func TestMCPOAuthFullFlow_ThroughToolsCall(t *testing.T) {
 		t.Fatalf("tools/list result not an object: %#v", list.Result)
 	}
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d: %#v", len(tools), tools)
+	if len(tools) != 16 {
+		t.Fatalf("expected 16 tools, got %d: %#v", len(tools), tools)
 	}
 }
 

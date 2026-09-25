@@ -17,6 +17,8 @@ const emptyLive: DraftView = {
   topics: [],
   tariffs: [],
   products: [],
+  specialists: [],
+  services: [],
   contacts: [],
   policies: [],
   tariff_info: [],

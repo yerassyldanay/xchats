@@ -93,6 +93,8 @@ export default {
       topics: { singular: 'Topic', plural: 'Topics' },
       products: { singular: 'Product', plural: 'Products' },
       tariffs: { singular: 'Tariff', plural: 'Tariffs' },
+      specialists: { singular: 'Specialist', plural: 'Specialists' },
+      services: { singular: 'Service', plural: 'Services' },
       delivery_zones: { singular: 'Delivery zone', plural: 'Delivery zones' },
       contacts: { singular: 'Contacts', plural: 'Contacts' },
       policies: { singular: 'Policies', plural: 'Policies' },
@@ -130,6 +132,18 @@ export default {
       deliveryCost: 'Delivery cost',
       deliveryInDays: 'Delivery time (days)',
       notes: 'Notes',
+      // Beauty-salon fields (specialists/services) -----------------------
+      fullName: 'Full name',
+      specialistTitle: 'Job title',
+      experience: 'Experience',
+      bookingUrl: 'Online booking link',
+      bookingUrlFallback: "Salon's main link",
+      schedule: 'Work schedule',
+      duration: 'Duration',
+      durationMinutes: '{n} min',
+      serviceType: 'Service type',
+      parentService: 'Parent service',
+      specialistRefs: 'Specialists',
       phone: 'Phone',
       website: 'Website',
       workingHours: 'Working hours',
@@ -162,6 +176,7 @@ export default {
       businessCard: 'Business card',
       map: 'Map',
       legalDocuments: 'Legal documents',
+      portfolio: 'Portfolio',
     },
     mediaStrip: {
       unavailable: 'Unavailable',
@@ -179,6 +194,9 @@ export default {
     pricingType: { fixed: 'Fixed', percentage: 'Percentage', tiered: 'Tiered' },
     zoneLevel: { city: 'City', region: 'Region', country: 'Country' },
     availabilityStatus: { in_stock: 'In stock', preorder: 'Preorder', on_demand: 'Made to order', unavailable: 'Unavailable' },
+    // serviceType mirrors ServiceRow.service_type — TEST.md §4.3's own
+    // bracket tags on a nested row, e.g. "[Variant] Short haircut / Pixie".
+    serviceType: { base: 'Base service', variant: 'Variant', addon: 'Add-on' },
     state: { published: 'Published', new: 'New', changed: 'Changed', to_delete: 'To delete' },
     actions: { edit: 'Edit', publish: 'Publish', cancel: 'Cancel change', removeFromDraft: 'Remove from draft', delete: 'Delete' },
     // facts.* — the repeatable ref/value/instruction editor (AdditionalFactsEditor.vue)
@@ -211,6 +229,58 @@ export default {
       empty: '— not set —',
       publishSection: 'Publish assistant changes',
       cancelAllSection: 'Cancel all assistant changes',
+    },
+    // schedule.* — ScheduleEditor.vue's own UI text: the 7-day (Monday-first)
+    // shift/break editor shared by ContactsForm (salon fallback hours) and
+    // SpecialistFormDialog (one master's shift).
+    schedule: {
+      weekday: {
+        mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday',
+      },
+      weekdayShort: { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' },
+      dayOff: 'Day off',
+      start: 'Start',
+      end: 'End',
+      breaks: 'Break',
+      breakStart: 'Break start',
+      breakEnd: 'Break end',
+      addBreak: 'Add break',
+      removeBreak: 'Remove break',
+      errStartEnd: 'Shift start must be before the end',
+      errBreakOrder: 'Break start must be before its end',
+      errBreakOutside: 'The break must fall within the shift',
+      errBreakOverlap: 'Breaks must not overlap',
+    },
+    // archive.* — the Active/Archived segmented filter and the instant
+    // status toggle on SpecialistsTab.vue/ServicesTab.vue — same "no
+    // confirmation, just an instant toggle with a spinner" UX philosophy as
+    // campaigns.templates.archive/restore (stores/campaignTemplates.ts).
+    archive: {
+      active: 'Active',
+      archived: 'Archived',
+      filterActive: 'Active',
+      filterArchived: 'Archived',
+      toggleAria: "Toggle the record's active status",
+    },
+    // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue's
+    // own copy beyond the shared kb.fields.*/kb.serviceType.* vocabulary.
+    services: {
+      addonNotStandalone: 'Not sold on its own',
+      noCategory: 'Uncategorized',
+    },
+    // specialists.columns.* — SpecialistsTab.vue's roster table headers,
+    // TEST.md §4.2's own column names verbatim (its Master/Booking link
+    // wording differs deliberately from the fuller kb.fields.bookingUrl used
+    // in the create/edit form — a table header and a form label read
+    // differently even for the same underlying field).
+    specialists: {
+      columns: {
+        master: 'Master',
+        workingDays: 'Working days',
+        shiftHours: 'Shift hours',
+        bookingUrl: 'Booking link',
+        status: 'Status',
+      },
     },
     stats: { added: 'Added', updated: 'Updated', removed: 'Removed', total: 'Total' },
     draft: {
@@ -371,10 +441,14 @@ export default {
         contacts: 'How customers reach a human — phone, email, working hours.',
         policies: 'Returns, warranties, and delivery terms shown to customers.',
         tariff_info: 'Facts shared across every tariff (e.g. a trial period), not tied to any one plan.',
+        specialists: 'Salon masters: shift schedules, breaks, a portfolio, and an online booking link.',
+        services: 'Service catalog: base services, variants, and add-ons with prices and durations.',
       },
       addTopic: 'Add topic',
       addProduct: 'Add product',
       addTariff: 'Add tariff',
+      addSpecialist: 'Add specialist',
+      addService: 'Add service',
       addZone: 'Add zone',
       editContacts: 'Edit contacts',
       editPolicies: 'Edit policies',
@@ -382,6 +456,8 @@ export default {
       emptyTopics: 'No topics yet.',
       emptyProducts: 'No products yet.',
       emptyTariffs: 'No tariffs yet.',
+      emptySpecialists: 'No specialists yet.',
+      emptyServices: 'No services yet.',
       emptyZones: 'No delivery zones yet.',
       loading: 'Loading knowledge base…',
       promptTab: 'Prompt',
@@ -392,6 +468,7 @@ export default {
       materialsEmpty: 'No materials yet.',
       materialsCreated: 'Created:',
       materialsDownload: 'Download',
+      photosCount: '{n} photos',
     },
     forms: {
       save: 'Save',
@@ -404,6 +481,10 @@ export default {
       editTariff: 'Edit tariff',
       newZone: 'New delivery zone',
       editZone: 'Edit delivery zone',
+      newSpecialist: 'New specialist',
+      editSpecialist: 'Edit specialist',
+      newService: 'New service',
+      editService: 'Edit service',
       editContacts: 'Edit contacts',
       editPolicies: 'Edit policies',
       editTariffInfo: 'Edit tariff information',
@@ -412,6 +493,10 @@ export default {
       slugHint: 'e.g. tariffs',
       ref: 'Ref',
       refHint: 'e.g. coffee-machine',
+      specialistRefHint: 'e.g. alina-kim',
+      serviceRefHint: 'e.g. womens-haircut',
+      selectParentService: 'Select a base service',
+      noActiveSpecialists: 'No active specialists.',
       tariffRef: 'Tariff code',
       zoneRef: 'Zone ref',
       staleTitle: 'The draft changed',

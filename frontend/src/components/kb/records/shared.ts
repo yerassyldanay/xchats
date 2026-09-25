@@ -52,6 +52,18 @@ export function changedFields<T>(draftRow: T | undefined, liveRow: T | undefined
   return keys.filter((k) => draftRow[k] !== liveRow[k]).map(String)
 }
 
+// summarizeShiftHours is SpecialistsTab/SpecialistRecord's «Часы смены»
+// helper: when every worked day shares the exact same start/end, returns
+// that one "HH:MM–HH:MM" string so the roster doesn't repeat it 7 times;
+// otherwise null, so the caller falls back to a per-day breakdown. An empty
+// schedule (no worked days at all) also returns null.
+export function summarizeShiftHours(schedule: Schedule): string | null {
+  if (schedule.length === 0) return null
+  const [first, ...rest] = schedule
+  const uniform = rest.every((d) => d.start === first.start && d.end === first.end)
+  return uniform ? `${first.start}–${first.end}` : null
+}
+
 // mediaIds normalizes a media field that is either a single nullable id
 // (`string | null`, e.g. featured_image) or an array of ids (e.g.
 // gallery_images) into the uniform shape MediaStrip iterates over.
@@ -112,6 +124,7 @@ export const KB_MEDIA_FIELDS: Record<string, MediaFieldSpec[]> = {
     { field: 'explainer_videos', kind: 'video', multiple: true },
     { field: 'terms_documents', kind: 'document', multiple: true },
   ],
+  specialists: [{ field: 'portfolio_images', kind: 'image', multiple: true }],
   contacts: [
     { field: 'contact_card_image', kind: 'image', multiple: false },
     { field: 'location_map_image', kind: 'image', multiple: false },
