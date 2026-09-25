@@ -7,18 +7,22 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/messaging"
+	"github.com/yerassyldanay/xchats/backend/response"
 )
 
 // promptSectionCounts mirrors the "Сформирован из разделов" sidebar list on
 // the Промпт tab (plan/ui/ui_knowledge_base_001.png) — how many rows of each
 // kind fed the render.
 type promptSectionCounts struct {
-	Topics   int `json:"topics"`
-	Products int `json:"products"`
-	Tariffs  int `json:"tariffs"`
-	Zones    int `json:"zones"`
-	Contacts int `json:"contacts"`
-	Policies int `json:"policies"`
+	Topics      int `json:"topics"`
+	Products    int `json:"products"`
+	Tariffs     int `json:"tariffs"`
+	Zones       int `json:"zones"`
+	Contacts    int `json:"contacts"`
+	Policies    int `json:"policies"`
+	Specialists int `json:"specialists"`
+	Services    int `json:"services"`
 }
 
 // promptView is the GET /kb/prompt payload: everything the Промпт tab needs
@@ -56,10 +60,16 @@ func (s *Server) handleKBPrompt(c *gin.Context) {
 		return
 	}
 
-	// The default (non-Telegram) frame, matching response.frameFor's own
-	// default branch — this tab shows what the engine would send right now.
-	frame := aiprompt.FrameShopKBV7RU()
-	view := promptView{PromptRef: aiprompt.PromptRefShopKBV7, FrameText: frame, BuiltAt: time.Now()}
+	// Non-Telegram channel, matching response.FrameFor's own default branch —
+	// this tab shows what the engine would send right now on the WhatsApp/
+	// simulator path. Before the KB loads, fall back to the shop-kb@v7
+	// default (response.FrameFor(nil, ...)) purely to have SOMETHING to show
+	// on a load error; the real, KB-driven selection happens right below.
+	view := promptView{
+		PromptRef: response.PromptRefFor(nil, messaging.ChannelWhatsApp),
+		FrameText: response.FrameFor(nil, messaging.ChannelWhatsApp),
+		BuiltAt:   time.Now(),
+	}
 
 	kb, err := s.kbRepo.Load(ctx(c), orgID.String())
 	if err != nil {
@@ -67,8 +77,12 @@ func (s *Server) handleKBPrompt(c *gin.Context) {
 		ok(c, view)
 		return
 	}
+	frame := response.FrameFor(kb, messaging.ChannelWhatsApp)
+	view.PromptRef = response.PromptRefFor(kb, messaging.ChannelWhatsApp)
+	view.FrameText = frame
 	view.SectionCounts = promptSectionCounts{
 		Topics: len(kb.Topics), Products: len(kb.Products), Tariffs: len(kb.Tariffs), Zones: len(kb.DeliveryZones),
+		Specialists: len(kb.Specialists), Services: len(kb.Services),
 	}
 	if kb.Contacts != nil {
 		view.SectionCounts.Contacts = 1

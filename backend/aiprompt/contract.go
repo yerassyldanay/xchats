@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -451,7 +452,40 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 			})
 		}
 	}
+	issues = append(issues, validateScheduleLiteralContract(cat, withoutPlaceholders)...)
 	return issues
+}
+
+// validateScheduleLiteralContract flags any HH:MM-shaped clock time the
+// model wrote itself outside of a substituted placeholder, but only for an
+// organization that actually has salon schedule tokens at all
+// (hasScheduleFacts, schedule.go) — PLAN.md: "extend literal-leak
+// validation to reject model-authored schedule times, including individual
+// shift and break boundaries." The model must see raw shift/break
+// boundaries to reason about an arbitrary customer-requested interval
+// (scheduleReasoningLines, schedule.go), but its REPLY must always carry
+// the schedule/schedule_<day> TOKEN, never the digits themselves.
+//
+// Unlike the value-uniqueness check above (exact_value_literal), this is
+// shape-based, not value-based: a clock time is virtually always shared
+// across many specialists/days, so the "attributable to exactly one token"
+// test that check relies on would almost never fire here. The accepted
+// tradeoff (documented, same spirit as that check's own comment) is a
+// false positive if seller-authored trusted prose (a service/specialist
+// description) happens to contain an HH:MM-shaped substring — vanishingly
+// unlikely in practice, and confined to salon organizations by the
+// hasScheduleFacts gate, so a non-salon org's behavior never changes.
+func validateScheduleLiteralContract(cat *Catalog, withoutPlaceholders string) []ContractIssue {
+	if !hasScheduleFacts(cat) {
+		return nil
+	}
+	if m := scheduleTimePattern.FindString(withoutPlaceholders); m != "" {
+		return []ContractIssue{{
+			Code:   "schedule_time_literal",
+			Detail: "reply_text contains a model-authored clock time " + m + " instead of a schedule token",
+		}}
+	}
+	return nil
 }
 
 func normalizeLiteral(s string) string {
@@ -581,12 +615,37 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 		if fact.Ref != SingletonRef || kb.Contacts == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has a contacts row", fact.Token)
 		}
+		if v, ok := scheduleFactValue(fact.Column, kb.Contacts.BookingURL, kb.Contacts.Schedule, lang); ok {
+			value = v
+			break
+		}
 		values := map[string]string{
 			"phone": kb.Contacts.Phone, "whatsapp": kb.Contacts.WhatsApp,
 			"email": kb.Contacts.Email, "website": kb.Contacts.Website,
 			"instagram": kb.Contacts.Instagram, "working_hours": kb.Contacts.WorkingHours,
 		}
 		value = values[fact.Column]
+	case "specialist":
+		specialist := currentSpecialist(kb, fact.Ref)
+		if specialist == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active specialist row", fact.Token)
+		}
+		booking := resolvedBookingURL(specialist.BookingURL, contactBookingURL(kb))
+		v, _ := scheduleFactValue(fact.Column, booking, specialist.Schedule, lang)
+		value = v
+	case "service":
+		service := currentService(kb, fact.Ref)
+		if service == nil {
+			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active service row", fact.Token)
+		}
+		switch fact.Column {
+		case "price":
+			value = service.Price
+		case "duration":
+			if service.Duration != nil && *service.Duration > 0 {
+				value = strconv.Itoa(*service.Duration)
+			}
+		}
 	case "policy":
 		if fact.Ref != SingletonRef || kb.Policies == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has a policies row", fact.Token)
@@ -680,6 +739,31 @@ func currentDeliveryZone(kb *KB, ref string) *DeliveryZone {
 	for i := range kb.DeliveryZones {
 		if kb.DeliveryZones[i].Ref == ref && active(kb.DeliveryZones[i].SalesStatus) {
 			return &kb.DeliveryZones[i]
+		}
+	}
+	return nil
+}
+
+// currentSpecialist re-reads the CURRENT specialist row for ref, applying
+// the same visibility rule BuildCatalog used (specialistVisible,
+// catalog.go) — an archived specialist must fail closed at substitution
+// exactly as one already archived at build time never got a token.
+func currentSpecialist(kb *KB, ref string) *Specialist {
+	for i := range kb.Specialists {
+		if kb.Specialists[i].Ref == ref && specialistVisible(&kb.Specialists[i]) {
+			return &kb.Specialists[i]
+		}
+	}
+	return nil
+}
+
+// currentService re-reads the CURRENT service row for ref; active(...) is
+// the same visibility rule buildServiceFacts used to decide whether to
+// emit a price/duration token for it.
+func currentService(kb *KB, ref string) *Service {
+	for i := range kb.Services {
+		if kb.Services[i].Ref == ref && active(kb.Services[i].SalesStatus) {
+			return &kb.Services[i]
 		}
 	}
 	return nil
@@ -807,6 +891,10 @@ func currentMediaIDs(kb *KB, entry *MediaEntry) ([]string, error) {
 	case "policies":
 		if entry.Ref == SingletonRef && kb.Policies != nil {
 			ids = policiesMedia(kb.Policies)[entry.Column]
+		}
+	case "specialists":
+		if specialist := currentSpecialist(kb, entry.Ref); specialist != nil {
+			ids = specialistMedia(specialist)[entry.Column]
 		}
 	}
 	if len(ids) == 0 {
