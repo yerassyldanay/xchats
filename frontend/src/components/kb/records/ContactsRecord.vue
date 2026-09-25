@@ -13,7 +13,8 @@ import type { KbAction } from './actions'
 import RecordShell from './RecordShell.vue'
 import FieldDiffNote from './FieldDiffNote.vue'
 import MediaStrip from './MediaStrip.vue'
-import { changedFields, stateForChange } from './shared'
+import WeekdayPills from './WeekdayPills.vue'
+import { changedFields, stateForChange, summarizeShiftHours } from './shared'
 
 const props = defineProps<{
   row?: ContactRow
@@ -31,9 +32,12 @@ const { t } = useI18n()
 const state = computed(() => (props.changeType ? stateForChange(props.changeType) : 'published'))
 const diff = computed(() =>
   changedFields(props.row, props.liveRow, [
-    'whatsapp', 'phone', 'email', 'website', 'instagram', 'working_hours', 'address', 'legal_information', 'callback_time',
+    'whatsapp', 'phone', 'email', 'website', 'instagram', 'working_hours', 'address', 'legal_information', 'callback_time', 'booking_url',
   ])
 )
+// schedule is excluded from diff like SpecialistRecord.vue's — changedFields
+// does reference equality, meaningless for arrays.
+const shiftHours = computed(() => summarizeShiftHours(props.row?.schedule ?? []))
 </script>
 
 <template>
@@ -81,6 +85,18 @@ const diff = computed(() =>
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.workingHours') }}</span>
         <p class="text-sm mt-0.5">{{ row?.working_hours || '—' }}</p>
         <FieldDiffNote :show="diff.includes('working_hours')" :was="liveRow?.working_hours ?? ''" :now="row?.working_hours ?? ''" />
+      </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.bookingUrl') }}</span>
+        <p class="text-sm mt-0.5 font-mono break-all">{{ row?.booking_url || '—' }}</p>
+        <FieldDiffNote :show="diff.includes('booking_url')" :was="liveRow?.booking_url ?? ''" :now="row?.booking_url ?? ''" />
+      </div>
+      <div class="sm:col-span-2">
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.schedule') }}</span>
+        <div class="mt-1 flex items-center gap-2 flex-wrap">
+          <WeekdayPills :schedule="row?.schedule ?? []" />
+          <span v-if="shiftHours" class="text-xs font-mono text-muted-foreground">{{ shiftHours }}</span>
+        </div>
       </div>
       <div class="sm:col-span-2">
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.address') }}</span>
