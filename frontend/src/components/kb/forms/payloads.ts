@@ -13,7 +13,7 @@
 // plural media field: omit it to leave existing facts unchanged, send it
 // (an empty array included) to replace the complete list — see
 // AdditionalFactsEditor.vue's own doc comment.
-import type { AdditionalFact } from '@/types'
+import type { AdditionalFact, Schedule } from '@/types'
 
 export interface TopicPayload {
   kind: 'topics'
@@ -72,6 +72,35 @@ export interface ProductPayload {
   guarantee_documents?: string[]
 }
 
+export interface SpecialistPayload {
+  kind: 'specialists'
+  ref: string
+  full_name?: string
+  title?: string
+  experience?: string
+  schedule?: Schedule
+  booking_url?: string
+  portfolio_images?: string[]
+  sales_status?: string
+}
+
+// ServicePayload — parent_ref is '' for a base service; duration is
+// number|null so an operator can genuinely clear it (blank = unset, never
+// 0 — see ServiceFormDialog.vue's duration input).
+export interface ServicePayload {
+  kind: 'services'
+  ref: string
+  parent_ref?: string
+  service_type?: string
+  category?: string
+  name?: string
+  price?: string
+  duration?: number | null
+  description?: string
+  specialist_refs?: string[]
+  sales_status?: string
+}
+
 export interface DeliveryZonePayload {
   kind: 'delivery_zones'
   ref: string
@@ -96,6 +125,11 @@ export interface ContactsPayload {
   phone?: string
   website?: string
   instagram?: string
+  // booking_url/schedule — the salon's own booking link + weekly hours;
+  // every specialist without a booking_url of their own falls back to this
+  // one (PLAN.md §3). working_hours above stays legacy free text, untouched.
+  booking_url?: string
+  schedule?: Schedule
   contact_card_image?: string | null
   location_map_image?: string | null
   company_legal_documents?: string[]
@@ -127,6 +161,8 @@ export type KbFormPayload =
   | TopicPayload
   | TariffPayload
   | ProductPayload
+  | SpecialistPayload
+  | ServicePayload
   | DeliveryZonePayload
   | ContactsPayload
   | PoliciesPayload

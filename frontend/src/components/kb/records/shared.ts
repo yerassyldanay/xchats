@@ -5,6 +5,7 @@
 // in.
 import type { ChangeType } from '@/composables/draftChanges'
 import { api } from '@/api/client'
+import type { Schedule } from '@/types'
 
 // published: a live row shown with no draft context at all (Знаний база).
 // new: a pending draft row with no live counterpart yet.
