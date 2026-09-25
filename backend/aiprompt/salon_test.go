@@ -521,3 +521,43 @@ func TestBuildPromptV7_Salon_EndToEnd(t *testing.T) {
 		t.Error("want no leftover %%SLOT%% markers")
 	}
 }
+
+// TestRenderPromptV7_ShopFrameUnaffectedBySalonSlots is the regression guard
+// PLAN.md's test plan calls for: "organizations without salon data retain
+// the existing prompt and KB behavior." Every pre-existing aiprompt test
+// already re-passing after this change is the broad proof of that (this
+// package's whole existing suite renders shop-kb@v* frames from baseKB()/
+// zonesKB(), unchanged); this test additionally covers the one new edge
+// case those fixtures can't: a KB that happens to carry salon rows too
+// (e.g. an org mid-migration between verticals) must still render a
+// byte-for-byte ordinary shop-kb@v7 prompt when THAT frame is the one
+// selected — %%SERVICES%%/%%SPECIALISTS%% are markers shop-kb@v7 simply
+// does not contain, so renderServices/renderSpecialists's output is built
+// but never substituted in, exactly like any other unused slot value.
+func TestRenderPromptV7_ShopFrameUnaffectedBySalonSlots(t *testing.T) {
+	kb := baseKB()
+	salon := salonKB()
+	kb.Specialists = salon.Specialists
+	kb.Services = salon.Services
+	kb.Materials = append(kb.Materials, salon.Materials...)
+
+	prompt, _, err := BuildPromptV7(FrameShopKBV7RU(), kb)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, unwanted := range []string{"specialist: alina-kim", "service: haircut-women", "schedule_reasoning", "standalone: forbidden"} {
+		if strings.Contains(prompt, unwanted) {
+			t.Errorf("shop-kb@v7 prompt must not render salon content, but contains %q", unwanted)
+		}
+	}
+	// Byte-identical to a plain baseKB() render with no salon data at all —
+	// carrying unused Specialists/Services on the KB must not perturb the
+	// shop frame's own output in any way.
+	plainPrompt, _, err := BuildPromptV7(FrameShopKBV7RU(), baseKB())
+	if err != nil {
+		t.Fatalf("unexpected error (plain): %v", err)
+	}
+	if prompt != plainPrompt {
+		t.Error("want byte-identical shop-kb@v7 output whether or not the KB carries unused salon rows")
+	}
+}
