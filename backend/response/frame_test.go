@@ -31,11 +31,53 @@ func TestFrameForChannel(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.wantLabel, func(t *testing.T) {
-			if got := frameFor(tc.channel); got != tc.want {
-				t.Fatalf("frameFor(%q) picked the wrong frame", tc.channel)
+			if got := FrameFor(nil, tc.channel); got != tc.want {
+				t.Fatalf("FrameFor(nil, %q) picked the wrong frame", tc.channel)
 			}
-			if got := PromptRefFor(tc.channel); got != tc.wantRef {
-				t.Fatalf("PromptRefFor(%q) = %q, want %q", tc.channel, got, tc.wantRef)
+			if got := PromptRefFor(nil, tc.channel); got != tc.wantRef {
+				t.Fatalf("PromptRefFor(nil, %q) = %q, want %q", tc.channel, got, tc.wantRef)
+			}
+		})
+	}
+}
+
+// TestFrameForSalon pins the salon-kb@v1 selection rule (PLAN.md): any
+// specialist or service row picks the salon frame over shop-kb@v7,
+// regardless of channel, and FrameFor/PromptRefFor never disagree about it.
+func TestFrameForSalon(t *testing.T) {
+	withSpecialist := &aiprompt.KB{Specialists: []aiprompt.Specialist{{Ref: "alina"}}}
+	withService := &aiprompt.KB{Services: []aiprompt.Service{{Ref: "haircut"}}}
+	empty := &aiprompt.KB{}
+
+	for _, tc := range []struct {
+		label   string
+		kb      *aiprompt.KB
+		channel messaging.Channel
+		wantSalon bool
+	}{
+		{"specialist-whatsapp", withSpecialist, messaging.ChannelWhatsApp, true},
+		{"specialist-telegram", withSpecialist, messaging.ChannelTelegram, true},
+		{"service-only", withService, messaging.ChannelWhatsApp, true},
+		{"no-salon-data", empty, messaging.ChannelWhatsApp, false},
+		{"nil-kb", nil, messaging.ChannelWhatsApp, false},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			gotFrame := FrameFor(tc.kb, tc.channel)
+			gotRef := PromptRefFor(tc.kb, tc.channel)
+			if tc.wantSalon {
+				if gotFrame != aiprompt.FrameSalonKBV1RU() {
+					t.Errorf("FrameFor: want the salon frame, got a different one")
+				}
+				if gotRef != aiprompt.PromptRefSalonKBV1 {
+					t.Errorf("PromptRefFor = %q, want %q", gotRef, aiprompt.PromptRefSalonKBV1)
+				}
+			} else {
+				if gotFrame == aiprompt.FrameSalonKBV1RU() {
+					t.Errorf("FrameFor: unexpectedly picked the salon frame")
+				}
+				if gotRef == aiprompt.PromptRefSalonKBV1 {
+					t.Errorf("PromptRefFor: unexpectedly picked the salon ref")
+				}
 			}
 		})
 	}
@@ -57,8 +99,8 @@ func TestFrameForChannel_ServesTariffCapableFrame(t *testing.T) {
 	for _, ch := range []messaging.Channel{
 		messaging.ChannelWhatsApp, messaging.ChannelSimulator, messaging.ChannelTelegram, messaging.Channel(""),
 	} {
-		if !strings.Contains(frameFor(ch), aiprompt.SlotTariffCatalog) {
-			t.Errorf("frameFor(%q) returned a frame with no %s slot — tariffs would be invisible to the model", ch, aiprompt.SlotTariffCatalog)
+		if !strings.Contains(FrameFor(nil, ch), aiprompt.SlotTariffCatalog) {
+			t.Errorf("FrameFor(nil, %q) returned a frame with no %s slot — tariffs would be invisible to the model", ch, aiprompt.SlotTariffCatalog)
 		}
 	}
 }

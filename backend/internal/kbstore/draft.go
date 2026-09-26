@@ -118,19 +118,27 @@ type DraftTariffInfo struct {
 
 // DraftContact is the org's single pending support-contact entry — a true
 // singleton (no lang dimension; V1 is Russian-only, plan/DECISIONS.md).
+// BookingURL/Schedule are the salon vertical's addition (PLAN.md): the
+// salon-wide booking-link/schedule fallback a Specialist without its own
+// BookingURL/full schedule resolves to (aiprompt.resolvedBookingURL).
+// WorkingHours (free text) is untouched by this addition — it stays the
+// non-salon fallback token, never parsed into Schedule (see migration
+// 0020's own header comment).
 type DraftContact struct {
-	WhatsApp              string      `json:"whatsapp"`
-	Email                 string      `json:"email"`
-	Address               string      `json:"address"`
-	LegalInformation      string      `json:"legal_information"`
-	CallbackTime          string      `json:"callback_time"`
-	WorkingHours          string      `json:"working_hours"`
-	Phone                 string      `json:"phone"`
-	Website               string      `json:"website"`
-	Instagram             string      `json:"instagram"`
-	ContactCardImage      *uuid.UUID  `json:"contact_card_image"`
-	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
-	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
+	WhatsApp              string            `json:"whatsapp"`
+	Email                 string            `json:"email"`
+	Address               string            `json:"address"`
+	LegalInformation      string            `json:"legal_information"`
+	CallbackTime          string            `json:"callback_time"`
+	WorkingHours          string            `json:"working_hours"`
+	Phone                 string            `json:"phone"`
+	Website               string            `json:"website"`
+	Instagram             string            `json:"instagram"`
+	ContactCardImage      *uuid.UUID        `json:"contact_card_image"`
+	LocationMapImage      *uuid.UUID        `json:"location_map_image"`
+	CompanyLegalDocuments []uuid.UUID       `json:"company_legal_documents"`
+	BookingURL            string            `json:"booking_url"`
+	Schedule              aiprompt.Schedule `json:"schedule"`
 }
 
 // DraftPolicy is a pending ai_policies entry — a structural clone of
@@ -166,11 +174,48 @@ type DraftDeliveryZone struct {
 	SalesStatus       string `json:"sales_status"`
 }
 
+// DraftSpecialist is a pending ai_specialists entry — the salon vertical's
+// (PLAN.md) counterpart to DraftProduct: a multi-row, ref-keyed catalog
+// entity with sales_status and exactly one media column (PortfolioImages).
+// Schedule is stored ALREADY NORMALIZED (aiprompt.NormalizeSchedule) —
+// validateSpecialist (salon_validate.go) runs before this is ever staged or
+// persisted, exactly the way facts.go's ValidateFacts gates
+// additional_facts before a write.
+type DraftSpecialist struct {
+	Ref             string            `json:"ref"`
+	FullName        string            `json:"full_name"`
+	Title           string            `json:"title"`
+	Experience      string            `json:"experience"`
+	Schedule        aiprompt.Schedule `json:"schedule"`
+	BookingURL      string            `json:"booking_url"`
+	PortfolioImages []uuid.UUID       `json:"portfolio_images"`
+	SalesStatus     string            `json:"sales_status"`
+}
+
+// DraftService is a pending ai_services entry. Base services have a blank
+// ParentRef; variant/addon services name a base service's Ref from the same
+// organization — only one hierarchy level is supported. Services carry no
+// media columns. validateService (salon_validate.go) enforces the full
+// hierarchy contract (PLAN.md) before this is ever staged or persisted.
+type DraftService struct {
+	Ref            string   `json:"ref"`
+	ParentRef      string   `json:"parent_ref"`
+	ServiceType    string   `json:"service_type"` // base | variant | addon
+	Category       string   `json:"category"`
+	Name           string   `json:"name"`
+	Price          string   `json:"price"`
+	Duration       *int     `json:"duration"` // minutes; nil means unspecified
+	Description    string   `json:"description"`
+	SpecialistRefs []string `json:"specialist_refs"`
+	SalesStatus    string   `json:"sales_status"`
+}
+
 // DraftDelete marks a live entity for removal at approve. Key is the entity's
-// natural key: topic slug, tariff/product/zone ref; contact/policy carry no
-// key (true singletons — Kind alone identifies the one row).
+// natural key: topic slug, tariff/product/zone/specialist/service ref;
+// contact/policy carry no key (true singletons — Kind alone identifies the
+// one row).
 type DraftDelete struct {
-	Kind string `json:"kind"` // 'topic'|'tariff'|'product'|'contact'|'policy'|'delivery_zone'
+	Kind string `json:"kind"` // 'topic'|'tariff'|'product'|'contact'|'policy'|'delivery_zone'|'specialist'|'service'
 	Key  string `json:"key"`
 }
 
@@ -184,6 +229,8 @@ type DraftBlob struct {
 	Policies      []DraftPolicy       `json:"policies"`
 	TariffInfo    []DraftTariffInfo   `json:"tariff_info"`
 	DeliveryZones []DraftDeliveryZone `json:"delivery_zones"`
+	Specialists   []DraftSpecialist   `json:"specialists"`
+	Services      []DraftService      `json:"services"`
 	Deletes       []DraftDelete       `json:"deletes"`
 }
 
@@ -295,6 +342,46 @@ func (b *DraftBlob) removeZone(ref string) {
 		}
 	}
 	b.DeliveryZones = out
+}
+
+func (b *DraftBlob) upsertSpecialist(sp DraftSpecialist) {
+	for i := range b.Specialists {
+		if b.Specialists[i].Ref == sp.Ref {
+			b.Specialists[i] = sp
+			return
+		}
+	}
+	b.Specialists = append(b.Specialists, sp)
+}
+
+func (b *DraftBlob) removeSpecialist(ref string) {
+	out := b.Specialists[:0]
+	for _, sp := range b.Specialists {
+		if sp.Ref != ref {
+			out = append(out, sp)
+		}
+	}
+	b.Specialists = out
+}
+
+func (b *DraftBlob) upsertService(sv DraftService) {
+	for i := range b.Services {
+		if b.Services[i].Ref == sv.Ref {
+			b.Services[i] = sv
+			return
+		}
+	}
+	b.Services = append(b.Services, sv)
+}
+
+func (b *DraftBlob) removeService(ref string) {
+	out := b.Services[:0]
+	for _, sv := range b.Services {
+		if sv.Ref != ref {
+			out = append(out, sv)
+		}
+	}
+	b.Services = out
 }
 
 func (b *DraftBlob) addDelete(kind, key string) {
@@ -593,6 +680,10 @@ func (s *Store) CancelChange(ctx context.Context, orgID, actor uuid.UUID, kind, 
 				b.removeProduct(key)
 			case "delivery_zone":
 				b.removeZone(key)
+			case "specialist":
+				b.removeSpecialist(key)
+			case "service":
+				b.removeService(key)
 			case "contact":
 				b.removeContact()
 			case "policy":
@@ -666,6 +757,18 @@ func entityChangePresent(blob DraftBlob, singular, key string) bool {
 	case "delivery_zone":
 		for _, z := range blob.DeliveryZones {
 			if z.Ref == key {
+				return true
+			}
+		}
+	case "specialist":
+		for _, sp := range blob.Specialists {
+			if sp.Ref == key {
+				return true
+			}
+		}
+	case "service":
+		for _, sv := range blob.Services {
+			if sv.Ref == key {
 				return true
 			}
 		}
@@ -813,6 +916,41 @@ type ProductRow struct {
 	UpdatedAt            time.Time                 `json:"updated_at"`
 }
 
+// SpecialistRow is the editor-facing ai_specialists row — ProductRow's shape
+// (ID/Draft/UpdatedAt alongside DraftSpecialist's own fields), the salon
+// vertical's addition (PLAN.md).
+type SpecialistRow struct {
+	ID              string            `json:"id"`
+	Ref             string            `json:"ref"`
+	FullName        string            `json:"full_name"`
+	Title           string            `json:"title"`
+	Experience      string            `json:"experience"`
+	Schedule        aiprompt.Schedule `json:"schedule"`
+	BookingURL      string            `json:"booking_url"`
+	PortfolioImages []uuid.UUID       `json:"portfolio_images"`
+	SalesStatus     string            `json:"sales_status"`
+	Draft           bool              `json:"draft"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+}
+
+// ServiceRow is the editor-facing ai_services row — a structural clone of
+// SpecialistRow's own doc comment, over DraftService's fields.
+type ServiceRow struct {
+	ID             string    `json:"id"`
+	Ref            string    `json:"ref"`
+	ParentRef      string    `json:"parent_ref"`
+	ServiceType    string    `json:"service_type"`
+	Category       string    `json:"category"`
+	Name           string    `json:"name"`
+	Price          string    `json:"price"`
+	Duration       *int      `json:"duration"`
+	Description    string    `json:"description"`
+	SpecialistRefs []string  `json:"specialist_refs"`
+	SalesStatus    string    `json:"sales_status"`
+	Draft          bool      `json:"draft"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 // TariffInfoRow is the editor-facing ai_tariff_info row — ID/Slug the
 // singleton NaturalKeyMain ("main"), same convention ContactRow/PolicyRow
 // use with domain.ContactSlug/PolicySlug.
@@ -825,22 +963,24 @@ type TariffInfoRow struct {
 }
 
 type ContactRow struct {
-	ID                    string      `json:"id"`
-	Slug                  string      `json:"slug"`
-	WhatsApp              string      `json:"whatsapp"`
-	Email                 string      `json:"email"`
-	Address               string      `json:"address"`
-	LegalInformation      string      `json:"legal_information"`
-	CallbackTime          string      `json:"callback_time"`
-	WorkingHours          string      `json:"working_hours"`
-	Phone                 string      `json:"phone"`
-	Website               string      `json:"website"`
-	Instagram             string      `json:"instagram"`
-	ContactCardImage      *uuid.UUID  `json:"contact_card_image"`
-	LocationMapImage      *uuid.UUID  `json:"location_map_image"`
-	CompanyLegalDocuments []uuid.UUID `json:"company_legal_documents"`
-	Draft                 bool        `json:"draft"`
-	UpdatedAt             time.Time   `json:"updated_at"`
+	ID                    string            `json:"id"`
+	Slug                  string            `json:"slug"`
+	WhatsApp              string            `json:"whatsapp"`
+	Email                 string            `json:"email"`
+	Address               string            `json:"address"`
+	LegalInformation      string            `json:"legal_information"`
+	CallbackTime          string            `json:"callback_time"`
+	WorkingHours          string            `json:"working_hours"`
+	Phone                 string            `json:"phone"`
+	Website               string            `json:"website"`
+	Instagram             string            `json:"instagram"`
+	ContactCardImage      *uuid.UUID        `json:"contact_card_image"`
+	LocationMapImage      *uuid.UUID        `json:"location_map_image"`
+	CompanyLegalDocuments []uuid.UUID       `json:"company_legal_documents"`
+	BookingURL            string            `json:"booking_url"`
+	Schedule              aiprompt.Schedule `json:"schedule"`
+	Draft                 bool              `json:"draft"`
+	UpdatedAt             time.Time         `json:"updated_at"`
 }
 
 // PolicyRow is the editor-facing ai_policies row — a structural clone of
@@ -875,9 +1015,14 @@ type DraftView struct {
 	// Zones is live ai_delivery_zones rows overlaid by pending
 	// blob.DeliveryZones entries — same live+blob merge as every other
 	// entity kind (see mergedView's zones section).
-	Zones     []ZoneRow  `json:"zones"`
-	Materials []Material `json:"materials"`
-	Requests  []Request  `json:"requests"`
+	Zones []ZoneRow `json:"zones"`
+	// Specialists/Services are live ai_specialists/ai_services rows
+	// overlaid by pending blob entries — the salon vertical's addition
+	// (PLAN.md), same live+blob merge as every other entity kind.
+	Specialists []SpecialistRow `json:"specialists"`
+	Services    []ServiceRow    `json:"services"`
+	Materials   []Material      `json:"materials"`
+	Requests    []Request       `json:"requests"`
 }
 
 // Draft assembles the merged working view: live rows, overlaid by pending blob
@@ -1051,8 +1196,8 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address, LegalInformation: c.LegalInformation,
 			CallbackTime: c.CallbackTime, WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website,
 			Instagram: c.Instagram, ContactCardImage: c.ContactCardImage, LocationMapImage: c.LocationMapImage,
-			CompanyLegalDocuments: c.CompanyLegalDocuments,
-			Draft:                 true, UpdatedAt: updatedAt})
+			CompanyLegalDocuments: c.CompanyLegalDocuments, BookingURL: c.BookingURL, Schedule: c.Schedule,
+			Draft: true, UpdatedAt: updatedAt})
 	}
 	if len(blob.Policies) > 0 && !deletedSingleton(blob, "policy") {
 		p := blob.Policies[0]
@@ -1077,6 +1222,25 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 			DeliveryInDays: z.DeliveryInDays, Notes: z.Notes, SalesStatus: orDefault(z.SalesStatus, "active"),
 			Draft: true, UpdatedAt: updatedAt})
 	}
+	for _, sp := range blob.Specialists {
+		if deleted["specialist:"+sp.Ref] {
+			continue
+		}
+		v.Specialists = append(v.Specialists, SpecialistRow{ID: sp.Ref, Ref: sp.Ref, FullName: sp.FullName,
+			Title: sp.Title, Experience: sp.Experience, Schedule: sp.Schedule, BookingURL: sp.BookingURL,
+			PortfolioImages: sp.PortfolioImages, SalesStatus: orDefault(sp.SalesStatus, "active"),
+			Draft: true, UpdatedAt: updatedAt})
+	}
+	for _, sv := range blob.Services {
+		if deleted["service:"+sv.Ref] {
+			continue
+		}
+		v.Services = append(v.Services, ServiceRow{ID: sv.Ref, Ref: sv.Ref, ParentRef: sv.ParentRef,
+			ServiceType: orDefault(sv.ServiceType, "base"), Category: sv.Category, Name: sv.Name, Price: sv.Price,
+			Duration: sv.Duration, Description: sv.Description, SpecialistRefs: sv.SpecialistRefs,
+			SalesStatus: orDefault(sv.SalesStatus, "active"),
+			Draft:       true, UpdatedAt: updatedAt})
+	}
 	v.Materials = []Material{}
 	v.Requests = []Request{}
 	if v.Topics == nil {
@@ -1099,6 +1263,12 @@ func draftRowsFromBlob(orgID uuid.UUID, blob DraftBlob, ver int64, updatedAt tim
 	}
 	if v.Zones == nil {
 		v.Zones = []ZoneRow{}
+	}
+	if v.Specialists == nil {
+		v.Specialists = []SpecialistRow{}
+	}
+	if v.Services == nil {
+		v.Services = []ServiceRow{}
 	}
 	return v
 }
@@ -1125,6 +1295,8 @@ type DraftChangeSet struct {
 	Policies    []PolicyRow         `json:"policies"`
 	TariffInfo  []TariffInfoRow     `json:"tariff_info"`
 	Zones       []ZoneRow           `json:"zones"`
+	Specialists []SpecialistRow     `json:"specialists"`
+	Services    []ServiceRow        `json:"services"`
 	Deletes     []DraftChangeDelete `json:"deletes"`
 }
 
@@ -1157,6 +1329,8 @@ func (s *Store) DraftChanges(ctx context.Context, orgID uuid.UUID) (*DraftChange
 		Policies:    rows.Policies,
 		TariffInfo:  rows.TariffInfo,
 		Zones:       rows.Zones,
+		Specialists: rows.Specialists,
+		Services:    rows.Services,
 		Deletes:     make([]DraftChangeDelete, 0, len(blob.Deletes)),
 	}
 	if blob.Config.hasPending() {
@@ -1345,7 +1519,7 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	// blob entry, both keyed by nothing but the org.
 	crows, err := db.Query(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		company_legal_documents, updated_at
+		company_legal_documents, booking_url, schedule, updated_at
 		FROM ai_contacts WHERE organization_id = $1 ORDER BY created_at`, orgID)
 	if err != nil {
 		return nil, err
@@ -1355,7 +1529,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 		var legalInfo *string
 		if err := crows.Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
-			(*dbx.UUIDArray)(&c.CompanyLegalDocuments), &c.UpdatedAt); err != nil {
+			(*dbx.UUIDArray)(&c.CompanyLegalDocuments), &c.BookingURL, (*aiprompt.ScheduleColumn)(&c.Schedule),
+			&c.UpdatedAt); err != nil {
 			crows.Close()
 			return nil, err
 		}
@@ -1373,8 +1548,8 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 			Address: bc.Address, LegalInformation: bc.LegalInformation, CallbackTime: bc.CallbackTime,
 			WorkingHours: bc.WorkingHours, Phone: bc.Phone, Website: bc.Website, Instagram: bc.Instagram,
 			ContactCardImage: bc.ContactCardImage, LocationMapImage: bc.LocationMapImage,
-			CompanyLegalDocuments: bc.CompanyLegalDocuments,
-			Draft:                 true, UpdatedAt: updatedAt}
+			CompanyLegalDocuments: bc.CompanyLegalDocuments, BookingURL: bc.BookingURL, Schedule: bc.Schedule,
+			Draft: true, UpdatedAt: updatedAt}
 		if len(v.Contacts) > 0 {
 			v.Contacts[0] = row
 		} else {
@@ -1487,11 +1662,79 @@ func (s *Store) mergedView(ctx context.Context, db dbtx, orgID uuid.UUID, blob D
 	}
 	v.Zones = kz
 
+	// specialists — live rows overlaid by pending blob.Specialists entries,
+	// same pattern as zones above (the salon vertical's addition, PLAN.md).
+	specialistIdx := map[string]int{}
+	liveSpecialists, err := loadSpecialistRows(ctx, db, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sp := range liveSpecialists {
+		v.Specialists = append(v.Specialists, sp)
+		specialistIdx[sp.Ref] = len(v.Specialists) - 1
+	}
+	for _, bsp := range blob.Specialists {
+		row := SpecialistRow{ID: bsp.Ref, Ref: bsp.Ref, FullName: bsp.FullName, Title: bsp.Title,
+			Experience: bsp.Experience, Schedule: bsp.Schedule, BookingURL: bsp.BookingURL,
+			PortfolioImages: bsp.PortfolioImages, SalesStatus: orDefault(bsp.SalesStatus, "active"),
+			Draft: true, UpdatedAt: updatedAt}
+		if i, ok := specialistIdx[bsp.Ref]; ok {
+			v.Specialists[i] = row
+		} else {
+			v.Specialists = append(v.Specialists, row)
+			specialistIdx[bsp.Ref] = len(v.Specialists) - 1
+		}
+	}
+	ksp := v.Specialists[:0]
+	for _, sp := range v.Specialists {
+		if !deleted["specialist:"+sp.Ref] {
+			ksp = append(ksp, sp)
+		}
+	}
+	v.Specialists = ksp
+
+	// services — live rows overlaid by pending blob.Services entries, same
+	// pattern as specialists above.
+	serviceIdx := map[string]int{}
+	liveServices, err := loadServiceRows(ctx, db, orgID)
+	if err != nil {
+		return nil, err
+	}
+	for _, sv := range liveServices {
+		v.Services = append(v.Services, sv)
+		serviceIdx[sv.Ref] = len(v.Services) - 1
+	}
+	for _, bsv := range blob.Services {
+		row := ServiceRow{ID: bsv.Ref, Ref: bsv.Ref, ParentRef: bsv.ParentRef, ServiceType: orDefault(bsv.ServiceType, "base"),
+			Category: bsv.Category, Name: bsv.Name, Price: bsv.Price, Duration: bsv.Duration, Description: bsv.Description,
+			SpecialistRefs: bsv.SpecialistRefs, SalesStatus: orDefault(bsv.SalesStatus, "active"),
+			Draft: true, UpdatedAt: updatedAt}
+		if i, ok := serviceIdx[bsv.Ref]; ok {
+			v.Services[i] = row
+		} else {
+			v.Services = append(v.Services, row)
+			serviceIdx[bsv.Ref] = len(v.Services) - 1
+		}
+	}
+	ksv := v.Services[:0]
+	for _, sv := range v.Services {
+		if !deleted["service:"+sv.Ref] {
+			ksv = append(ksv, sv)
+		}
+	}
+	v.Services = ksv
+
 	// Guarantee non-nil slices: every collection must serialize as a JSON array
 	// ([]), never null. A nil slice (empty table + empty blob) marshals to null,
 	// and the client reads d.<coll>.length directly — a null would crash the page.
 	if v.Zones == nil {
 		v.Zones = []ZoneRow{}
+	}
+	if v.Specialists == nil {
+		v.Specialists = []SpecialistRow{}
+	}
+	if v.Services == nil {
+		v.Services = []ServiceRow{}
 	}
 	if v.Topics == nil {
 		v.Topics = []TopicRow{}
@@ -1751,9 +1994,111 @@ func (s *Store) DeleteZone(ctx context.Context, orgID uuid.UUID, actor uuid.UUID
 	})
 }
 
+// SpecialistInput is an upsert payload for a draft specialist — every scalar
+// field a plain value representing the full desired state (the httpapi
+// request contract this backs, specialistReq, is a whole-value PUT, not a
+// partial PATCH — DeliveryZoneInput's own shape, not ProductInput's). Media
+// is nil-means-absent, same contract as TopicInput.Media above.
+type SpecialistInput struct {
+	Ref, FullName, Title, Experience, BookingURL, SalesStatus string
+	Schedule                                                  aiprompt.Schedule
+	Media                                                     SpecialistMedia
+}
+
+// UpsertSpecialist stages a specialist create/update in the draft blob, by
+// ref. Merges onto the specialist's current shape (currentSpecialist) so a
+// caller that leaves Media zero cannot blank out media an MCP tool already
+// staged. Validates ref/sales_status/schedule via validateSpecialist — the
+// SAME rule PutLiveSpecialist and MCPUpsertSpecialist enforce, so an invalid
+// specialist can never reach the draft blob through any of the three lanes.
+func (s *Store) UpsertSpecialist(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in SpecialistInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentSpecialist(ctx, db, orgID, in.Ref, b)
+		if err != nil {
+			return err
+		}
+		cur.Ref = in.Ref
+		cur.FullName, cur.Title, cur.Experience = in.FullName, in.Title, in.Experience
+		cur.Schedule = in.Schedule
+		cur.BookingURL = in.BookingURL
+		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		cur, err = validateSpecialist(cur)
+		if err != nil {
+			return err
+		}
+		refs := applySpecialistMedia(&cur, in.Media)
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
+		}
+		b.upsertSpecialist(cur)
+		return nil
+	})
+}
+
+// DeleteSpecialist stages removal of a specialist by ref.
+func (s *Store) DeleteSpecialist(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		b.removeSpecialist(ref)
+		b.addDelete("specialist", ref)
+		return nil
+	})
+}
+
+// ServiceInput is an upsert payload for a draft service — every field a
+// plain value representing the full desired state (SpecialistInput's own
+// doc comment), except Duration, which is genuinely nullable rather than an
+// "unchanged" sentinel: nil persists SQL NULL (unspecified duration), a
+// pointer to a positive int persists that many minutes. Services carry no
+// media columns.
+type ServiceInput struct {
+	Ref, ParentRef, ServiceType, Category, Name, Price, Description, SalesStatus string
+	Duration                                                                     *int
+	SpecialistRefs                                                               []string
+}
+
+// UpsertService stages a service create/update in the draft blob, by ref.
+// Merges onto the service's current shape (currentService) and validates
+// the full hierarchy contract via validateService — the SAME rule
+// PutLiveService and MCPUpsertService enforce, against the CURRENT merged
+// view (draft blob entries overlaid on live rows) for this organization.
+func (s *Store) UpsertService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ServiceInput) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		cur, err := s.currentService(ctx, db, orgID, in.Ref, b)
+		if err != nil {
+			return err
+		}
+		cur.Ref = in.Ref
+		cur.ParentRef = in.ParentRef
+		cur.ServiceType = orDefault(in.ServiceType, "base")
+		cur.Category, cur.Name, cur.Price, cur.Description = in.Category, in.Name, in.Price, in.Description
+		cur.Duration = in.Duration
+		cur.SpecialistRefs = in.SpecialistRefs
+		cur.SalesStatus = orDefault(in.SalesStatus, "active")
+		cur, err = s.validateService(ctx, db, orgID, b, cur)
+		if err != nil {
+			return err
+		}
+		b.upsertService(cur)
+		return nil
+	})
+}
+
+// DeleteService stages removal of a service by ref.
+func (s *Store) DeleteService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
+	return s.writeDraftBlob(ctx, orgID, actor, func(db dbtx, b *DraftBlob) error {
+		b.removeService(ref)
+		b.addDelete("service", ref)
+		return nil
+	})
+}
+
 // ContactPatch carries optional edits to the org's singleton contact row (nil
 // = leave unchanged). Media is nil-means-absent, same contract as
-// TopicInput.Media above.
+// TopicInput.Media above. BookingURL/Schedule are the salon vertical's
+// addition (PLAN.md) — Schedule follows AdditionalFacts' own pointer-to-
+// slice convention: nil leaves it unchanged, a non-nil pointer (even to an
+// empty Schedule) replaces it with aiprompt.NormalizeSchedule's canonical
+// result.
 type ContactPatch struct {
 	WhatsApp         *string
 	Email            *string
@@ -1764,6 +2109,8 @@ type ContactPatch struct {
 	Phone            *string
 	Website          *string
 	Instagram        *string
+	BookingURL       *string
+	Schedule         *aiprompt.Schedule
 	Media            ContactsMedia
 }
 
@@ -1802,6 +2149,16 @@ func (s *Store) PatchContacts(ctx context.Context, orgID uuid.UUID, actor uuid.U
 		}
 		if p.Instagram != nil {
 			cur.Instagram = *p.Instagram
+		}
+		if p.BookingURL != nil {
+			cur.BookingURL = *p.BookingURL
+		}
+		if p.Schedule != nil {
+			schedule, err := aiprompt.NormalizeSchedule(*p.Schedule)
+			if err != nil {
+				return fmt.Errorf("kbstore: contact: %w", err)
+			}
+			cur.Schedule = schedule
 		}
 		refs := applyContactsMedia(&cur, p.Media)
 		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
@@ -2134,6 +2491,36 @@ func (s *Store) currentZone(ctx context.Context, db dbtx, orgID uuid.UUID, ref s
 	return z, err
 }
 
+// currentSpecialist resolves the merged current shape of a specialist — the
+// same pattern as currentTariff/currentProduct/currentZone, over
+// ai_specialists: a blank Ref-only scaffold for "not found," since every
+// caller is about to WRITE that exact ref (see currentSpecialistIfAny in
+// salon_validate.go for the cross-reference-lookup sibling this delegates
+// to, which distinguishes "not found" explicitly instead).
+func (s *Store) currentSpecialist(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftSpecialist, error) {
+	sp, ok, err := s.currentSpecialistIfAny(ctx, db, orgID, ref, b)
+	if err != nil {
+		return DraftSpecialist{}, err
+	}
+	if !ok {
+		return DraftSpecialist{Ref: ref}, nil
+	}
+	return sp, nil
+}
+
+// currentService is currentSpecialist's twin for ai_services — see its doc
+// comment.
+func (s *Store) currentService(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (DraftService, error) {
+	sv, ok, err := s.currentServiceIfAny(ctx, db, orgID, ref, b)
+	if err != nil {
+		return DraftService{}, err
+	}
+	if !ok {
+		return DraftService{Ref: ref}, nil
+	}
+	return sv, nil
+}
+
 // currentContact resolves the merged current shape of the org's singleton
 // contact row: the pending blob entry if one exists, else the live row, else
 // a blank scaffold.
@@ -2145,11 +2532,11 @@ func (s *Store) currentContact(ctx context.Context, db dbtx, orgID uuid.UUID, b 
 	var legalInfo *string
 	err := db.QueryRow(ctx, `SELECT whatsapp, email, address, legal_information, callback_time,
 		working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		company_legal_documents
+		company_legal_documents, booking_url, schedule
 		FROM ai_contacts WHERE organization_id = $1`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram, &c.ContactCardImage, &c.LocationMapImage,
-			(*dbx.UUIDArray)(&c.CompanyLegalDocuments))
+			(*dbx.UUIDArray)(&c.CompanyLegalDocuments), &c.BookingURL, (*aiprompt.ScheduleColumn)(&c.Schedule))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return DraftContact{}, nil
 	}
@@ -2197,24 +2584,27 @@ func orDefault(v, def string) string {
 // domain.ContactSlug/domain.PolicySlug constant (there is nothing else to key
 // on — the natural key IS the org).
 type ApproveSelector struct {
-	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "tariff_info" | "delivery_zones" | "config"
-	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | NaturalKeyMain | ref | NaturalKeyMain
+	Kind string // "" | "topics" | "tariffs" | "products" | "contacts" | "policies" | "tariff_info" | "delivery_zones" | "specialists" | "services" | "config"
+	Key  string // slug | ref | ref | domain.ContactSlug | domain.PolicySlug | NaturalKeyMain | ref | ref | ref | NaturalKeyMain
 }
 
 type approveSet struct {
-	topics     []DraftTopic
-	tariffs    []DraftTariff
-	products   []DraftProduct
-	contacts   []DraftContact
-	policies   []DraftPolicy
-	tariffInfo []DraftTariffInfo
-	zones      []DraftDeliveryZone
-	config     bool // a pending assistant-config edit is targeted by this selector
-	deletes    []DraftDelete
+	topics      []DraftTopic
+	tariffs     []DraftTariff
+	products    []DraftProduct
+	contacts    []DraftContact
+	policies    []DraftPolicy
+	tariffInfo  []DraftTariffInfo
+	zones       []DraftDeliveryZone
+	specialists []DraftSpecialist
+	services    []DraftService
+	config      bool // a pending assistant-config edit is targeted by this selector
+	deletes     []DraftDelete
 }
 
 func (a approveSet) empty() bool {
-	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.tariffInfo)+len(a.zones)+len(a.deletes) == 0 && !a.config
+	return len(a.topics)+len(a.tariffs)+len(a.products)+len(a.contacts)+len(a.policies)+len(a.tariffInfo)+len(a.zones)+
+		len(a.specialists)+len(a.services)+len(a.deletes) == 0 && !a.config
 }
 
 // errApproveNothingPending is an internal control-flow sentinel:
@@ -2298,6 +2688,16 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 			return err
 		}
 		reasons = append(reasons, zoneGateReasons(resultingZonesForGate(liveZones, set.zones, set.deletes), resultPolicies)...)
+		liveServices, err := loadServiceRows(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, serviceGateReasons(resultingServicesForGate(liveServices, set.services, set.deletes))...)
+		liveSpecialists, err := loadSpecialistRows(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, serviceSpecialistGateReasons(set.services, resultingSpecialistsForGate(liveSpecialists, set.specialists, set.deletes))...)
 		if len(reasons) > 0 {
 			return &GateError{Reasons: reasons}
 		}
@@ -2338,6 +2738,26 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 				DeliveryAvailable: z.DeliveryAvailable, DeliveryCost: z.DeliveryCost, DeliveryInDays: z.DeliveryInDays,
 				Notes: z.Notes, SalesStatus: z.SalesStatus,
 			}); err != nil {
+				return err
+			}
+		}
+		// Specialists/services materialize with a plain upsert, same as every
+		// other entity above — the archive-cascade rule (PLAN.md: archiving a
+		// base service atomically archives its active children) is a
+		// LIVE-write-path-only concern (PutLiveService, live.go); a staged
+		// draft entry is still under human review, so it does not auto-cascade
+		// here even for a whole-draft approve. The gate above (serviceGateReasons)
+		// still refuses to materialize the one state that rule exists to
+		// prevent — an active child left pointing at a now-archived base — so
+		// an operator gets a clear rejection here instead of a silently
+		// corrupted live KB and a hard error on the next customer reply.
+		for _, sp := range set.specialists {
+			if err := upsertSpecialistRow(ctx, db, orgID, sp); err != nil {
+				return err
+			}
+		}
+		for _, sv := range set.services {
+			if err := upsertServiceRow(ctx, db, orgID, sv); err != nil {
 				return err
 			}
 		}
@@ -2411,6 +2831,12 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 		for _, z := range set.zones {
 			b.removeZone(z.Ref)
 		}
+		for _, sp := range set.specialists {
+			b.removeSpecialist(sp.Ref)
+		}
+		for _, sv := range set.services {
+			b.removeService(sv.Ref)
+		}
 		for _, d := range set.deletes {
 			b.removeDelete(d.Kind, d.Key)
 		}
@@ -2452,6 +2878,12 @@ func applyDelete(ctx context.Context, tx execer, orgID uuid.UUID, d DraftDelete)
 	case "delivery_zone":
 		_, err := tx.Exec(ctx, `DELETE FROM ai_delivery_zones WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
 		return err
+	case "specialist":
+		_, err := tx.Exec(ctx, `DELETE FROM ai_specialists WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		return err
+	case "service":
+		_, err := tx.Exec(ctx, `DELETE FROM ai_services WHERE organization_id=$1 AND ref=$2`, orgID, d.Key)
+		return err
 	}
 	return nil
 }
@@ -2464,8 +2896,9 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 		}
 		return fmt.Sprintf("approved %s %s", singular, sel.Key)
 	}
-	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d tariff_info, %d zone(s), %d deletion(s)",
-		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.tariffInfo), len(set.zones), len(set.deletes))
+	return fmt.Sprintf("approved %d topic(s), %d tariff(s), %d product(s), %d contact(s), %d policy(-ies), %d tariff_info, %d zone(s), %d specialist(s), %d service(s), %d deletion(s)",
+		len(set.topics), len(set.tariffs), len(set.products), len(set.contacts), len(set.policies), len(set.tariffInfo), len(set.zones),
+		len(set.specialists), len(set.services), len(set.deletes))
 }
 
 // selectApproved picks the blob entries an ApproveSelector targets. Deletes are
@@ -2485,15 +2918,17 @@ func approveNote(sel ApproveSelector, set approveSet) string {
 func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 	if sel.Kind == "" {
 		return approveSet{
-			topics:     append([]DraftTopic(nil), b.Topics...),
-			tariffs:    append([]DraftTariff(nil), b.Tariffs...),
-			products:   append([]DraftProduct(nil), b.Products...),
-			contacts:   append([]DraftContact(nil), b.Contacts...),
-			policies:   append([]DraftPolicy(nil), b.Policies...),
-			tariffInfo: append([]DraftTariffInfo(nil), b.TariffInfo...),
-			zones:      append([]DraftDeliveryZone(nil), b.DeliveryZones...),
-			config:     b.Config.hasPending(),
-			deletes:    append([]DraftDelete(nil), b.Deletes...),
+			topics:      append([]DraftTopic(nil), b.Topics...),
+			tariffs:     append([]DraftTariff(nil), b.Tariffs...),
+			products:    append([]DraftProduct(nil), b.Products...),
+			contacts:    append([]DraftContact(nil), b.Contacts...),
+			policies:    append([]DraftPolicy(nil), b.Policies...),
+			tariffInfo:  append([]DraftTariffInfo(nil), b.TariffInfo...),
+			zones:       append([]DraftDeliveryZone(nil), b.DeliveryZones...),
+			specialists: append([]DraftSpecialist(nil), b.Specialists...),
+			services:    append([]DraftService(nil), b.Services...),
+			config:      b.Config.hasPending(),
+			deletes:     append([]DraftDelete(nil), b.Deletes...),
 		}
 	}
 	var set approveSet
@@ -2543,6 +2978,18 @@ func selectApproved(b DraftBlob, sel ApproveSelector) approveSet {
 		for _, z := range b.DeliveryZones {
 			if z.Ref == sel.Key {
 				set.zones = append(set.zones, z)
+			}
+		}
+	case "specialists":
+		for _, sp := range b.Specialists {
+			if sp.Ref == sel.Key {
+				set.specialists = append(set.specialists, sp)
+			}
+		}
+	case "services":
+		for _, sv := range b.Services {
+			if sv.Ref == sel.Key {
+				set.services = append(set.services, sv)
 			}
 		}
 	case "config":

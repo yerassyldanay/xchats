@@ -125,7 +125,7 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if err != nil {
 		return nil, fmt.Errorf("response: build catalog: %w", err)
 	}
-	rendered, err := aiprompt.RenderPromptV7(frameFor(req.Channel), req.KB.PromptInput(), cat)
+	rendered, err := aiprompt.RenderPromptV7(FrameFor(req.KB, req.Channel), req.KB.PromptInput(), cat)
 	if err != nil {
 		return nil, fmt.Errorf("response: render prompt: %w", err)
 	}
@@ -214,10 +214,29 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	}, nil
 }
 
-// frameFor picks the prompt frame for a channel. WhatsApp and the simulator
-// keep the byte-identical base frame (the simulator exists to rehearse the
-// WhatsApp path, so it must not diverge from it); Telegram gets the variant
-// whose only difference is a persona line that does not call the assistant a
+// salonFrameSelected reports whether kb carries any structured salon data
+// (PLAN.md "Beauty Salon Knowledge Base Extension") — the trigger FrameFor/
+// PromptRefFor use to pick salon-kb@v1 over the shop-kb family, regardless
+// of channel. A nil kb (a caller that predates GenerateRequest.KB being
+// required, or handleKBPrompt's pre-load default) never selects it.
+func salonFrameSelected(kb *aiprompt.KB) bool {
+	return kb != nil && (len(kb.Specialists) > 0 || len(kb.Services) > 0)
+}
+
+// FrameFor picks the prompt frame for an organization's KB and channel.
+// Structured salon data always wins, on every channel — PLAN.md: "Select it
+// when structured salon data exists; organizations without salon data
+// continue using the existing shop frame unchanged." There is no Telegram
+// variant of salon-kb@v1 yet (PLAN.md's scope is silent on Telegram for the
+// salon vertical — see aiprompt.PromptRefSalonKBV1's doc comment); a
+// Telegram-channel salon organization still gets the WhatsApp-worded salon
+// frame rather than falling back to shop-kb, which would leave its
+// %%SERVICES%%/%%SPECIALISTS%% markers unfilled.
+//
+// Absent salon data, WhatsApp and the simulator keep the byte-identical
+// shop-kb@v7 base frame (the simulator exists to rehearse the WhatsApp
+// path, so it must not diverge from it); Telegram gets the variant whose
+// only difference is a persona line that does not call the assistant a
 // WhatsApp one. An unset channel — a caller that predates GenerateRequest
 // carrying it — keeps the base frame rather than guessing.
 //
@@ -228,20 +247,29 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 // prose, unreportable except by reading chat transcripts one at a time. v7
 // is v6 plus the optional "kb_gap" structured diagnostic (rule 9) — see
 // aiprompt.PromptRefShopKBV7, which also records that the eval pipeline has
-// not been run against it yet. Generate must call ValidateResponseV7 (not
-// ValidateResponse) whenever this function returns a v7 frame — the two
-// move in lockstep exactly as frameFor and PromptRefFor do.
-func frameFor(channel messaging.Channel) string {
+// not been run against it yet. salon-kb@v1 shares the same v7 response
+// contract (aiprompt.PromptRefSalonKBV1's doc comment), so Generate always
+// calls ValidateResponseV7 (not ValidateResponse) regardless of which frame
+// FrameFor returns — FrameFor and PromptRefFor must move in lockstep with
+// each other, a draft stamped with a ref whose frame did not produce it
+// being unreproducible.
+func FrameFor(kb *aiprompt.KB, channel messaging.Channel) string {
+	if salonFrameSelected(kb) {
+		return aiprompt.FrameSalonKBV1RU()
+	}
 	if channel == messaging.ChannelTelegram {
 		return aiprompt.FrameShopKBV7TGRU()
 	}
 	return aiprompt.FrameShopKBV7RU()
 }
 
-// PromptRefFor names the frame frameFor would pick, for logs and draft records.
-// It must move in lockstep with frameFor: a draft stamped with a ref whose
-// frame did not produce it is unreproducible.
-func PromptRefFor(channel messaging.Channel) string {
+// PromptRefFor names the frame FrameFor would pick, for logs and draft
+// records. It must move in lockstep with FrameFor: a draft stamped with a
+// ref whose frame did not produce it is unreproducible.
+func PromptRefFor(kb *aiprompt.KB, channel messaging.Channel) string {
+	if salonFrameSelected(kb) {
+		return aiprompt.PromptRefSalonKBV1
+	}
 	if channel == messaging.ChannelTelegram {
 		return aiprompt.PromptRefShopKBV7TG
 	}

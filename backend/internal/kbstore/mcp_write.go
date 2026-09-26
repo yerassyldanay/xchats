@@ -504,11 +504,17 @@ func (s *Store) MCPUpsertTariff(ctx context.Context, orgID uuid.UUID, userID uui
 // Contacts (singleton, patch-only)
 // ---------------------------------------------------------------------------
 
-// ContactsChanges is kb_contacts_upsert's `changes`.
+// ContactsChanges is kb_contacts_upsert's `changes`. BookingURL/Schedule are
+// the salon vertical's addition (PLAN.md): Schedule is nil-means-unchanged,
+// non-nil (even empty) means replace with aiprompt.NormalizeSchedule's
+// canonical result — the same pointer-to-slice convention AdditionalFacts
+// uses (ProductChanges' doc comment).
 type ContactsChanges struct {
 	WhatsApp, Email, Address, LegalInformation, CallbackTime, WorkingHours, Phone, Website, Instagram *string
 	ContactCardImage, LocationMapImage                                                                **uuid.UUID
 	CompanyLegalDocuments                                                                             *[]uuid.UUID
+	BookingURL                                                                                        *string
+	Schedule                                                                                          *aiprompt.Schedule
 }
 
 // MCPUpsertContacts patches the contacts singleton.
@@ -544,6 +550,16 @@ func (s *Store) MCPUpsertContacts(ctx context.Context, orgID uuid.UUID, userID u
 		}
 		if ch.Instagram != nil {
 			cur.Instagram = *ch.Instagram
+		}
+		if ch.BookingURL != nil {
+			cur.BookingURL = *ch.BookingURL
+		}
+		if ch.Schedule != nil {
+			schedule, err := aiprompt.NormalizeSchedule(*ch.Schedule)
+			if err != nil {
+				return fmt.Errorf("kbstore: contact: %w", err)
+			}
+			cur.Schedule = schedule
 		}
 		refs := applyContactsMedia(&cur, ContactsMedia{
 			ContactCardImage:      ch.ContactCardImage,
@@ -759,6 +775,187 @@ func (s *Store) MCPUpsertDeliveryZone(ctx context.Context, orgID uuid.UUID, user
 }
 
 // ---------------------------------------------------------------------------
+// Specialist (salon vertical, PLAN.md)
+// ---------------------------------------------------------------------------
+
+// SpecialistChanges is kb_specialist_upsert's `changes`. sales_status is a
+// plain enum patch field, exactly like every other typed upsert — archive/
+// restore via MCP is just calling this tool with sales_status set (PLAN.md:
+// "Both accept sales_status, allowing archive and restore operations
+// without destructive deletion"). Schedule is nil-means-unchanged, non-nil
+// (even empty) means replace with aiprompt.NormalizeSchedule's canonical
+// result (ContactsChanges' own doc comment).
+type SpecialistChanges struct {
+	FullName, Title, Experience, BookingURL *string
+	Schedule                                *aiprompt.Schedule
+	SalesStatus                             *string
+	PortfolioImages                         *[]uuid.UUID
+}
+
+// MCPUpsertSpecialist creates or patches a specialist (kb_specialist_upsert).
+func (s *Store) MCPUpsertSpecialist(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch SpecialistChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
+	var result UpsertResult
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeSpecialist}, "both", "")
+		if err != nil {
+			return err
+		}
+		title := ""
+		if ch.FullName != nil {
+			title = *ch.FullName
+		}
+		key, creating, err := resolveUpsertKey(KBTypeSpecialist, ref, title, index)
+		if err != nil {
+			return err
+		}
+		cur, err := s.currentSpecialist(ctx, db, orgID, key, b)
+		if err != nil {
+			return err
+		}
+		cur.Ref = key
+		if ch.FullName != nil {
+			cur.FullName = *ch.FullName
+		}
+		if ch.Title != nil {
+			cur.Title = *ch.Title
+		}
+		if ch.Experience != nil {
+			cur.Experience = *ch.Experience
+		}
+		if ch.BookingURL != nil {
+			cur.BookingURL = *ch.BookingURL
+		}
+		if ch.Schedule != nil {
+			cur.Schedule = *ch.Schedule
+		}
+		if ch.SalesStatus != nil {
+			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
+				return err
+			}
+			cur.SalesStatus = *ch.SalesStatus
+		}
+		if creating && strings.TrimSpace(cur.FullName) == "" {
+			return &ErrRequiredFieldMissing{Field: "full_name"}
+		}
+		cur, err = validateSpecialist(cur)
+		if err != nil {
+			return err
+		}
+		refs := applySpecialistMedia(&cur, SpecialistMedia{PortfolioImages: ch.PortfolioImages})
+		if err := validateMediaRefs(ctx, db, orgID, refs); err != nil {
+			return err
+		}
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeSpecialist, key, provenance); err != nil {
+			return err
+		}
+		b.upsertSpecialist(cur)
+		b.removeDelete(deleteKindFor(KBTypeSpecialist), key) // upserting cancels a pending delete — see MCPUpsertTopic's comment
+		result = UpsertResult{Type: KBTypeSpecialist, Key: key, Created: creating}
+		return nil
+	})
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	result.DraftVersion = newVersion
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Service (salon vertical, PLAN.md)
+// ---------------------------------------------------------------------------
+
+// ServiceChanges is kb_service_upsert's `changes`. Duration is a genuine
+// three-state nullable field (omit = unchanged, explicit null = clear to
+// unspecified, a number = set) — the same **T contract FeaturedImage-style
+// fields use (optMaterialID's own doc comment, internal/mcpserver/args.go),
+// applied here to an int instead of a uuid.UUID.
+type ServiceChanges struct {
+	ParentRef, ServiceType, Category, Name, Price, Description, SalesStatus *string
+	Duration                                                                **int
+	SpecialistRefs                                                          *[]string
+}
+
+// MCPUpsertService creates or patches a service (kb_service_upsert).
+func (s *Store) MCPUpsertService(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, ref string, ch ServiceChanges, expectedVersion *int64, provenance MCPProvenance) (UpsertResult, error) {
+	var result UpsertResult
+	newVersion, err := s.writeDraftBlobVersioned(ctx, orgID, expectedVersion, userID, func(db dbtx, b *DraftBlob) error {
+		index, err := s.identityIndex(ctx, db, orgID, []string{KBTypeService}, "both", "")
+		if err != nil {
+			return err
+		}
+		title := ""
+		if ch.Name != nil {
+			title = *ch.Name
+		}
+		key, creating, err := resolveUpsertKey(KBTypeService, ref, title, index)
+		if err != nil {
+			return err
+		}
+		cur, err := s.currentService(ctx, db, orgID, key, b)
+		if err != nil {
+			return err
+		}
+		cur.Ref = key
+		if ch.ParentRef != nil {
+			cur.ParentRef = *ch.ParentRef
+		}
+		if ch.ServiceType != nil {
+			cur.ServiceType = *ch.ServiceType
+		}
+		if ch.Category != nil {
+			cur.Category = *ch.Category
+		}
+		if ch.Price != nil {
+			cur.Price = *ch.Price
+		}
+		if ch.Description != nil {
+			cur.Description = *ch.Description
+		}
+		if ch.Duration != nil {
+			cur.Duration = *ch.Duration
+		}
+		if ch.SpecialistRefs != nil {
+			cur.SpecialistRefs = *ch.SpecialistRefs
+		}
+		if ch.SalesStatus != nil {
+			if err := validateEnum("sales_status", *ch.SalesStatus, "active", "inactive"); err != nil {
+				return err
+			}
+			cur.SalesStatus = *ch.SalesStatus
+		}
+		if ch.Name != nil {
+			cur.Name = *ch.Name
+		}
+		if creating && strings.TrimSpace(cur.Name) == "" {
+			return &ErrRequiredFieldMissing{Field: "name"}
+		}
+		// Default BEFORE validating, same as UpsertService (draft.go) and
+		// PutLiveService (live.go): a blank service_type must become "base"
+		// (the column's own DEFAULT) before validateService's hierarchy
+		// branch runs, or a plain "create a base service" call with
+		// service_type omitted would wrongly fall into the variant/addon
+		// branch and demand a parent_ref.
+		cur.ServiceType = orDefault(cur.ServiceType, "base")
+		cur, err = s.validateService(ctx, db, orgID, b, cur)
+		if err != nil {
+			return err
+		}
+		if err := s.recordProvenance(ctx, db, orgID, KBTypeService, key, provenance); err != nil {
+			return err
+		}
+		b.upsertService(cur)
+		b.removeDelete(deleteKindFor(KBTypeService), key) // upserting cancels a pending delete — see MCPUpsertTopic's comment
+		result = UpsertResult{Type: KBTypeService, Key: key, Created: creating}
+		return nil
+	})
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	result.DraftVersion = newVersion
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
 // kb_delete
 // ---------------------------------------------------------------------------
 
@@ -803,7 +1000,7 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		if key != NaturalKeyMain {
 			return DeleteResult{}, &ErrCannotDelete{Reason: fmt.Sprintf("key must be %q for %s", NaturalKeyMain, kbType)}
 		}
-	case KBTypeTopic, KBTypeProduct, KBTypeTariff, KBTypeDeliveryZone:
+	case KBTypeTopic, KBTypeProduct, KBTypeTariff, KBTypeDeliveryZone, KBTypeSpecialist, KBTypeService:
 		if strings.TrimSpace(key) == "" {
 			return DeleteResult{}, &ErrCannotDelete{Reason: "key is required"}
 		}
@@ -836,6 +1033,10 @@ func (s *Store) MCPDelete(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 			b.removeTariff(key)
 		case KBTypeDeliveryZone:
 			b.removeZone(key)
+		case KBTypeSpecialist:
+			b.removeSpecialist(key)
+		case KBTypeService:
+			b.removeService(key)
 		case KBTypeContacts:
 			b.removeContact()
 		case KBTypePolicies:

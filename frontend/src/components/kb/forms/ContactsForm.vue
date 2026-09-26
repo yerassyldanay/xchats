@@ -2,11 +2,12 @@
 import { reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useKbModal } from '@/composables/useKbModal'
-import type { ContactRow } from '@/types'
+import type { ContactRow, Schedule } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import KbFormDialog from './KbFormDialog.vue'
 import MediaFieldPicker from './MediaFieldPicker.vue'
+import ScheduleEditor from './ScheduleEditor.vue'
 import type { ContactsPayload } from './payloads'
 
 const modal = useKbModal()
@@ -15,6 +16,8 @@ const { t } = useI18n()
 const buf = reactive({
   whatsapp: '', email: '', address: '', legal_information: '', callback_time: '',
   working_hours: '', phone: '', website: '', instagram: '',
+  booking_url: '',
+  schedule: [] as Schedule,
   contact_card_image: null as string | null,
   location_map_image: null as string | null,
   company_legal_documents: [] as string[],
@@ -36,6 +39,8 @@ watch(
     buf.phone = snap?.phone ?? ''
     buf.website = snap?.website ?? ''
     buf.instagram = snap?.instagram ?? ''
+    buf.booking_url = snap?.booking_url ?? ''
+    buf.schedule = [...(snap?.schedule ?? [])]
     buf.contact_card_image = snap?.contact_card_image ?? null
     buf.location_map_image = snap?.location_map_image ?? null
     buf.company_legal_documents = [...(snap?.company_legal_documents ?? [])]
@@ -90,6 +95,10 @@ function retry() {
         <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.workingHours') }}</span>
         <Input v-model="buf.working_hours" class="h-9 mt-1" />
       </div>
+      <div>
+        <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.bookingUrl') }}</span>
+        <Input v-model="buf.booking_url" class="h-9 mt-1 font-mono" data-testid="contacts-booking-url" />
+      </div>
     </div>
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.address') }}</span>
@@ -102,6 +111,12 @@ function retry() {
     <div>
       <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.callbackTime') }}</span>
       <Input v-model="buf.callback_time" class="h-9 mt-1" />
+    </div>
+    <div>
+      <span class="text-xs font-medium text-muted-foreground">{{ t('kb.fields.schedule') }}</span>
+      <div class="mt-1.5">
+        <ScheduleEditor v-model="buf.schedule" />
+      </div>
     </div>
     <MediaFieldPicker
       :label="t('kb.media.businessCard')" field="contact_card_image" :multiple="false"

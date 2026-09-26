@@ -148,3 +148,22 @@ func applyPoliciesMedia(cur *DraftPolicy, m PoliciesMedia) map[string][]uuid.UUI
 	}
 	return refs
 }
+
+// SpecialistMedia carries specialist media edits shared by SpecialistChanges
+// (MCP) and SpecialistInput.Media (draft/live lanes) — ProductMedia's per-
+// field shape (media_apply.go's doc comment), but simpler: a specialist has
+// exactly one media column (aiprompt.Specialist.PortfolioImages, the
+// specialists.<ref>.portfolio token — aiprompt/catalog.go's
+// specialistMedia).
+type SpecialistMedia struct {
+	PortfolioImages *[]uuid.UUID
+}
+
+func applySpecialistMedia(cur *DraftSpecialist, m SpecialistMedia) map[string][]uuid.UUID {
+	refs := map[string][]uuid.UUID{}
+	if m.PortfolioImages != nil {
+		cur.PortfolioImages = nonNilUUIDs(*m.PortfolioImages)
+		refs = mergeRefs(refs, map[string][]uuid.UUID{"portfolio_images": cur.PortfolioImages})
+	}
+	return refs
+}

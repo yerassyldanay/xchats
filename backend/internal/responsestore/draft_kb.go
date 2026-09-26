@@ -1,8 +1,6 @@
 package responsestore
 
 import (
-	"github.com/google/uuid"
-
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 )
@@ -16,13 +14,24 @@ import (
 // second prompt-building code path: BuildCatalog/RenderPrompt never know the
 // difference between this and a live-loaded KB.
 //
-// Materials carry no StorageBackend/StorageKey here — kbstore.Material
-// deliberately never exposes that internal blob-store locator to callers
-// outside kbstore (see materials.go's own doc comment on Material.HasContent)
-// — so every media reference is treated as unresolvable by BuildCatalog's own
-// fail-closed StorageBackend/StorageKey check and left out of the catalog. A
-// draft-simulated reply can therefore undersell media the real, published KB
-// would actually offer; text-only facts are unaffected either way.
+// No media reference (FeaturedImage, GalleryImages, PortfolioImages, ...) is
+// EVER carried into the result, for any entity, on purpose: kbstore.Material
+// deliberately never exposes its internal StorageBackend/StorageKey blob-store
+// locator to callers outside kbstore (see materials.go's own doc comment on
+// Material.HasContent), so kb.Materials below is populated with every field
+// EXCEPT those two — meaning aiprompt.BuildCatalog's fail-closed
+// validateMaterialRef check (catalog.go: "a broken reference is never
+// silently treated as empty") would hard-fail catalog construction for the
+// ENTIRE org on the very first media reference it hit, not just skip that one
+// photo, the moment any entity anywhere in the merged draft view had one
+// attached. This was undetected for as long as Specialists/Services (the
+// salon vertical's addition) were themselves missing from this projection
+// (nothing to attach a photo to that would ever be reached) — restoring them
+// surfaced it immediately (a specialist with a portfolio photo). Stripping
+// every media field here, uniformly, is what actually delivers this
+// function's own long-standing intent: a draft-simulated reply can undersell
+// media the real, published KB would offer, but never crash the whole
+// simulation over it — text-only facts are genuinely unaffected either way.
 func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 	kb := &aiprompt.KB{
 		OrganizationID: orgID,
@@ -37,10 +46,6 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 	for _, t := range dv.Topics {
 		kb.Topics = append(kb.Topics, aiprompt.Topic{
 			Slug: t.Slug, Title: t.Title, BodyMD: t.BodyMD,
-			FeaturedImage:      uuidPtrString(t.FeaturedImage),
-			IllustrationImages: mediaArray(t.IllustrationImages),
-			ExplainerVideos:    mediaArray(t.ExplainerVideos),
-			ReferenceDocuments: mediaArray(t.ReferenceDocuments),
 		})
 	}
 	for _, p := range dv.Products {
@@ -51,11 +56,6 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			AvailabilityStatus: p.AvailabilityStatus, AvailabilityNote: p.AvailabilityNote,
 			InstallationTerms: p.InstallationTerms, WarrantyTerms: p.WarrantyTerms,
 			AdditionalFacts: p.AdditionalFacts, SalesStatus: p.SalesStatus,
-			FeaturedImage:        uuidPtrString(p.FeaturedImage),
-			GalleryImages:        mediaArray(p.GalleryImages),
-			DemoVideos:           mediaArray(p.DemoVideos),
-			CertificateDocuments: mediaArray(p.CertificateDocuments),
-			GuaranteeDocuments:   mediaArray(p.GuaranteeDocuments),
 		})
 	}
 	for _, t := range dv.Tariffs {
@@ -64,10 +64,6 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			Summary: t.Summary, PricingType: t.PricingType, Advantages: t.Advantages,
 			Disadvantages: t.Disadvantages, BestFor: t.BestFor, NotFor: t.NotFor,
 			AdditionalFacts: t.AdditionalFacts, SalesStatus: t.SalesStatus,
-			FeaturedImage:   uuidPtrString(t.FeaturedImage),
-			PricingImages:   mediaArray(t.PricingImages),
-			ExplainerVideos: mediaArray(t.ExplainerVideos),
-			TermsDocuments:  mediaArray(t.TermsDocuments),
 		})
 	}
 	if len(dv.TariffInfo) > 0 {
@@ -89,9 +85,8 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			WhatsApp: c.WhatsApp, Email: c.Email, Address: c.Address,
 			LegalInformation: c.LegalInformation, CallbackTime: c.CallbackTime,
 			WorkingHours: c.WorkingHours, Phone: c.Phone, Website: c.Website, Instagram: c.Instagram,
-			ContactCardImage:      uuidPtrString(c.ContactCardImage),
-			LocationMapImage:      uuidPtrString(c.LocationMapImage),
-			CompanyLegalDocuments: mediaArray(c.CompanyLegalDocuments),
+			BookingURL: c.BookingURL,
+			Schedule:   c.Schedule,
 		}
 	}
 	if len(dv.Policies) > 0 {
@@ -100,9 +95,28 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			DeliveryCost: p.DeliveryCost, DeliveryInDays: p.DeliveryInDays,
 			FreeDeliveryFrom: p.FreeDeliveryFrom, MinOrder: p.MinOrder, Prepayment: p.Prepayment,
 			Installment: p.Installment, ReturnPeriodInDays: p.ReturnPeriodInDays, Warranty: p.Warranty,
-			OutsideZonesNote:        p.OutsideZonesNote,
-			CommercePolicyDocuments: mediaArray(p.CommercePolicyDocuments),
+			OutsideZonesNote: p.OutsideZonesNote,
 		}
+	}
+	// Specialists/Services (the salon vertical's addition, PLAN.md) were
+	// missing from this projection entirely: isSalonOrganization(kb) — the
+	// gate every salon-only prompt/contract rule keys off (schedule.go) —
+	// reads kb.Specialists/kb.Services directly, so a draft-simulated
+	// message for an org that HAS staged salon content still silently fell
+	// back to the plain shop-kb frame with zero specialists/services facts
+	// available, same as an org with no salon data at all.
+	for _, sp := range dv.Specialists {
+		kb.Specialists = append(kb.Specialists, aiprompt.Specialist{
+			Ref: sp.Ref, FullName: sp.FullName, Title: sp.Title, Experience: sp.Experience,
+			Schedule: sp.Schedule, BookingURL: sp.BookingURL, SalesStatus: sp.SalesStatus,
+		})
+	}
+	for _, sv := range dv.Services {
+		kb.Services = append(kb.Services, aiprompt.Service{
+			Ref: sv.Ref, ParentRef: sv.ParentRef, ServiceType: sv.ServiceType, Category: sv.Category,
+			Name: sv.Name, Price: sv.Price, Duration: sv.Duration, Description: sv.Description,
+			SpecialistRefs: sv.SpecialistRefs, SalesStatus: sv.SalesStatus,
+		})
 	}
 	for _, m := range dv.Materials {
 		kb.Materials = append(kb.Materials, aiprompt.Material{
@@ -112,11 +126,4 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 		})
 	}
 	return kb
-}
-
-func uuidPtrString(id *uuid.UUID) string {
-	if id == nil {
-		return ""
-	}
-	return id.String()
 }

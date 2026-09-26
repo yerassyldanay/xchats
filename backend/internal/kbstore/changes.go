@@ -13,6 +13,9 @@ var changeKinds = map[string]string{
 	"topics": "topic", "tariffs": "tariff", "products": "product",
 	"contacts": "contact", "policies": "policy", "tariff_info": "tariff_info",
 	"delivery_zones": "delivery_zone",
+	// specialists/services (PLAN.md's salon vertical) follow products' own
+	// plural-HTTP-kind/singular-blob-kind shape exactly — see salon.go.
+	"specialists": "specialist", "services": "service",
 }
 
 // singularToPlural is changeKinds inverted — built once at init so

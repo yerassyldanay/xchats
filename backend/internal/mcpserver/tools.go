@@ -127,6 +127,14 @@ func str(desc string) map[string]any { return map[string]any{"type": "string", "
 func clearableStr(desc string) map[string]any {
 	return map[string]any{"type": []string{"string", "null"}, "description": desc + " (or null to clear)"}
 }
+
+// clearableInt is clearableStr's twin for a nullable integer `changes` field
+// (a service's duration — genuinely nullable, not an "unchanged" sentinel:
+// omit leaves it unchanged, an explicit JSON null clears it to unspecified,
+// a number sets it).
+func clearableInt(desc string) map[string]any {
+	return map[string]any{"type": []string{"integer", "null"}, "description": desc + " (or null to clear)"}
+}
 func boolean(desc string) map[string]any {
 	return map[string]any{"type": "boolean", "description": desc}
 }
@@ -171,6 +179,41 @@ func additionalFactsArray(desc string) map[string]any {
 			"value":       map[string]any{"type": []string{"number", "boolean", "string"}, "description": "The exact hidden value the model never sees — a JSON number, boolean, or string. Never null, an array, or an object."},
 			"instruction": str("Prompt-visible Russian explanation of the fact and how to phrase it safely (e.g. neutral wording for a number, with no unit word directly appended). Must not restate the exact value and must not contain a {{...}} token."),
 		}, "ref", "value", "instruction"),
+	}
+}
+
+// scheduleArray is the schema for a specialist's `schedule` changes field
+// (kb_specialist_upsert) — a whole-value replace, the same nil-means-
+// unchanged/present-means-replace semantics additionalFactsArray uses for a
+// fact list. Each entry is aiprompt.ScheduleDay's own wire shape (PLAN.md's
+// shared Schedule contract): ref is the authoritative weekday key breaks/
+// reasoning code use, day is display/import metadata only. The server
+// re-validates and canonically re-orders every schedule via
+// aiprompt.NormalizeSchedule before it is ever stored (duplicate weekdays,
+// malformed HH:MM, overnight shifts, and out-of-shift/overlapping breaks
+// are all rejected) — this schema documents the shape, not the full
+// semantic contract.
+func scheduleArray(desc string) map[string]any {
+	return map[string]any{
+		"type": "array",
+		"description": desc + " Whole-value replace: omit this field to leave the existing schedule unchanged; " +
+			"provide it (an empty array included) to replace the complete week. At most 7 entries, one per worked " +
+			"weekday — a missing weekday is an off-day. Rejected if a weekday repeats, a time is not a valid 24-hour " +
+			"HH:MM, the shift is overnight (start >= end), or a break lies outside the shift or overlaps another break.",
+		"items": obj(map[string]any{
+			"ref":   enumStr("Weekday this shift applies to — the authoritative key for schedule reasoning (day is display metadata only).", "mon", "tue", "wed", "thu", "fri", "sat", "sun"),
+			"day":   str("Display label for this weekday, e.g. \"Вторник\" — import/authoring metadata only, never used for reasoning."),
+			"start": str("Shift start, 24-hour HH:MM."),
+			"end":   str("Shift end, 24-hour HH:MM. Must be after start — overnight shifts are not supported."),
+			"breaks": map[string]any{
+				"type":        "array",
+				"description": "Any number of breaks inside the shift. Must lie inside [start, end) and must not overlap each other.",
+				"items": obj(map[string]any{
+					"start": str("Break start, 24-hour HH:MM."),
+					"end":   str("Break end, 24-hour HH:MM."),
+				}, "start", "end"),
+			},
+		}, "ref", "day", "start", "end"),
 	}
 }
 
@@ -300,8 +343,9 @@ func merge(a, b map[string]any) map[string]any {
 	return out
 }
 
-// Tools is the closed, ordered 14-tool contract (plan/mcp.md §5 plus
-// kb_media_attach and kb_tariff_info_upsert).
+// Tools is the closed, ordered 16-tool contract (plan/mcp.md §5 plus
+// kb_media_attach, kb_tariff_info_upsert, and the salon vertical's
+// kb_specialist_upsert/kb_service_upsert — PLAN.md).
 func Tools() []Tool {
 	tools := []Tool{
 		assistantUpsertTool(),
@@ -312,6 +356,8 @@ func Tools() []Tool {
 		policiesUpsertTool(),
 		tariffInfoUpsertTool(),
 		deliveryZoneUpsertTool(),
+		specialistUpsertTool(),
+		serviceUpsertTool(),
 		kbReadTool(),
 		kbDeleteTool(),
 		kbSummaryTool(),
@@ -471,6 +517,8 @@ func contactsUpsertTool() Tool {
 				"phone":                   clearableStr("Exact approved support phone."),
 				"website":                 clearableStr("Exact approved website."),
 				"instagram":               clearableStr("Exact approved Instagram account."),
+				"booking_url":             clearableStr("The organization's own booking link — the fallback every specialist without a personal booking_url resolves to."),
+				"schedule":                scheduleArray("The organization's own weekly working schedule — the salon's general hours, independent of any specialist's own schedule."),
 				"contact_card_image":      materialID("Single contact-card image."),
 				"location_map_image":      materialID("Single location/map image."),
 				"company_legal_documents": materialIDs("Customer-sendable company/legal documents."),
@@ -529,12 +577,62 @@ func deliveryZoneUpsertTool() Tool {
 	}
 }
 
+// specialistUpsertTool creates or patches a salon specialist (PLAN.md's
+// beauty-salon vertical) — productUpsertTool's own shape.
+func specialistUpsertTool() Tool {
+	return Tool{
+		Name:        "kb_specialist_upsert",
+		Description: "Create or patch a salon specialist (a staff member with a weekly schedule and an optional own booking link). Key is `ref`. Provide ref to update an existing specialist or create with that exact ref; omit ref to derive one from full_name (after duplicate checks). `full_name` is required when creating. Archiving/restoring is just this tool with sales_status set — there is no separate archive tool; archiving a specialist preserves any service's specialist_refs pointing at them, it only removes them from prompt-visible associations.",
+		InputSchema: obj(merge(map[string]any{
+			"ref": str("Existing specialist's ref to update, or a new ref to create with. Omit to derive a ref from changes.full_name."),
+			"changes": changesObject(map[string]any{
+				"full_name":        clearableStr("Russian full name. Required when creating."),
+				"title":            clearableStr("Russian professional title, e.g. \"Топ-стилист / Колорист\"."),
+				"experience":       clearableStr("Russian experience description, e.g. \"7 лет\"."),
+				"schedule":         scheduleArray("This specialist's weekly working schedule."),
+				"booking_url":      clearableStr("This specialist's own booking link. Blank falls back to the organization's contact.main.booking."),
+				"sales_status":     enumStr("active or inactive.", "active", "inactive"),
+				"portfolio_images": materialIDs("Portfolio photos of this specialist's work."),
+			}),
+		}, upsertCommon()), "changes"),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
+	}
+}
+
+// serviceUpsertTool creates or patches a salon service — productUpsertTool's
+// own shape. Services carry no media columns.
+func serviceUpsertTool() Tool {
+	return Tool{
+		Name:        "kb_service_upsert",
+		Description: "Create or patch a salon service. Key is `ref`. Provide ref to update an existing service or create with that exact ref; omit ref to derive one from name (after duplicate checks). `name` is required when creating; `service_type` defaults to `base` when omitted (the same default the column itself has). A `base` service must not have a parent_ref; a `variant`/`addon` service's parent_ref must name an existing `base` service in this organization — only one hierarchy level is supported (a variant/addon can never itself be a parent). Every specialist_refs entry must name an existing specialist in this organization. Archiving/restoring is just this tool with sales_status set — there is no separate archive tool; note that the cascading archive of a base service's active children (PLAN.md) happens only on the LIVE status endpoint, not on this draft-staging tool.",
+		InputSchema: obj(merge(map[string]any{
+			"ref": str("Existing service's ref to update, or a new ref to create with. Omit to derive a ref from changes.name."),
+			"changes": changesObject(map[string]any{
+				"parent_ref":      clearableStr("The base service's ref this variant/addon nests under. Required for service_type variant/addon; must stay blank for base."),
+				"service_type":    enumStr("Defaults to base when omitted on create.", "base", "variant", "addon"),
+				"category":        clearableStr("Russian service category, e.g. \"Ногти\"."),
+				"name":            clearableStr("Russian service name. Required when creating."),
+				"price":           clearableStr("Exact approved price, including currency formatting."),
+				"duration":        clearableInt("Duration in minutes — a positive integer, or null/omitted for unspecified."),
+				"description":     clearableStr("Trusted Russian service description."),
+				"specialist_refs": strArray("Whole-list replace: refs of specialists (this organization's own kb_specialist_upsert records) who perform this service. Every ref must already exist (live or draft) in this organization."),
+				"sales_status":    enumStr("active or inactive.", "active", "inactive"),
+			}),
+		}, upsertCommon()), "changes"),
+		Meta:         widgetMeta(),
+		Annotations:  notIdempotentAnnotations(),
+		OutputSchema: upsertOutputSchema(),
+	}
+}
+
 func kbReadTool() Tool {
 	return Tool{
 		Name:        "kb_read",
 		Description: "Read complete KB records. Use after kb_summary identifies a possible match, to confirm the exact record before upserting. source=both shows the live and draft records SEPARATELY (never a merged view) when both exist.",
 		InputSchema: obj(map[string]any{
-			"types":  strArray("KB types to read: assistant, topic, product, tariff, contacts, policies, delivery_zone. Omit for all types."),
+			"types":  strArray("KB types to read: assistant, topic, product, tariff, contacts, policies, delivery_zone, specialist, service. Omit for all types."),
 			"source": enumStr("Defaults to both.", "live", "draft", "both"),
 			"key":    str("Exact ref, slug, or \"main\" to read one record."),
 			"query":  str("Case-insensitive substring match against title/name."),
@@ -552,7 +650,7 @@ func kbDeleteTool() Tool {
 		Name:        "kb_delete",
 		Description: "Add a delete marker to the draft for one record, by natural key. The record is removed from the live KB only after human review and publish. The assistant singleton cannot be deleted.",
 		InputSchema: obj(map[string]any{
-			"type":                   enumStr("KB type.", "topic", "product", "tariff", "contacts", "policies", "delivery_zone"),
+			"type":                   enumStr("KB type.", "topic", "product", "tariff", "contacts", "policies", "delivery_zone", "specialist", "service"),
 			"key":                    str("ref, slug, or \"main\"."),
 			"expected_draft_version": integer("Optimistic-concurrency token from a prior kb_summary/kb_read/upsert result."),
 		}, "type", "key"),
@@ -599,7 +697,7 @@ func kbMediaUploadTool() Tool {
 			"size_bytes":      integer("Declared size in bytes."),
 			"sha256_checksum": str("Declared SHA-256 checksum, if known."),
 			"target": obj(map[string]any{
-				"type":  enumStr("KB type the media will be attached to.", "topic", "product", "tariff", "contacts", "policies"),
+				"type":  enumStr("KB type the media will be attached to.", "topic", "product", "tariff", "contacts", "policies", "specialist"),
 				"key":   str("The record's ref/slug/\"main\", if known."),
 				"field": str("The semantic media field this upload is intended for, e.g. gallery_images, illustration_images — must be one of kb_info.media_attachment_fields' entries for type."),
 			}, "type", "field"),
@@ -615,7 +713,7 @@ func kbMediaAttachTool() Tool {
 		Description: "App-only, widget-invoked tool: attaches an already-uploaded material (kb_media_upload's material_id, with a completed PUT) to one media field of an EXISTING draft or live record. Never creates a record — an unknown key is rejected, not created. A plural field appends (no duplicates); a singular field replaces. Writes only the draft. The model never calls this tool itself.",
 		InputSchema: obj(map[string]any{
 			"material_id":            str("A kb_media_upload material_id whose PUT has completed."),
-			"type":                   enumStr("KB type owning the field.", "topic", "product", "tariff", "contacts", "policies"),
+			"type":                   enumStr("KB type owning the field.", "topic", "product", "tariff", "contacts", "policies", "specialist"),
 			"key":                    str("The record's ref/slug/\"main\". The record must already exist (live or draft) and must not be staged for deletion."),
 			"field":                  str("The media field to attach to — must be one of kb_info.media_attachment_fields' entries for type. Never featured_image, which is not an attachment target."),
 			"expected_draft_version": integer("Optional optimistic-concurrency token from a prior kb_summary/kb_read/upsert result."),

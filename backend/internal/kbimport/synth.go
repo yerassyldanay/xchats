@@ -259,15 +259,53 @@ func parseModelOutput(raw string) (modelOutput, bool) {
 	return out, true
 }
 
-// applyRank sorts contacts/policies last — plan spec's "apply singletons
-// last for stable ordering."
-func applyRank(tool string) int {
-	switch tool {
+// applyRank sorts specialists first, then base services, then everything
+// else in the model's own order, then contacts/policies/tariff_info last —
+// plan spec's "apply singletons last for stable ordering," extended for the
+// salon vertical's own within-batch dependency chain: a service upsert's
+// specialist_refs and a variant/addon's parent_ref must both already exist
+// (live or draft) or MCPUpsertService rejects the call (salon_validate.go),
+// so specialists → base services → variant/addon services is the only order
+// that lets one import batch create the whole chain in a single pass. A
+// model that already emits calls in the right order pays nothing (the sort
+// is stable); one that doesn't interleave them is silently corrected here
+// instead of validly-constructed calls getting dropped on ordering alone.
+func applyRank(c modelCall) int {
+	switch c.Tool {
 	case "kb_contacts_upsert", "kb_policies_upsert", "kb_tariff_info_upsert":
+		return 2
+	case "kb_specialist_upsert":
+		return -1
+	case "kb_service_upsert":
+		if serviceCallIsBase(c) {
+			return 0
+		}
 		return 1
 	default:
 		return 0
 	}
+}
+
+// serviceCallIsBase peeks a not-yet-validated kb_service_upsert call's
+// changes.service_type just far enough to rank it — ParseUpsertCall (via
+// parseServiceChanges) does the real validation once applyCalls gets to it.
+// Anything unparseable or omitted sorts as a base, mirroring ServiceInput's
+// own "" -> "base" default (kbstore/salon_validate.go): the same assumption
+// Apply itself makes, so a call that sorts as a base but turns out not to be
+// one still only ever fails its OWN validation, never silently reorders
+// something else.
+func serviceCallIsBase(c modelCall) bool {
+	changesRaw, ok := c.Args["changes"]
+	if !ok {
+		return true
+	}
+	var changes struct {
+		ServiceType string `json:"service_type"`
+	}
+	if err := json.Unmarshal(changesRaw, &changes); err != nil {
+		return true
+	}
+	return changes.ServiceType == "" || changes.ServiceType == "base"
 }
 
 // applyCalls validates and applies every model call, fail-closed:
@@ -278,7 +316,7 @@ func (s *Service) applyCalls(ctx context.Context, orgID, userID uuid.UUID, targe
 	if len(calls) > s.cfg.MaxCallsPerRun {
 		calls = calls[:s.cfg.MaxCallsPerRun]
 	}
-	sort.SliceStable(calls, func(i, j int) bool { return applyRank(calls[i].Tool) < applyRank(calls[j].Tool) })
+	sort.SliceStable(calls, func(i, j int) bool { return applyRank(calls[i]) < applyRank(calls[j]) })
 
 	prov := kbstore.MCPProvenance{MaterialIDs: evidenceIDs}
 

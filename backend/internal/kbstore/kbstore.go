@@ -392,21 +392,278 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_contacts
 		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		 company_legal_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 company_legal_documents, booking_url, schedule)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
 			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
 			working_hours=EXCLUDED.working_hours, phone=EXCLUDED.phone,
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
 			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
-			company_legal_documents=EXCLUDED.company_legal_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			company_legal_documents=EXCLUDED.company_legal_documents,
+			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
 		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
-		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments))); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments)), c.BookingURL, aiprompt.ScheduleColumn(c.Schedule)); err != nil {
 		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
+}
+
+// upsertSpecialistRow writes one ai_specialists row — upsertProductRow's own
+// shape (salon vertical, PLAN.md).
+func upsertSpecialistRow(ctx context.Context, tx execer, orgID uuid.UUID, sp DraftSpecialist) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_specialists
+		(organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
+			full_name=EXCLUDED.full_name, title=EXCLUDED.title, experience=EXCLUDED.experience,
+			schedule=EXCLUDED.schedule, booking_url=EXCLUDED.booking_url,
+			portfolio_images=EXCLUDED.portfolio_images, sales_status=EXCLUDED.sales_status,
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, sp.Ref, sp.FullName, sp.Title, sp.Experience, aiprompt.ScheduleColumn(sp.Schedule), sp.BookingURL,
+		dbx.UUIDArray(nonNilUUIDs(sp.PortfolioImages)), orDefault(sp.SalesStatus, "active")); err != nil {
+		return fmt.Errorf("insert specialist %s: %w", sp.Ref, err)
+	}
+	return nil
+}
+
+// upsertServiceRow writes one ai_services row — upsertProductRow's own
+// shape (salon vertical, PLAN.md). Duration binds directly as *int: nil
+// persists SQL NULL, a non-nil pointer persists that integer (both
+// directions confirmed against modernc.org/sqlite's database/sql support
+// for a **T scan/bind target).
+func upsertServiceRow(ctx context.Context, tx execer, orgID uuid.UUID, sv DraftService) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_services
+		(organization_id, ref, parent_ref, service_type, category, name, price, duration, description,
+		 specialist_refs, sales_status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (organization_id, ref) DO UPDATE SET
+			parent_ref=EXCLUDED.parent_ref, service_type=EXCLUDED.service_type, category=EXCLUDED.category,
+			name=EXCLUDED.name, price=EXCLUDED.price, duration=EXCLUDED.duration, description=EXCLUDED.description,
+			specialist_refs=EXCLUDED.specialist_refs, sales_status=EXCLUDED.sales_status,
+			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+		orgID, sv.Ref, sv.ParentRef, orDefault(sv.ServiceType, "base"), sv.Category, sv.Name, sv.Price, sv.Duration,
+		sv.Description, dbx.StringArray(nonNilStrings(sv.SpecialistRefs)), orDefault(sv.SalesStatus, "active")); err != nil {
+		return fmt.Errorf("insert service %s: %w", sv.Ref, err)
+	}
+	return nil
+}
+
+// loadSpecialistRows reads every specialist for the org, live-only (no
+// draft concept) — loadZoneRows' own shape (zones.go), used both by
+// mergedView (draft.go, the overlay base) and — via mergedView(blob=empty)
+// — by LiveView.
+func loadSpecialistRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]SpecialistRow, error) {
+	rows, err := db.Query(ctx, `SELECT ref, full_name, title, experience, schedule, booking_url, portfolio_images,
+		sales_status, updated_at
+		FROM ai_specialists WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SpecialistRow
+	for rows.Next() {
+		var sp SpecialistRow
+		if err := rows.Scan(&sp.Ref, &sp.FullName, &sp.Title, &sp.Experience, (*aiprompt.ScheduleColumn)(&sp.Schedule),
+			&sp.BookingURL, (*dbx.UUIDArray)(&sp.PortfolioImages), &sp.SalesStatus, &sp.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sp.ID = sp.Ref
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// loadServiceRows is loadSpecialistRows' twin for ai_services.
+func loadServiceRows(ctx context.Context, db dbtx, orgID uuid.UUID) ([]ServiceRow, error) {
+	rows, err := db.Query(ctx, `SELECT ref, parent_ref, service_type, category, name, price, duration, description,
+		specialist_refs, sales_status, updated_at
+		FROM ai_services WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServiceRow
+	for rows.Next() {
+		var sv ServiceRow
+		if err := rows.Scan(&sv.Ref, &sv.ParentRef, &sv.ServiceType, &sv.Category, &sv.Name, &sv.Price, &sv.Duration,
+			&sv.Description, (*dbx.StringArray)(&sv.SpecialistRefs), &sv.SalesStatus, &sv.UpdatedAt); err != nil {
+			return nil, err
+		}
+		sv.ID = sv.Ref
+		out = append(out, sv)
+	}
+	return out, rows.Err()
+}
+
+// resultingServicesForGate is resultingZonesForGate's (zones.go) twin for
+// ai_services: live, overridden/extended by this approve batch's pending
+// service upserts, minus anything staged for deletion — the same
+// live-∪-approved-minus-deletes shape serviceGateReasons is checked against.
+func resultingServicesForGate(live []ServiceRow, upserts []DraftService, deletes []DraftDelete) []ServiceRow {
+	del := map[string]bool{}
+	for _, d := range deletes {
+		if d.Kind == deleteKindFor(KBTypeService) {
+			del[d.Key] = true
+		}
+	}
+	idx := map[string]int{}
+	var out []ServiceRow
+	for _, sv := range live {
+		if del[sv.Ref] {
+			continue
+		}
+		out = append(out, sv)
+		idx[sv.Ref] = len(out) - 1
+	}
+	for _, u := range upserts {
+		row := ServiceRow{
+			Ref: u.Ref, ParentRef: u.ParentRef, ServiceType: orDefault(u.ServiceType, "base"),
+			Category: u.Category, Name: u.Name, Price: u.Price, Duration: u.Duration,
+			Description: u.Description, SpecialistRefs: u.SpecialistRefs, SalesStatus: orDefault(u.SalesStatus, "active"),
+		}
+		if i, ok := idx[u.Ref]; ok {
+			out[i] = row
+		} else {
+			out = append(out, row)
+			idx[u.Ref] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// serviceGateReasons is the pure, table-tested invariant over one org's
+// resulting (post-approve) service tree — mirrors aiprompt.buildServiceFacts'
+// own fail-closed rules (backend/aiprompt/catalog.go: every non-base
+// service's parent_ref must resolve to SOME row, and "archiving a base must
+// archive its active children"), enforced here at approve time instead of
+// only being discovered later as a hard error breaking every customer reply
+// for the org. The live-write path (PutLiveService, live.go) already
+// cascades a base's archival to its children automatically; the draft-approve
+// path deliberately does not (a staged entry is still under human review —
+// see ApproveVersioned's own comment), so this gate is what turns "publish
+// an archived base without also archiving its active children" into a clear,
+// rejected-up-front error instead of a silently corrupted live KB.
+//
+// The parent-EXISTENCE check below runs for every non-base service
+// regardless of its own sales_status — deliberately broader than the
+// active-parent-must-be-active check, which only applies to an active
+// child. buildServiceFacts resolves parent_ref unconditionally (it has no
+// sales_status exemption at all), so an INACTIVE child left pointing at a
+// deleted/nonexistent parent — e.g. approving a "delete this base service"
+// draft entry while an archived variant/addon still names it — is just as
+// fatal to every subsequent customer reply as an active one would be.
+func serviceGateReasons(services []ServiceRow) []GateReason {
+	var reasons []GateReason
+	byRef := make(map[string]ServiceRow, len(services))
+	for _, sv := range services {
+		byRef[sv.Ref] = sv
+	}
+	for _, sv := range services {
+		if sv.ServiceType == "base" || sv.ParentRef == "" {
+			continue
+		}
+		parent, ok := byRef[sv.ParentRef]
+		if !ok {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q references base service %q, which no longer exists — delete %q too, or keep %q",
+				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
+			continue
+		}
+		// Also unconditional of sv's own sales_status, same reasoning as the
+		// existence check above: validateService (salon_validate.go,
+		// hasServiceChildren) already blocks staging THIS exact change at
+		// write time, but this second, independent check is the same
+		// belt-and-suspenders relationship every other rule in this
+		// function has with its write-time counterpart — never trust a
+		// single point of enforcement to have been perfect.
+		if parent.ServiceType != "base" {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q's base service %q is no longer a base service — only one hierarchy level is supported",
+				sv.Ref, sv.ParentRef)})
+			continue
+		}
+		if sv.SalesStatus == "active" && parent.SalesStatus != "active" {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q is active but its base service %q is not — archive %q too, or restore %q, before publishing",
+				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
+		}
+	}
+	return reasons
+}
+
+// resultingSpecialistsForGate is resultingServicesForGate's twin for
+// ai_specialists: live, overridden/extended by this approve batch's pending
+// specialist upserts, minus anything staged for deletion.
+func resultingSpecialistsForGate(live []SpecialistRow, upserts []DraftSpecialist, deletes []DraftDelete) []SpecialistRow {
+	del := map[string]bool{}
+	for _, d := range deletes {
+		if d.Kind == deleteKindFor(KBTypeSpecialist) {
+			del[d.Key] = true
+		}
+	}
+	idx := map[string]int{}
+	var out []SpecialistRow
+	for _, sp := range live {
+		if del[sp.Ref] {
+			continue
+		}
+		out = append(out, sp)
+		idx[sp.Ref] = len(out) - 1
+	}
+	for _, u := range upserts {
+		row := SpecialistRow{
+			Ref: u.Ref, FullName: u.FullName, Title: u.Title, Experience: u.Experience,
+			Schedule: u.Schedule, BookingURL: u.BookingURL, PortfolioImages: u.PortfolioImages,
+			SalesStatus: orDefault(u.SalesStatus, "active"),
+		}
+		if i, ok := idx[u.Ref]; ok {
+			out[i] = row
+		} else {
+			out = append(out, row)
+			idx[u.Ref] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// serviceSpecialistGateReasons rejects approving a service whose
+// specialist_refs would not resolve to any LIVE-after-this-approve
+// specialist row. MCPUpsertService/UpsertService (salon_validate.go's
+// validateService, via currentSpecialistIfAny) only ever check a
+// specialist_ref against the draft blob OR the live table AT STAGING time —
+// so a service can be staged referencing a specialist that exists only as a
+// pending, unapproved draft entry. An entity-scoped approve of just that one
+// service (ApproveVersioned, sel.Kind == "services") can then publish it
+// while the specialist itself is still pending, silently losing the
+// attribution the moment it goes live: unlike a service's own parent_ref
+// (buildServiceFacts hard-errors on an unknown one), aiprompt.
+// activeSpecialistRefs just drops any ref it cannot resolve.
+//
+// approving is the set of services THIS call is about to write to
+// ai_services (set.services) — not every resulting live service, which was
+// already validated against SOME specialist state when it was first staged
+// and is unaffected by specialists this batch never touches. resulting is
+// resultingSpecialistsForGate's output, so a specialist approved in the SAME
+// batch as the service that references it (e.g. "approve all") correctly
+// counts as present.
+func serviceSpecialistGateReasons(approving []DraftService, resulting []SpecialistRow) []GateReason {
+	known := make(map[string]bool, len(resulting))
+	for _, sp := range resulting {
+		known[sp.Ref] = true
+	}
+	var reasons []GateReason
+	for _, sv := range approving {
+		for _, ref := range sv.SpecialistRefs {
+			if !known[ref] {
+				reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+					"service %q references specialist %q, which is not live yet — approve %q too (or together with %q)",
+					sv.Ref, ref, ref, sv.Ref)})
+			}
+		}
+	}
+	return reasons
 }
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
@@ -437,6 +694,15 @@ func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPol
 func nonNilUUIDs(v []uuid.UUID) []uuid.UUID {
 	if v == nil {
 		return []uuid.UUID{}
+	}
+	return v
+}
+
+// nonNilStrings is nonNilUUIDs' twin for a text[] NOT NULL DEFAULT '{}'
+// column (ai_services.specialist_refs, dbx.StringArray).
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
 	}
 	return v
 }

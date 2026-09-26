@@ -2,10 +2,13 @@ import { defineStore } from 'pinia'
 import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
-import type { CancelChangeResponse, DraftChangeSet, DraftView, KbGapFilter, KbGapReport, KbGateReason, KbMaterial, PromptView } from '../types'
+import type {
+  CancelChangeResponse, DraftChangeSet, DraftView, KbGapFilter, KbGapReport, KbGateReason, KbMaterial, PromptView, ServiceRow, SpecialistRow,
+} from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
-  ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, TariffInfoPayload, TariffPayload, TopicPayload,
+  ContactsPayload, DeliveryZonePayload, KbFormPayload, PoliciesPayload, ProductPayload, ServicePayload, SpecialistPayload, TariffInfoPayload,
+  TariffPayload, TopicPayload,
 } from '@/components/kb/forms/payloads'
 
 // usePlayground backs the two KB pages — Черновик (/draft) and Знаний
@@ -78,7 +81,8 @@ export const usePlayground = defineStore('playground', {
       const c = s.changes
       if (!c) return 0
       const rows =
-        c.topics.length + c.tariffs.length + c.products.length + c.contacts.length + c.policies.length + c.tariff_info.length + c.zones.length
+        c.topics.length + c.tariffs.length + c.products.length + c.specialists.length + c.services.length +
+        c.contacts.length + c.policies.length + c.tariff_info.length + c.zones.length
       const configFields = c.config
         ? (['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'] as const).filter((k) => c.config![k] !== undefined).length
         : 0
@@ -177,6 +181,24 @@ export const usePlayground = defineStore('playground', {
       return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/products/' + encodeURIComponent(ref), this.ifMatch())))
     },
 
+    // --- draft specialists (schedule + portfolio + optional booking link) -----
+    upsertSpecialist(input: Omit<SpecialistPayload, 'kind'>) {
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/specialists', input, this.ifMatch())))
+    },
+    deleteSpecialist(ref: string) {
+      return this.write(async () =>
+        this.setChanges(await api.del<DraftChangeSet>('/playground/draft/specialists/' + encodeURIComponent(ref), this.ifMatch()))
+      )
+    },
+
+    // --- draft services (base/variant/addon tree) ------------------------------
+    upsertService(input: Omit<ServicePayload, 'kind'>) {
+      return this.write(async () => this.setChanges(await api.post<DraftChangeSet>('/playground/draft/services', input, this.ifMatch())))
+    },
+    deleteService(ref: string) {
+      return this.write(async () => this.setChanges(await api.del<DraftChangeSet>('/playground/draft/services/' + encodeURIComponent(ref), this.ifMatch())))
+    },
+
     // --- draft delivery zones -------------------------------------------------
     upsertZone(input: {
       ref: string
@@ -234,6 +256,14 @@ export const usePlayground = defineStore('playground', {
           const { kind: _k, ...rest } = payload as ProductPayload
           return this.upsertProduct(rest).then(() => !this.error)
         }
+        case 'specialists': {
+          const { kind: _k, ...rest } = payload as SpecialistPayload
+          return this.upsertSpecialist(rest).then(() => !this.error)
+        }
+        case 'services': {
+          const { kind: _k, ...rest } = payload as ServicePayload
+          return this.upsertService(rest).then(() => !this.error)
+        }
         case 'delivery_zones': {
           const { kind: _k, ...rest } = payload as DeliveryZonePayload
           return this.upsertZone(rest).then(() => !this.error)
@@ -252,7 +282,7 @@ export const usePlayground = defineStore('playground', {
         }
       }
     },
-    async stageDelete(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string): Promise<boolean> {
+    async stageDelete(kind: 'topics' | 'tariffs' | 'products' | 'specialists' | 'services' | 'delivery_zones', key: string): Promise<boolean> {
       switch (kind) {
         case 'topics':
           await this.deleteTopic(key)
@@ -262,6 +292,12 @@ export const usePlayground = defineStore('playground', {
           break
         case 'products':
           await this.deleteProduct(key)
+          break
+        case 'specialists':
+          await this.deleteSpecialist(key)
+          break
+        case 'services':
+          await this.deleteService(key)
           break
         case 'delivery_zones':
           await this.deleteZone(key)
@@ -391,6 +427,18 @@ export const usePlayground = defineStore('playground', {
     deleteLiveProduct(ref: string) {
       return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/products/' + encodeURIComponent(ref)) })
     },
+    upsertLiveSpecialist(input: Omit<SpecialistPayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/specialists', input) })
+    },
+    deleteLiveSpecialist(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/specialists/' + encodeURIComponent(ref)) })
+    },
+    upsertLiveService(input: Omit<ServicePayload, 'kind'>) {
+      return this.writeLive(async () => { this.live = await api.post<DraftView>('/kb/services', input) })
+    },
+    deleteLiveService(ref: string) {
+      return this.writeLive(async () => { this.live = await api.del<DraftView>('/kb/services/' + encodeURIComponent(ref)) })
+    },
     upsertLiveZone(input: {
       ref: string
       name?: string
@@ -438,6 +486,14 @@ export const usePlayground = defineStore('playground', {
           const { kind: _k, ...rest } = payload as ProductPayload
           return this.upsertLiveProduct(rest).then(() => !this.error)
         }
+        case 'specialists': {
+          const { kind: _k, ...rest } = payload as SpecialistPayload
+          return this.upsertLiveSpecialist(rest).then(() => !this.error)
+        }
+        case 'services': {
+          const { kind: _k, ...rest } = payload as ServicePayload
+          return this.upsertLiveService(rest).then(() => !this.error)
+        }
         case 'delivery_zones': {
           const { kind: _k, ...rest } = payload as DeliveryZonePayload
           return this.upsertLiveZone(rest).then(() => !this.error)
@@ -456,7 +512,7 @@ export const usePlayground = defineStore('playground', {
         }
       }
     },
-    async deleteLiveEntity(kind: 'topics' | 'tariffs' | 'products' | 'delivery_zones', key: string): Promise<boolean> {
+    async deleteLiveEntity(kind: 'topics' | 'tariffs' | 'products' | 'specialists' | 'services' | 'delivery_zones', key: string): Promise<boolean> {
       switch (kind) {
         case 'topics':
           await this.deleteLiveTopic(key)
@@ -467,11 +523,45 @@ export const usePlayground = defineStore('playground', {
         case 'products':
           await this.deleteLiveProduct(key)
           break
+        case 'specialists':
+          await this.deleteLiveSpecialist(key)
+          break
+        case 'services':
+          await this.deleteLiveService(key)
+          break
         case 'delivery_zones':
           await this.deleteLiveZone(key)
           break
       }
       return !this.error
+    },
+
+    // --- archive/restore (Знаний база's Специалисты/Услуги tabs) ------------
+    // setSpecialistStatus/setServiceStatus are direct, immediate live writes
+    // with NO draft/approve step and NO confirmation dialog — PATCH
+    // .../status is meant to feel instantly reversible, the same UX
+    // philosophy as stores/campaignTemplates.ts's archive()/restore() (see
+    // that file's own doc comment). Deliberately NOT routed through
+    // writeLive()/write(): the caller (SpecialistsTab.vue/ServicesTab.vue)
+    // owns its own per-row busy/error state (a spinner on the one row being
+    // toggled, not the whole page/store) and catches a thrown ApiError
+    // itself, exactly like CampaignTemplatesPanel.vue's toggleArchive(). On
+    // success the changed row is spliced back into `live` in place — the
+    // roster keeps showing BOTH active and archived rows (client-side
+    // filtered by the tab's own toggle), so nothing is ever filtered out of
+    // this array the way campaignTemplates.ts's own archive()/restore() drop
+    // a row from their (server-paginated, single-filter) list.
+    async setSpecialistStatus(ref: string, salesStatus: 'active' | 'inactive'): Promise<void> {
+      const updated = await api.patch<SpecialistRow>('/kb/specialists/' + encodeURIComponent(ref) + '/status', { sales_status: salesStatus })
+      if (!this.live) return
+      const idx = this.live.specialists.findIndex((r) => r.ref === ref)
+      if (idx !== -1) this.live.specialists.splice(idx, 1, updated)
+    },
+    async setServiceStatus(ref: string, salesStatus: 'active' | 'inactive'): Promise<void> {
+      const updated = await api.patch<ServiceRow>('/kb/services/' + encodeURIComponent(ref) + '/status', { sales_status: salesStatus })
+      if (!this.live) return
+      const idx = this.live.services.findIndex((r) => r.ref === ref)
+      if (idx !== -1) this.live.services.splice(idx, 1, updated)
     },
 
     // --- live (Знаний база — /knowledge-base): read-only baseline, GET /kb.

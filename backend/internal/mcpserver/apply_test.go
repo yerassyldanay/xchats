@@ -56,12 +56,13 @@ func TestUpsertTools_ExcludesDelete(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	if len(mcpserver.UpsertTools) != 8 {
-		t.Fatalf("UpsertTools has %d entries, want the 8 typed upserts", len(mcpserver.UpsertTools))
+	if len(mcpserver.UpsertTools) != 10 {
+		t.Fatalf("UpsertTools has %d entries, want the 10 typed upserts", len(mcpserver.UpsertTools))
 	}
 	for _, want := range []string{
 		"kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert", "kb_contacts_upsert",
-		"kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert", "kb_assistant_upsert",
+		"kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert",
+		"kb_specialist_upsert", "kb_service_upsert", "kb_assistant_upsert",
 	} {
 		if !seen[want] {
 			t.Errorf("UpsertTools is missing %q", want)
@@ -204,6 +205,75 @@ func TestParseUpsertCall_EquivalentToHandler(t *testing.T) {
 		viewB, _ := srvB.Deps.KB.DraftOnly(ctx, principalB.OrganizationID)
 		if viewA.Config.Persona != viewB.Config.Persona || viewA.Config.ReplyMaxWords != viewB.Config.ReplyMaxWords {
 			t.Fatalf("assistant config diverged:\n  handler: %+v\n  apply:   %+v", viewA.Config, viewB.Config)
+		}
+	})
+
+	// The salon vertical's own two tools — added to UpsertTools/ParseUpsertCall
+	// so kbimport can synthesize a staff roster and service menu from scraped
+	// content, same as every other content kind already could.
+	t.Run("specialist", func(t *testing.T) {
+		srvA, principalA := newTestServer(t)
+		srvB, principalB := newTestServer(t)
+		ctx := context.Background()
+
+		changes := map[string]any{
+			"full_name": "Алина Ким", "title": "Топ-стилист", "experience": "7 лет",
+			"booking_url": "https://xpayment.kz/book/aura-alina", "sales_status": "active",
+			"schedule": []map[string]any{{"ref": "tue", "start": "10:00", "end": "19:00"}},
+		}
+
+		callTool(t, srvA, principalA, "kb_specialist_upsert", map[string]any{"ref": "alina-kim", "changes": changes})
+
+		call, err := mcpserver.ParseUpsertCall("kb_specialist_upsert", rawArgs(t, map[string]any{"ref": "alina-kim", "changes": changes}))
+		if err != nil {
+			t.Fatalf("ParseUpsertCall: %v", err)
+		}
+		if call.Key != "alina-kim" {
+			t.Fatalf("Key = %q, want %q", call.Key, "alina-kim")
+		}
+		if _, err := call.Apply(ctx, srvB.Deps.KB, principalB.OrganizationID, principalB.UserID, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+
+		viewA, _ := srvA.Deps.KB.DraftOnly(ctx, principalA.OrganizationID)
+		viewB, _ := srvB.Deps.KB.DraftOnly(ctx, principalB.OrganizationID)
+		if len(viewA.Specialists) != 1 || len(viewB.Specialists) != 1 {
+			t.Fatalf("expected exactly one draft specialist each, got %d / %d", len(viewA.Specialists), len(viewB.Specialists))
+		}
+		a, b := viewA.Specialists[0], viewB.Specialists[0]
+		if a.Ref != b.Ref || a.FullName != b.FullName || a.BookingURL != b.BookingURL || len(a.Schedule) != len(b.Schedule) {
+			t.Fatalf("specialist business fields diverged:\n  handler: %+v\n  apply:   %+v", a, b)
+		}
+	})
+
+	t.Run("service", func(t *testing.T) {
+		srvA, principalA := newTestServer(t)
+		srvB, principalB := newTestServer(t)
+		ctx := context.Background()
+
+		changes := map[string]any{
+			"service_type": "base", "category": "Волосы", "name": "Женская стрижка",
+			"price": "10 000 ₸", "duration": 60, "sales_status": "active",
+		}
+
+		callTool(t, srvA, principalA, "kb_service_upsert", map[string]any{"ref": "haircut-women", "changes": changes})
+
+		call, err := mcpserver.ParseUpsertCall("kb_service_upsert", rawArgs(t, map[string]any{"ref": "haircut-women", "changes": changes}))
+		if err != nil {
+			t.Fatalf("ParseUpsertCall: %v", err)
+		}
+		if _, err := call.Apply(ctx, srvB.Deps.KB, principalB.OrganizationID, principalB.UserID, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+
+		viewA, _ := srvA.Deps.KB.DraftOnly(ctx, principalA.OrganizationID)
+		viewB, _ := srvB.Deps.KB.DraftOnly(ctx, principalB.OrganizationID)
+		if len(viewA.Services) != 1 || len(viewB.Services) != 1 {
+			t.Fatalf("expected exactly one draft service each, got %d / %d", len(viewA.Services), len(viewB.Services))
+		}
+		a, b := viewA.Services[0], viewB.Services[0]
+		if a.Ref != b.Ref || a.Name != b.Name || a.Price != b.Price || a.ServiceType != b.ServiceType {
+			t.Fatalf("service business fields diverged:\n  handler: %+v\n  apply:   %+v", a, b)
 		}
 	})
 }
