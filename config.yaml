@@ -36,7 +36,7 @@ system:
   queue_workers: 4
   session_ttl_hours: 720
   min_password_len: 8
-  simulator_enabled: false
+  simulator_enabled: true
   customer_message_wait_seconds: 5   # default channel debounce wait; each channel may override (0-60s) via Automation settings
 
 telegram:
