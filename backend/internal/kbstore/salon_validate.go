@@ -166,6 +166,16 @@ func (s *Store) validateService(ctx context.Context, db dbtx, orgID uuid.UUID, b
 		if parent.ServiceType != "base" {
 			return DraftService{}, fmt.Errorf("kbstore: service %q's parent_ref %q is not a base service — only one hierarchy level is supported", sv.Ref, sv.ParentRef)
 		}
+		// Mirrors buildServiceFacts' own rule (aiprompt/catalog.go): an active
+		// child's base must also be active. Without this, restoring ONLY the
+		// child through the live status endpoint (validateService's other
+		// caller here is a plain type/existence check, blind to sales_status)
+		// silently lands the exact orphaned state BuildCatalog hard-errors on
+		// for every subsequent customer reply for the org — reachable through
+		// the ordinary archive/restore switch, not just a hand-crafted call.
+		if sv.SalesStatus == "active" && parent.SalesStatus != "active" {
+			return DraftService{}, fmt.Errorf("kbstore: service %q cannot be active while its base service %q is not — activate %q first", sv.Ref, sv.ParentRef, sv.ParentRef)
+		}
 	}
 	if sv.Duration != nil && *sv.Duration <= 0 {
 		return DraftService{}, fmt.Errorf("kbstore: service %q: duration must be a positive minute count", sv.Ref)

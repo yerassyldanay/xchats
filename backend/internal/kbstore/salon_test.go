@@ -204,6 +204,53 @@ func TestValidateService_Hierarchy(t *testing.T) {
 	mustPutLiveService(t, kbstore.ServiceInput{Ref: "hair-spa-mask", ParentRef: "haircut-women", ServiceType: "addon", Name: "Спа-уход", SalesStatus: "active"})
 }
 
+// TestPutLiveService_RejectsActivatingChildUnderArchivedBase is the write-
+// path regression test for the exact defect the archive-cascade tests below
+// prove fixed on the way DOWN: restoring a child ALONE, through the live
+// status endpoint, while its base is still archived. validateService used
+// to check only that parent_ref resolves to a base — never the base's own
+// sales_status — so this silently landed an active child under an inactive
+// base: the one state aiprompt.buildServiceFacts hard-errors on for every
+// subsequent customer reply for the org.
+func TestPutLiveService_RejectsActivatingChildUnderArchivedBase(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+
+	// Archive the base — cascades the child inactive too (TestPutLiveService_
+	// ArchiveCascade, below).
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "inactive"})
+
+	// Restoring ONLY the child, base still archived, must be rejected.
+	err := kb.PutLiveService(ctx, orgID, actor, kbstore.ServiceInput{
+		Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active",
+	})
+	if err == nil {
+		t.Fatal("want an error activating a child whose base is still archived, got none")
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sv := findService(live.Services, "haircut-short"); sv == nil || sv.SalesStatus != "inactive" {
+		t.Errorf("haircut-short = %+v, want still inactive — the rejected write must not partially apply", sv)
+	}
+
+	// Activating the base first, THEN the child, must succeed.
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+}
+
 // TestPutLiveService_ArchiveCascade pins PLAN.md's exact rule: archiving a
 // base atomically archives its currently-active children; restoring the
 // base never auto-restores them.

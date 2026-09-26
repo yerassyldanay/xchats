@@ -268,6 +268,13 @@ func buildFacts(kb *KB, cat *Catalog) error {
 		if err != nil {
 			return fmt.Errorf("aiprompt: contact: %w", err)
 		}
+		if isSalonOrganization(kb) && len(schedule) > 0 {
+			// The structured schedule is authoritative once a salon has one
+			// (migration 0020's comment) — legacy working_hours free text is
+			// no longer an approved fact, so it can't contradict schedule/
+			// schedule_<day> with a different, stale set of hours.
+			vals["working_hours"] = ""
+		}
 		for _, col := range factColumns["contact"] {
 			if v, ok := scheduleFactValue(col.Column, c.BookingURL, schedule, "ru"); ok {
 				addFact(cat, "contact", SingletonRef, col, v)

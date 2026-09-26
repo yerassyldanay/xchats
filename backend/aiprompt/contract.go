@@ -452,19 +452,64 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 			})
 		}
 	}
-	issues = append(issues, validateScheduleLiteralContract(cat, withoutPlaceholders)...)
+	issues = append(issues, validateScheduleLiteralContract(kb, withoutPlaceholders)...)
+	issues = append(issues, validateSalonConfirmationGuard(kb, withoutPlaceholders)...)
 	return issues
+}
+
+// bookingConfirmationRE matches the phrasing PLAN.md states as an absolute
+// invariant with no exception: the assistant must never confirm that an
+// appointment was booked, nor assert that a specific time is free right
+// now — every real-time booking/availability fact lives on the actual
+// booking page, never here. TEST.md Category D's own forbidden-phrase list
+// ("Вы записаны", "Я вас записала", "Бронь подтверждена", "Да, свободно",
+// "Время свободно", "Есть окно") is the source for every stem below. Not a
+// parser — a deliberately eager set of Russian stems, not an exhaustive
+// grammar: a false positive here costs one retry (ClassifyRetryV7) or an
+// escalation, never a customer-visible error, while a false negative is a
+// customer told they hold an appointment that does not exist. That
+// asymmetry is why this errs eager rather than precise.
+var bookingConfirmationRE = regexp.MustCompile(`(?i)` +
+	`вы\s+записан` + // "Вы записаны"
+	`|я\s+(вас\s+)?записал` + // "Я (вас) записал(а)"
+	`|записал[аи]?\s+вас` + // "Записал(а) вас"
+	`|запись\s+подтвержд` + // "Запись подтверждена"
+	`|бронь\s+подтвержд` + // "Бронь подтверждена"
+	`|подтвержда(ю|ем)\s+(вашу\s+)?запись` + // "Подтверждаю(-ем) (вашу) запись"
+	`|жд[её]м\s+вас` + // "Ждём/Ждем вас"
+	`|время\s+(\S+\s+)?своб` + // "Время (14:00) свобод-но/на"
+	`|да,?\s+своб` + // "Да, свободно"
+	`|есть\s+окно` + // "Есть окно"
+	`|окно\s+(есть|своб)`) // "Окно есть" / "Окно свободно"
+
+// validateSalonConfirmationGuard is bookingConfirmationRE's contract-check
+// wrapper — gated by isSalonOrganization like validateScheduleLiteralContract,
+// so a non-salon org's behavior is unchanged. Before this, the rule existed
+// only as prompt text (kb.config.guardrails) — every other check in this
+// file is token/leak-shaped, none of them semantic, so nothing in code
+// stopped a model that simply ignored the instruction.
+func validateSalonConfirmationGuard(kb *KB, withoutPlaceholders string) []ContractIssue {
+	if !isSalonOrganization(kb) {
+		return nil
+	}
+	if m := bookingConfirmationRE.FindString(withoutPlaceholders); m != "" {
+		return []ContractIssue{{
+			Code:   "salon_booking_confirmation",
+			Detail: "reply_text confirms a booking or asserts real-time availability (\"" + strings.TrimSpace(m) + "\") — must always route to the booking link instead",
+		}}
+	}
+	return nil
 }
 
 // validateScheduleLiteralContract flags any HH:MM-shaped clock time the
 // model wrote itself outside of a substituted placeholder, but only for an
-// organization that actually has salon schedule tokens at all
-// (hasScheduleFacts, schedule.go) — PLAN.md: "extend literal-leak
-// validation to reject model-authored schedule times, including individual
-// shift and break boundaries." The model must see raw shift/break
-// boundaries to reason about an arbitrary customer-requested interval
-// (scheduleReasoningLines, schedule.go), but its REPLY must always carry
-// the schedule/schedule_<day> TOKEN, never the digits themselves.
+// organization that actually is a salon (isSalonOrganization, schedule.go)
+// — PLAN.md: "extend literal-leak validation to reject model-authored
+// schedule times, including individual shift and break boundaries." The
+// model must see raw shift/break boundaries to reason about an arbitrary
+// customer-requested interval (scheduleReasoningLines, schedule.go), but
+// its REPLY must always carry the schedule/schedule_<day> TOKEN, never the
+// digits — or the spelled-out hour — themselves.
 //
 // Unlike the value-uniqueness check above (exact_value_literal), this is
 // shape-based, not value-based: a clock time is virtually always shared
@@ -474,15 +519,21 @@ func validateFactContract(resp Response, kb *KB, cat *Catalog) []ContractIssue {
 // false positive if seller-authored trusted prose (a service/specialist
 // description) happens to contain an HH:MM-shaped substring — vanishingly
 // unlikely in practice, and confined to salon organizations by the
-// hasScheduleFacts gate, so a non-salon org's behavior never changes.
-func validateScheduleLiteralContract(cat *Catalog, withoutPlaceholders string) []ContractIssue {
-	if !hasScheduleFacts(cat) {
+// isSalonOrganization gate, so a non-salon org's behavior never changes.
+func validateScheduleLiteralContract(kb *KB, withoutPlaceholders string) []ContractIssue {
+	if !isSalonOrganization(kb) {
 		return nil
 	}
 	if m := scheduleTimePattern.FindString(withoutPlaceholders); m != "" {
 		return []ContractIssue{{
 			Code:   "schedule_time_literal",
 			Detail: "reply_text contains a model-authored clock time " + m + " instead of a schedule token",
+		}}
+	}
+	if m := spelledOutHourPattern.FindString(withoutPlaceholders); m != "" {
+		return []ContractIssue{{
+			Code:   "schedule_time_literal",
+			Detail: "reply_text contains a model-authored spelled-out time " + strings.TrimSpace(m) + " instead of a schedule token",
 		}}
 	}
 	return nil

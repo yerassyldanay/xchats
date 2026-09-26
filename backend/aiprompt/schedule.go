@@ -329,22 +329,40 @@ func scheduleReasoningLines(s Schedule) []string {
 	return lines
 }
 
-// scheduleTimePattern matches any HH:MM-shaped clock time —
-// validateScheduleLiteralContract (contract.go) uses it to catch the model
-// writing a shift/break boundary itself instead of using a schedule token.
-var scheduleTimePattern = regexp.MustCompile(`\b([01]\d|2[0-3]):[0-5]\d\b`)
+// scheduleTimePattern matches any HH:MM-shaped clock time, with or without
+// a leading zero on a single-digit hour (0-9, 00-23) — validateScheduleLiteralContract
+// (contract.go) uses it to catch the model writing a shift/break boundary
+// itself instead of using a schedule token. "9:00" is exactly as much a
+// leaked literal as "09:00"; the pattern must not require the padding a
+// model has no reason to always produce.
+var scheduleTimePattern = regexp.MustCompile(`\b([01]?\d|2[0-3]):[0-5]\d\b`)
 
-// hasScheduleFacts reports whether cat contains any schedule-derived fact
-// token (contact.main.schedule*/specialist.<ref>.schedule*) — scopes
-// validateScheduleLiteralContract to salon organizations only, so a
-// non-salon org's existing shop-kb prompt/response behavior never changes.
-func hasScheduleFacts(cat *Catalog) bool {
-	for _, f := range cat.Facts {
-		if f.Column == "schedule" || strings.HasPrefix(f.Column, "schedule_") {
-			return true
-		}
-	}
-	return false
+// spelledOutHourPattern catches the common "at <spelled-out hour> <daypart>"
+// Russian construction ("работает с десяти утра") that scheduleTimePattern,
+// being digit-shaped, cannot see at all. A curated stem list for one through
+// twelve plus every daypart word and noon/midnight, not a numeral parser —
+// an uncommon phrasing (an ordinal "в десятом часу", spelled-out minutes)
+// can still slip through. The same documented, accepted tradeoff
+// bookingConfirmationRE (contract.go) makes: catching the common real
+// phrasings beats matching nothing while chasing a complete grammar.
+// No leading \b: RE2's word-boundary class is ASCII-only ([0-9A-Za-z_]), so
+// \b never matches at a Cyrillic-letter boundary — the same reason
+// bookingConfirmationRE (above) carries no \b either.
+var spelledOutHourPattern = regexp.MustCompile(`(?i)(час|полдень|полночь|одиннадцат|двенадцат|десят|девят|восем|сем|шест|пят|четыр|тр[её]|дв[ае]х?|одн[оа])[а-я]*\s+(утра|дня|вечера|ночи)`)
+
+// isSalonOrganization reports whether kb carries any structured salon data
+// (PLAN.md "Beauty Salon Knowledge Base Extension") — scopes
+// validateScheduleLiteralContract/validateSalonConfirmationGuard (contract.go)
+// to salon organizations only, so a non-salon org's existing shop-kb
+// prompt/response behavior never changes. Checks kb.Specialists/kb.Services
+// directly (the same definition response.salonFrameSelected uses to pick
+// the frame in the first place) rather than the DERIVED presence of a
+// schedule-shaped fact column: a specialist whose schedule happens to be
+// empty (no hours entered yet) still contributes zero schedule_* facts to
+// the catalog, so that derived signal silently went missing — and with it,
+// both guards — for a salon org that plainly is one.
+func isSalonOrganization(kb *KB) bool {
+	return kb != nil && (len(kb.Specialists) > 0 || len(kb.Services) > 0)
 }
 
 // ShiftState is EvaluateShift/EvaluateShiftPoint's classification result.

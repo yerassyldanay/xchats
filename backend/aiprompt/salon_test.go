@@ -3,6 +3,7 @@ package aiprompt
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -261,6 +262,43 @@ func TestBuildCatalog_BookingFallback(t *testing.T) {
 	})
 }
 
+func TestBuildCatalog_WorkingHoursSuppressedWhenScheduleAuthoritative(t *testing.T) {
+	cat, err := BuildCatalog(salonKB())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cat.FactByToken("{{contact.main.working_hours}}") != nil {
+		t.Error("want no working_hours token once a salon has a populated structured schedule — it would contradict schedule/schedule_<day> with a different, stale set of hours")
+	}
+	if cat.FactByToken("{{contact.main.schedule}}") == nil {
+		t.Error("want the structured schedule token to still be present")
+	}
+
+	t.Run("falls back to working_hours when the salon has no structured schedule yet", func(t *testing.T) {
+		kb := salonKB()
+		kb.Contacts.Schedule = nil
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cat.FactByToken("{{contact.main.working_hours}}") == nil {
+			t.Error("want the legacy working_hours token when the salon has not set a structured schedule")
+		}
+	})
+
+	t.Run("non-salon organizations keep working_hours regardless of contact schedule", func(t *testing.T) {
+		kb := baseKB()
+		kb.Contacts.Schedule = Schedule{day(Monday, "09:00", "18:00")}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cat.FactByToken("{{contact.main.working_hours}}") == nil {
+			t.Error("want working_hours preserved for a non-salon organization — migration 0020: structured schedule is authoritative only where the salon prompt is selected")
+		}
+	})
+}
+
 func TestBuildCatalog_ScheduleTokens_OnlyScheduledDaysGetDailyTokens(t *testing.T) {
 	cat, err := BuildCatalog(salonKB())
 	if err != nil {
@@ -389,6 +427,51 @@ func TestValidateScheduleLiteralContract(t *testing.T) {
 			t.Fatalf("a non-salon organization must never trigger schedule_time_literal, got %v", issueCodes(issues))
 		}
 	})
+
+	t.Run("a single-digit hour with no leading zero is still flagged", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Алина работает с 9:00.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if !containsCode(issues, "schedule_time_literal") {
+			t.Fatalf("want schedule_time_literal for an unpadded hour, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("a spelled-out hour is flagged even with no digits at all", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Алина работает с десяти утра.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if !containsCode(issues, "schedule_time_literal") {
+			t.Fatalf("want schedule_time_literal for a spelled-out hour, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("active specialists with empty schedules still count as a salon org", func(t *testing.T) {
+		kb := &KB{
+			OrganizationID: testOrg,
+			Assistant:      salonKB().Assistant,
+			Specialists: []Specialist{
+				{Ref: "alina-kim", FullName: "Алина Ким", SalesStatus: "active"}, // no Schedule set at all
+			},
+		}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Алина работает с 10:00 до 19:00.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if !containsCode(issues, "schedule_time_literal") {
+			t.Fatalf("an active specialist with an empty schedule must still count as a salon org, got %v", issueCodes(issues))
+		}
+	})
 }
 
 // TestSalonPromptNoRawLeaks is the TEST.md-named regression guard for
@@ -405,6 +488,93 @@ func TestValidateScheduleLiteralContract(t *testing.T) {
 // boundary that is actually enforceable: the reasoning block's numbers stay
 // confined to the prompt, and separately (above) can never leak into a
 // validated customer reply.
+// TestValidateSalonConfirmationGuard is the regression test for a real gap:
+// before validateSalonConfirmationGuard existed, ValidateResponseV7 had NO
+// code-level check against the model confirming a booking or asserting
+// real-time availability — PLAN.md states this as an absolute invariant,
+// but it lived only in the persona/guardrails prompt text, which a model
+// could simply ignore with nothing in code to catch it.
+func TestValidateSalonConfirmationGuard(t *testing.T) {
+	kb := salonKB()
+	cat, err := BuildCatalog(kb)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"booking + availability combined", "Да, время свободно. Вы записаны."},
+		{"Вы записаны", "Хорошо, вы записаны на завтра."},
+		{"Я вас записала", "Я вас записала, ждите подтверждения."},
+		{"Записал вас", "Записал вас на маникюр."},
+		{"Бронь подтверждена", "Ваша бронь подтверждена."},
+		{"Запись подтверждена", "Запись подтверждена, до встречи!"},
+		{"Ждём вас", "Ждём вас завтра в 15:00."},
+		{"Время свободно", "Это время свободно, приходите."},
+		{"Да, свободно", "Да, свободно, можно подходить."},
+		{"Есть окно", "Да, есть окно на 12:00 у Дианы."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := fmt.Sprintf(`{"reply_text":%q,"reply_language":"ru","media_files_to_send":[],"escalate":false}`, tc.text)
+			_, issues := ValidateResponseV7(raw, kb, cat)
+			if !containsCode(issues, "salon_booking_confirmation") {
+				t.Fatalf("text %q: want salon_booking_confirmation, got %v", tc.text, issueCodes(issues))
+			}
+		})
+	}
+
+	t.Run("directing to the booking link, with no confirmation, is not flagged", func(t *testing.T) {
+		raw := `{"reply_text":"Алина работает во вторник: {{specialist.alina-kim.schedule_tue}}. Запишитесь по ссылке: {{specialist.alina-kim.booking}}","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if containsCode(issues, "salon_booking_confirmation") {
+			t.Fatalf("did not want salon_booking_confirmation, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("stating that a slot is NOT free is not flagged (negation, not confirmation)", func(t *testing.T) {
+		raw := `{"reply_text":"К сожалению, свободного окна в это время нет. Уточните другое время по ссылке.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if containsCode(issues, "salon_booking_confirmation") {
+			t.Fatalf("did not want salon_booking_confirmation on a negation, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("gated to salon organizations — a non-salon KB never triggers it", func(t *testing.T) {
+		shopKB := &KB{OrganizationID: testOrg, Assistant: &Assistant{Persona: "p", Mission: "m", Guardrails: "g", LanguagePolicy: "l", ReplyMaxWords: 50}}
+		shopCat, err := BuildCatalog(shopKB)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Да, вы записаны, ждём вас!","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, shopKB, shopCat)
+		if containsCode(issues, "salon_booking_confirmation") {
+			t.Fatalf("a non-salon KB must never trigger this check, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("active specialists with empty schedules still count as a salon org", func(t *testing.T) {
+		kb := &KB{
+			OrganizationID: testOrg,
+			Assistant:      salonKB().Assistant,
+			Specialists: []Specialist{
+				{Ref: "alina-kim", FullName: "Алина Ким", SalesStatus: "active"}, // no Schedule set at all
+			},
+		}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Да, вы записаны!","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if !containsCode(issues, "salon_booking_confirmation") {
+			t.Fatalf("an active specialist with an empty schedule must still count as a salon org, got %v", issueCodes(issues))
+		}
+	})
+}
+
 func TestSalonPromptNoRawLeaks(t *testing.T) {
 	kb := salonKB()
 	prompt, _, err := BuildPromptV7(FrameSalonKBV1RU(), kb)
