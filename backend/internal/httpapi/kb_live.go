@@ -406,11 +406,15 @@ type salesStatusReq struct {
 }
 
 // handleKBSpecialistStatus flips a specialist's sales_status (archive/
-// restore), leaving every other field exactly as it currently is: read the
-// current live row, write it back via PutLiveSpecialist with only
-// SalesStatus changed. validateSpecialist (inside PutLiveSpecialist) is the
-// enum's actual gate — an invalid value surfaces as the usual 422 via
-// kbFail, not a separate check here.
+// restore) via the atomic SetLiveSpecialistSalesStatus (live.go) — a
+// single-column UPDATE, not a read-modify-write of the whole row (see that
+// method's own doc comment for why: the earlier PutLiveSpecialist-based
+// version could silently clobber a concurrent edit to any other field).
+// validateEnum (inside SetLiveSpecialistSalesStatus) is the enum's actual
+// gate — an invalid value surfaces as the usual 422 via kbFail, not a
+// separate check here. The existence pre-check below is only for a clean
+// 404; SetLiveSpecialistSalesStatus itself would otherwise report a generic
+// not-found error for the same case.
 //
 // Response shape: the payload is the single updated SpecialistRow (not the
 // whole live view) — the frontend's setSpecialistStatus (stores/
@@ -428,23 +432,15 @@ func (s *Server) handleKBSpecialistStatus(c *gin.Context) {
 		return
 	}
 	ref := c.Param("ref")
-	found, exists := s.findLiveSpecialist(c, orgID, ref)
-	if !exists {
+	if _, exists := s.findLiveSpecialist(c, orgID, ref); !exists {
 		return
 	}
-	if err := s.kb.PutLiveSpecialist(ctx(c), orgID, currentUser(c).ID, kbstore.SpecialistInput{
-		Ref: found.Ref, FullName: found.FullName, Title: found.Title, Experience: found.Experience,
-		Schedule: found.Schedule, BookingURL: found.BookingURL, SalesStatus: req.SalesStatus,
-		Media: kbstore.SpecialistMedia{PortfolioImages: &found.PortfolioImages},
-	}); err != nil {
+	updated, err := s.kb.SetLiveSpecialistSalesStatus(ctx(c), orgID, currentUser(c).ID, ref, req.SalesStatus)
+	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.invalidateKBCache(orgID)
-	updated, exists := s.findLiveSpecialist(c, orgID, ref)
-	if !exists {
-		return
-	}
 	s.hub.Broadcast("kb.row.changed", gin.H{})
 	ok(c, updated)
 }
@@ -504,16 +500,19 @@ func (s *Server) handleKBDeleteService(c *gin.Context) {
 	s.kbLiveChanged(c, orgID)
 }
 
-// handleKBServiceStatus is handleKBSpecialistStatus's twin. Because the
-// write goes through PutLiveService, flipping a base service from active to
-// inactive here also atomically cascades to its active children — see
-// PutLiveService's own doc comment (live.go) — exactly the archive/restore
-// UI flow PLAN.md describes ("Archiving a base service atomically archives
-// its active children; restoring children is explicit"). The response
-// payload is still just the ONE service named by :ref, not its cascaded
-// children — findLiveService's own doc comment explains why a whole-view
-// response is wrong here; the frontend re-syncs the rest of the roster from
-// the realtime kb.row.changed broadcast this handler still sends.
+// handleKBServiceStatus is handleKBSpecialistStatus's twin, via the atomic
+// SetLiveServiceSalesStatus (live.go) instead of a PutLiveService full-row
+// overwrite (same reasoning as handleKBSpecialistStatus's own doc comment).
+// SetLiveServiceSalesStatus still enforces both of PutLiveService's
+// hierarchy rules: flipping a base service from active to inactive
+// atomically cascades to its active children, and restoring a variant/addon
+// requires its base to already be active — exactly the archive/restore UI
+// flow PLAN.md describes ("Archiving a base service atomically archives its
+// active children; restoring children is explicit"). The response payload
+// is still just the ONE service named by :ref, not its cascaded children —
+// findLiveService's own doc comment explains why a whole-view response is
+// wrong here; the frontend re-syncs the rest of the roster from the
+// realtime kb.row.changed broadcast this handler still sends.
 func (s *Server) handleKBServiceStatus(c *gin.Context) {
 	orgID, proceed := s.kbWrite(c)
 	if !proceed {
@@ -525,23 +524,15 @@ func (s *Server) handleKBServiceStatus(c *gin.Context) {
 		return
 	}
 	ref := c.Param("ref")
-	found, exists := s.findLiveService(c, orgID, ref)
-	if !exists {
+	if _, exists := s.findLiveService(c, orgID, ref); !exists {
 		return
 	}
-	if err := s.kb.PutLiveService(ctx(c), orgID, currentUser(c).ID, kbstore.ServiceInput{
-		Ref: found.Ref, ParentRef: found.ParentRef, ServiceType: found.ServiceType, Category: found.Category,
-		Name: found.Name, Price: found.Price, Duration: found.Duration, Description: found.Description,
-		SpecialistRefs: found.SpecialistRefs, SalesStatus: req.SalesStatus,
-	}); err != nil {
+	updated, err := s.kb.SetLiveServiceSalesStatus(ctx(c), orgID, currentUser(c).ID, ref, req.SalesStatus)
+	if err != nil {
 		s.kbFail(c, err)
 		return
 	}
 	s.invalidateKBCache(orgID)
-	updated, exists := s.findLiveService(c, orgID, ref)
-	if !exists {
-		return
-	}
 	s.hub.Broadcast("kb.row.changed", gin.H{})
 	ok(c, updated)
 }

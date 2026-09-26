@@ -373,17 +373,33 @@ func currentLiveServiceTx(ctx context.Context, tx dbtx, orgID uuid.UUID, ref str
 }
 
 // DeleteLiveService removes a live service row by ref. Deliberately no
-// cascade: PLAN.md scopes the archive/restore cascade to a sales_status
-// flip (PutLiveService above), not to a hard delete — no hard-delete UI is
-// introduced at all (PLAN.md), so this exists only for symmetry with every
-// other entity's DeleteLive* method and for MCPDelete's eventual approve
-// step (applyDelete, draft.go).
+// cascade to children: PLAN.md scopes the archive/restore cascade to a
+// sales_status flip (PutLiveService above), not to a hard delete — no
+// hard-delete UI is introduced at all (PLAN.md), so this exists only for
+// symmetry with every other entity's DeleteLive* method and for MCPDelete's
+// eventual approve step (applyDelete, draft.go).
+//
+// It DOES refuse to delete while any child (variant/addon) still names ref
+// as its parent_ref — active OR inactive, unlike serviceGateReasons'
+// active-only concern (kbstore.go): aiprompt.buildServiceFacts resolves
+// EVERY service's parent_ref regardless of the child's own sales_status, so
+// even an archived child left pointing at a deleted parent is a hard
+// BuildCatalog error on the very next customer message for the whole org —
+// not just a degraded reply about this one service.
 func (s *Store) DeleteLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	var hasChildren bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_services WHERE organization_id=$1 AND parent_ref=$2)`,
+		orgID, ref).Scan(&hasChildren); err != nil {
+		return err
+	}
+	if hasChildren {
+		return fmt.Errorf("kbstore: cannot delete service %q — it still has variant/addon services referencing it as parent_ref", ref)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ai_services WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
 		return err
 	}
@@ -391,6 +407,120 @@ func (s *Store) DeleteLiveService(ctx context.Context, orgID uuid.UUID, actor uu
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// SetLiveSpecialistSalesStatus flips exactly one specialist's sales_status
+// (archive/restore) via a single-column UPDATE — never a read-modify-write
+// of the whole row. handleKBSpecialistStatus (httpapi/kb_live.go) used to
+// build a full SpecialistInput from an earlier, separately-read LiveView row
+// and PUT it back through PutLiveSpecialist, which overwrites every scalar
+// field unconditionally (PutLiveSpecialist's own doc comment: "in.* is the
+// full desired state") — so a concurrent edit to any OTHER field (schedule,
+// booking_url, title, ...) landing between that read and this write was
+// silently reverted to its pre-edit value. This method touches sales_status
+// and updated_at only, so it can never clobber a concurrent edit to
+// anything else.
+func (s *Store) SetLiveSpecialistSalesStatus(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string, status string) (SpecialistRow, error) {
+	if err := validateEnum("sales_status", status, "active", "inactive"); err != nil {
+		return SpecialistRow{}, err
+	}
+	status = orDefault(status, "active")
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return SpecialistRow{}, err
+	}
+	defer tx.Rollback(ctx)
+	var row SpecialistRow
+	err = tx.QueryRow(ctx, `UPDATE ai_specialists SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE organization_id=$2 AND ref=$3
+		RETURNING ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, updated_at`,
+		status, orgID, ref).
+		Scan(&row.Ref, &row.FullName, &row.Title, &row.Experience, (*aiprompt.ScheduleColumn)(&row.Schedule),
+			&row.BookingURL, (*dbx.UUIDArray)(&row.PortfolioImages), &row.SalesStatus, &row.UpdatedAt)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return SpecialistRow{}, fmt.Errorf("kbstore: specialist %q not found", ref)
+	}
+	if err != nil {
+		return SpecialistRow{}, err
+	}
+	row.ID = row.Ref
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "specialist:"+ref); err != nil {
+		return SpecialistRow{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SpecialistRow{}, err
+	}
+	return row, nil
+}
+
+// SetLiveServiceSalesStatus is SetLiveSpecialistSalesStatus's twin for
+// ai_services, preserving PutLiveService's own two hierarchy rules (see its
+// doc comment above) instead of the generic full-row overwrite:
+//   - restoring a variant/addon to active still requires its base to
+//     currently be active (validateService's own rule — a status flip is not
+//     exempt from it just because it goes through a narrower code path).
+//   - archiving a base still cascades to every currently-active child, in
+//     the same transaction, exactly as PutLiveService already does today.
+//
+// Restoring a base never touches children, and archiving/restoring a
+// variant/addon never touches its base — only a base's own archive cascades
+// downward.
+func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string, status string) (ServiceRow, error) {
+	if err := validateEnum("sales_status", status, "active", "inactive"); err != nil {
+		return ServiceRow{}, err
+	}
+	status = orDefault(status, "active")
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return ServiceRow{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	cur, existed, err := currentLiveServiceTx(ctx, tx, orgID, ref)
+	if err != nil {
+		return ServiceRow{}, err
+	}
+	if !existed {
+		return ServiceRow{}, fmt.Errorf("kbstore: service %q not found", ref)
+	}
+	if status == "active" && cur.ServiceType != "base" && cur.ParentRef != "" {
+		parent, parentExists, err := currentLiveServiceTx(ctx, tx, orgID, cur.ParentRef)
+		if err != nil {
+			return ServiceRow{}, err
+		}
+		if !parentExists || parent.SalesStatus != "active" {
+			return ServiceRow{}, fmt.Errorf("kbstore: service %q cannot be active while its base service %q is not — activate %q first", ref, cur.ParentRef, cur.ParentRef)
+		}
+	}
+
+	var row ServiceRow
+	err = tx.QueryRow(ctx, `UPDATE ai_services SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		WHERE organization_id=$2 AND ref=$3
+		RETURNING ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, updated_at`,
+		status, orgID, ref).
+		Scan(&row.Ref, &row.ParentRef, &row.ServiceType, &row.Category, &row.Name, &row.Price, &row.Duration,
+			&row.Description, (*dbx.StringArray)(&row.SpecialistRefs), &row.SalesStatus, &row.UpdatedAt)
+	if errors.Is(err, dbx.ErrNoRows) {
+		return ServiceRow{}, fmt.Errorf("kbstore: service %q not found", ref)
+	}
+	if err != nil {
+		return ServiceRow{}, err
+	}
+	row.ID = row.Ref
+
+	if row.ServiceType == "base" && cur.SalesStatus == "active" && status == "inactive" {
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, ref); err != nil {
+			return ServiceRow{}, err
+		}
+	}
+	if err := auditRow(ctx, tx, orgID, actor, "edit", "service:"+ref); err != nil {
+		return ServiceRow{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ServiceRow{}, err
+	}
+	return row, nil
 }
 
 // PatchLiveContacts edits the org's live support-contact row — a true

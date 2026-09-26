@@ -535,7 +535,8 @@ func resultingServicesForGate(live []ServiceRow, upserts []DraftService, deletes
 
 // serviceGateReasons is the pure, table-tested invariant over one org's
 // resulting (post-approve) service tree — mirrors aiprompt.buildServiceFacts'
-// own fail-closed rule (backend/aiprompt/catalog.go: "archiving a base must
+// own fail-closed rules (backend/aiprompt/catalog.go: every non-base
+// service's parent_ref must resolve to SOME row, and "archiving a base must
 // archive its active children"), enforced here at approve time instead of
 // only being discovered later as a hard error breaking every customer reply
 // for the org. The live-write path (PutLiveService, live.go) already
@@ -544,6 +545,15 @@ func resultingServicesForGate(live []ServiceRow, upserts []DraftService, deletes
 // see ApproveVersioned's own comment), so this gate is what turns "publish
 // an archived base without also archiving its active children" into a clear,
 // rejected-up-front error instead of a silently corrupted live KB.
+//
+// The parent-EXISTENCE check below runs for every non-base service
+// regardless of its own sales_status — deliberately broader than the
+// active-parent-must-be-active check, which only applies to an active
+// child. buildServiceFacts resolves parent_ref unconditionally (it has no
+// sales_status exemption at all), so an INACTIVE child left pointing at a
+// deleted/nonexistent parent — e.g. approving a "delete this base service"
+// draft entry while an archived variant/addon still names it — is just as
+// fatal to every subsequent customer reply as an active one would be.
 func serviceGateReasons(services []ServiceRow) []GateReason {
 	var reasons []GateReason
 	byRef := make(map[string]ServiceRow, len(services))
@@ -551,14 +561,93 @@ func serviceGateReasons(services []ServiceRow) []GateReason {
 		byRef[sv.Ref] = sv
 	}
 	for _, sv := range services {
-		if sv.ServiceType == "base" || sv.ParentRef == "" || sv.SalesStatus != "active" {
+		if sv.ServiceType == "base" || sv.ParentRef == "" {
 			continue
 		}
 		parent, ok := byRef[sv.ParentRef]
-		if !ok || parent.SalesStatus != "active" {
+		if !ok {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q references base service %q, which no longer exists — delete %q too, or keep %q",
+				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
+			continue
+		}
+		if sv.SalesStatus == "active" && parent.SalesStatus != "active" {
 			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
 				"service %q is active but its base service %q is not — archive %q too, or restore %q, before publishing",
 				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
+		}
+	}
+	return reasons
+}
+
+// resultingSpecialistsForGate is resultingServicesForGate's twin for
+// ai_specialists: live, overridden/extended by this approve batch's pending
+// specialist upserts, minus anything staged for deletion.
+func resultingSpecialistsForGate(live []SpecialistRow, upserts []DraftSpecialist, deletes []DraftDelete) []SpecialistRow {
+	del := map[string]bool{}
+	for _, d := range deletes {
+		if d.Kind == deleteKindFor(KBTypeSpecialist) {
+			del[d.Key] = true
+		}
+	}
+	idx := map[string]int{}
+	var out []SpecialistRow
+	for _, sp := range live {
+		if del[sp.Ref] {
+			continue
+		}
+		out = append(out, sp)
+		idx[sp.Ref] = len(out) - 1
+	}
+	for _, u := range upserts {
+		row := SpecialistRow{
+			Ref: u.Ref, FullName: u.FullName, Title: u.Title, Experience: u.Experience,
+			Schedule: u.Schedule, BookingURL: u.BookingURL, PortfolioImages: u.PortfolioImages,
+			SalesStatus: orDefault(u.SalesStatus, "active"),
+		}
+		if i, ok := idx[u.Ref]; ok {
+			out[i] = row
+		} else {
+			out = append(out, row)
+			idx[u.Ref] = len(out) - 1
+		}
+	}
+	return out
+}
+
+// serviceSpecialistGateReasons rejects approving a service whose
+// specialist_refs would not resolve to any LIVE-after-this-approve
+// specialist row. MCPUpsertService/UpsertService (salon_validate.go's
+// validateService, via currentSpecialistIfAny) only ever check a
+// specialist_ref against the draft blob OR the live table AT STAGING time —
+// so a service can be staged referencing a specialist that exists only as a
+// pending, unapproved draft entry. An entity-scoped approve of just that one
+// service (ApproveVersioned, sel.Kind == "services") can then publish it
+// while the specialist itself is still pending, silently losing the
+// attribution the moment it goes live: unlike a service's own parent_ref
+// (buildServiceFacts hard-errors on an unknown one), aiprompt.
+// activeSpecialistRefs just drops any ref it cannot resolve.
+//
+// approving is the set of services THIS call is about to write to
+// ai_services (set.services) — not every resulting live service, which was
+// already validated against SOME specialist state when it was first staged
+// and is unaffected by specialists this batch never touches. resulting is
+// resultingSpecialistsForGate's output, so a specialist approved in the SAME
+// batch as the service that references it (e.g. "approve all") correctly
+// counts as present.
+func serviceSpecialistGateReasons(approving []DraftService, resulting []SpecialistRow) []GateReason {
+	known := make(map[string]bool, len(resulting))
+	for _, sp := range resulting {
+		known[sp.Ref] = true
+	}
+	var reasons []GateReason
+	for _, sv := range approving {
+		for _, ref := range sv.SpecialistRefs {
+			if !known[ref] {
+				reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+					"service %q references specialist %q, which is not live yet — approve %q too (or together with %q)",
+					sv.Ref, ref, ref, sv.Ref)})
+			}
 		}
 	}
 	return reasons

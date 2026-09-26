@@ -400,6 +400,291 @@ func TestApproveVersioned_AllowsCascadedArchive(t *testing.T) {
 	}
 }
 
+// TestDeleteLiveService_RejectsWhenChildrenExist is DeleteLiveService's
+// regression test for a hard-delete counterpart to TestPutLiveService_
+// ArchiveCascade: unlike a sales_status flip, a hard delete of a base
+// service had no check at all for children still naming it as parent_ref —
+// active OR inactive — leaving a dangling parent_ref that
+// aiprompt.buildServiceFacts hard-errors on for every subsequent customer
+// reply for the WHOLE org, not just this one service.
+func TestDeleteLiveService_RejectsWhenChildrenExist(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+
+	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-women"); err == nil {
+		t.Fatal("want an error deleting a base service with an active child, got none")
+	}
+
+	// Archiving the child (not removing it) must still block the delete —
+	// buildServiceFacts resolves parent_ref regardless of the child's own
+	// sales_status.
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "inactive"})
+	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-women"); err == nil {
+		t.Fatal("want an error deleting a base service with an INACTIVE child, got none")
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if findService(live.Services, "haircut-women") == nil {
+		t.Error("haircut-women must still exist — the rejected delete must not partially apply")
+	}
+
+	// Once the child is gone, the delete succeeds.
+	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-short"); err != nil {
+		t.Fatalf("DeleteLiveService(haircut-short): %v", err)
+	}
+	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-women"); err != nil {
+		t.Fatalf("DeleteLiveService(haircut-women) after child removed: %v", err)
+	}
+	live, err = kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if findService(live.Services, "haircut-women") != nil {
+		t.Error("haircut-women should be deleted")
+	}
+}
+
+// TestApproveVersioned_RejectsDeletingBaseServiceWithChildren is
+// serviceGateReasons' regression test for the approve-time counterpart to
+// TestDeleteLiveService_RejectsWhenChildrenExist: staging a plain "delete
+// this base service" draft entry (DeleteService) has no orphan check of its
+// own either — the check has to live in the approve gate, same as the
+// archive-cascade gate above (TestApproveVersioned_RejectsOrphanedActiveChild).
+// The remaining child here is INACTIVE, which the OLD serviceGateReasons
+// (active-children-only) would have let straight through.
+func TestApproveVersioned_RejectsDeletingBaseServiceWithChildren(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "inactive"})
+
+	if err := kb.DeleteService(ctx, orgID, actor, "haircut-women"); err != nil {
+		t.Fatalf("DeleteService (stage draft delete): %v", err)
+	}
+
+	err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{}, nil, actor)
+	var gateErr *kbstore.GateError
+	if !errors.As(err, &gateErr) {
+		t.Fatalf("ApproveVersioned error = %v (%T), want a *GateError", err, err)
+	}
+	found := false
+	for _, r := range gateErr.Reasons {
+		if r.Kind == "services" && r.Key == "haircut-short" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("GateError.Reasons = %+v, want a reason naming orphaned child haircut-short", gateErr.Reasons)
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if findService(live.Services, "haircut-women") == nil {
+		t.Error("haircut-women must still exist live — a rejected approve must not partially apply")
+	}
+}
+
+// TestApproveVersioned_RejectsServiceReferencingUnapprovedSpecialist is
+// serviceSpecialistGateReasons' regression test: MCPUpsertService/
+// UpsertService only check a specialist_ref against the draft blob OR the
+// live table AT STAGING time (validateService's currentSpecialistIfAny), so
+// staging a brand-new specialist and a service referencing it in the SAME
+// draft, then approving ONLY the service (an entity-scoped approve), used to
+// publish the service with a specialist_ref that resolves to nothing live —
+// aiprompt.activeSpecialistRefs would then silently drop the attribution
+// forever, with no error anywhere telling the operator why.
+func TestApproveVersioned_RejectsServiceReferencingUnapprovedSpecialist(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	if err := kb.UpsertSpecialist(ctx, orgID, actor, kbstore.SpecialistInput{
+		Ref: "alina-kim", FullName: "Алина Ким", SalesStatus: "active",
+	}); err != nil {
+		t.Fatalf("UpsertSpecialist (draft): %v", err)
+	}
+	if err := kb.UpsertService(ctx, orgID, actor, kbstore.ServiceInput{
+		Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка",
+		SpecialistRefs: []string{"alina-kim"}, SalesStatus: "active",
+	}); err != nil {
+		t.Fatalf("UpsertService (draft): %v", err)
+	}
+
+	err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{Kind: "services", Key: "haircut-women"}, nil, actor)
+	var gateErr *kbstore.GateError
+	if !errors.As(err, &gateErr) {
+		t.Fatalf("ApproveVersioned(services, haircut-women) error = %v (%T), want a *GateError", err, err)
+	}
+	found := false
+	for _, r := range gateErr.Reasons {
+		if r.Kind == "services" && r.Key == "haircut-women" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("GateError.Reasons = %+v, want a reason naming haircut-women's unresolved specialist_ref", gateErr.Reasons)
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if findService(live.Services, "haircut-women") != nil {
+		t.Error("haircut-women must not have been published — the rejected approve must not partially apply")
+	}
+
+	// Approving both together (the legitimate case — e.g. "approve all") must
+	// succeed: a specialist approved in the SAME batch as the service
+	// referencing it counts as present.
+	if err := kb.ApproveVersioned(ctx, orgID, kbstore.ApproveSelector{}, nil, actor); err != nil {
+		t.Fatalf("ApproveVersioned (whole draft): %v", err)
+	}
+	live, err = kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	sv := findService(live.Services, "haircut-women")
+	if sv == nil || len(sv.SpecialistRefs) != 1 || sv.SpecialistRefs[0] != "alina-kim" {
+		t.Fatalf("haircut-women = %+v, want specialist_refs=[alina-kim] after whole-draft approve", sv)
+	}
+}
+
+// TestSetLiveSpecialistSalesStatus_OnlyChangesStatus is the atomic
+// status-set method's regression test for the bug handleKBSpecialistStatus
+// used to have: building a full SpecialistInput from an earlier LiveView
+// read and PUTting it back through PutLiveSpecialist overwrote every scalar
+// field unconditionally (PutLiveSpecialist's own doc comment: "in.* is the
+// full desired state"), so a concurrent edit to any other field landing
+// between that read and the status-toggle write was silently reverted.
+// SetLiveSpecialistSalesStatus touches sales_status (and updated_at) only.
+func TestSetLiveSpecialistSalesStatus_OnlyChangesStatus(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	if err := kb.PutLiveSpecialist(ctx, orgID, actor, kbstore.SpecialistInput{
+		Ref: "alina-kim", FullName: "Алина Ким", Title: "Топ-стилист", Experience: "7 лет",
+		Schedule:    aiprompt.Schedule{{Ref: "tue", Day: "Вторник", Start: "10:00", End: "19:00"}},
+		BookingURL:  "https://example.com/book/alina",
+		SalesStatus: "active",
+	}); err != nil {
+		t.Fatalf("PutLiveSpecialist: %v", err)
+	}
+
+	// A concurrent edit to other fields landing BEFORE the status toggle:
+	// the old PutLiveSpecialist-based handler would have read a stale copy
+	// of this into `found` and then silently reverted it.
+	if err := kb.PutLiveSpecialist(ctx, orgID, actor, kbstore.SpecialistInput{
+		Ref: "alina-kim", FullName: "Алина Ким", Title: "Ведущий колорист", Experience: "8 лет",
+		Schedule:    aiprompt.Schedule{{Ref: "wed", Day: "Среда", Start: "11:00", End: "20:00"}},
+		BookingURL:  "https://example.com/book/alina-new",
+		SalesStatus: "active",
+	}); err != nil {
+		t.Fatalf("concurrent PutLiveSpecialist: %v", err)
+	}
+
+	updated, err := kb.SetLiveSpecialistSalesStatus(ctx, orgID, actor, "alina-kim", "inactive")
+	if err != nil {
+		t.Fatalf("SetLiveSpecialistSalesStatus: %v", err)
+	}
+	if updated.SalesStatus != "inactive" {
+		t.Errorf("SalesStatus = %q, want inactive", updated.SalesStatus)
+	}
+	if updated.Title != "Ведущий колорист" || updated.Experience != "8 лет" || updated.BookingURL != "https://example.com/book/alina-new" {
+		t.Errorf("SetLiveSpecialistSalesStatus clobbered the concurrent edit: %+v", updated)
+	}
+	if len(updated.Schedule) != 1 || updated.Schedule[0].Ref != "wed" {
+		t.Errorf("SetLiveSpecialistSalesStatus clobbered the concurrent schedule edit: %+v", updated.Schedule)
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sp := findSpecialist(live.Specialists, "alina-kim"); sp == nil || sp.SalesStatus != "inactive" || sp.Title != "Ведущий колорист" {
+		t.Errorf("live alina-kim = %+v, want inactive with the concurrent edit preserved", sp)
+	}
+}
+
+// TestSetLiveServiceSalesStatus_OnlyChangesStatus is
+// TestSetLiveSpecialistSalesStatus_OnlyChangesStatus's twin for services,
+// also proving the hierarchy rules PutLiveService enforced (archive-cascade
+// downward, reject restoring a child under a still-archived base) hold
+// through the new atomic method the status-toggle endpoint now actually
+// calls (see TestPutLiveService_ArchiveCascade/TestPutLiveService_
+// RejectsActivatingChildUnderArchivedBase for the PutLiveService originals).
+func TestSetLiveServiceSalesStatus_OnlyChangesStatus(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", Price: "10 000 ₸", SalesStatus: "active"})
+	// A concurrent price edit landing before the status toggle.
+	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", Price: "12 000 ₸", SalesStatus: "active"})
+
+	updated, err := kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-women", "inactive")
+	if err != nil {
+		t.Fatalf("SetLiveServiceSalesStatus: %v", err)
+	}
+	if updated.SalesStatus != "inactive" {
+		t.Errorf("SalesStatus = %q, want inactive", updated.SalesStatus)
+	}
+	if updated.Price != "12 000 ₸" {
+		t.Errorf("SetLiveServiceSalesStatus clobbered the concurrent price edit: %+v", updated)
+	}
+
+	// Restore it, add an active child, archive the base again — must cascade.
+	if _, err := kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-women", "active"); err != nil {
+		t.Fatalf("restore base: %v", err)
+	}
+	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
+	if _, err := kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-women", "inactive"); err != nil {
+		t.Fatalf("archive base: %v", err)
+	}
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sv := findService(live.Services, "haircut-short"); sv == nil || sv.SalesStatus != "inactive" {
+		t.Errorf("haircut-short = %+v, want cascaded to inactive", sv)
+	}
+
+	// Restoring ONLY the child while the base is still archived must be
+	// rejected.
+	if _, err := kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-short", "active"); err == nil {
+		t.Fatal("want an error activating a child whose base is still archived, got none")
+	}
+}
+
 // TestService_SpecialistRefSurvivesArchivedSpecialist proves PLAN.md's rule
 // that archiving a specialist "preserves service relationships" — a
 // specialist_ref set at service creation time must not be invalidated

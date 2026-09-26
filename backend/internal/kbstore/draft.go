@@ -2693,6 +2693,11 @@ func (s *Store) ApproveVersioned(ctx context.Context, orgID uuid.UUID, sel Appro
 			return err
 		}
 		reasons = append(reasons, serviceGateReasons(resultingServicesForGate(liveServices, set.services, set.deletes))...)
+		liveSpecialists, err := loadSpecialistRows(ctx, db, orgID)
+		if err != nil {
+			return err
+		}
+		reasons = append(reasons, serviceSpecialistGateReasons(set.services, resultingSpecialistsForGate(liveSpecialists, set.specialists, set.deletes))...)
 		if len(reasons) > 0 {
 			return &GateError{Reasons: reasons}
 		}
