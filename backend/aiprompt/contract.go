@@ -482,6 +482,30 @@ var bookingConfirmationRE = regexp.MustCompile(`(?i)` +
 	`|есть\s+окно` + // "Есть окно"
 	`|окно\s+(есть|своб)`) // "Окно есть" / "Окно свободно"
 
+// bookingQuestionParticleRE detects the Russian yes/no interrogative
+// particle "ли" as a standalone word, near a bookingConfirmationRE match —
+// "Проверьте, есть ли окно свободного времени на странице записи:
+// {{link}}" correctly defers the actual answer to the booking link (exactly
+// the desired behavior) but still contains bare trigger words
+// bookingConfirmationRE looks for ("есть", "окно ... своб-"). "ли" has
+// essentially no other use in ordinary business Russian, so its presence
+// near a match turns what looks like an assertion trigger into a question
+// one instead. No \b: Go's RE2 \b is ASCII-only and never fires at a
+// Cyrillic boundary (see spelledOutHourPattern, schedule.go, hit and fixed
+// the same way this session) — an explicit non-letter class either side
+// does the job \b would if it worked here.
+var bookingQuestionParticleRE = regexp.MustCompile(`(?i)(?:^|[^а-я])ли(?:[^а-я]|$)`)
+
+// bookingQuestionWindow bounds how far from a bookingConfirmationRE match
+// validateSalonConfirmationGuard looks for "ли" — generous enough for a
+// realistic Russian question construction ("Проверьте, есть ли ... на
+// странице записи"), short enough that an unrelated "ли" several sentences
+// away in a longer reply cannot mask a genuine, separate confirmation
+// elsewhere in the same text. Byte offsets, not rune-aligned — matches this
+// file's existing pragmatic-not-a-parser tolerance for a stray boundary
+// landing mid-rune at the very edge of the window.
+const bookingQuestionWindow = 40
+
 // validateSalonConfirmationGuard is bookingConfirmationRE's contract-check
 // wrapper — gated by isSalonOrganization like validateScheduleLiteralContract,
 // so a non-salon org's behavior is unchanged. Before this, the rule existed
@@ -492,13 +516,26 @@ func validateSalonConfirmationGuard(kb *KB, withoutPlaceholders string) []Contra
 	if !isSalonOrganization(kb) {
 		return nil
 	}
-	if m := bookingConfirmationRE.FindString(withoutPlaceholders); m != "" {
-		return []ContractIssue{{
-			Code:   "salon_booking_confirmation",
-			Detail: "reply_text confirms a booking or asserts real-time availability (\"" + strings.TrimSpace(m) + "\") — must always route to the booking link instead",
-		}}
+	loc := bookingConfirmationRE.FindStringIndex(withoutPlaceholders)
+	if loc == nil {
+		return nil
 	}
-	return nil
+	start := loc[0] - bookingQuestionWindow
+	if start < 0 {
+		start = 0
+	}
+	end := loc[1] + bookingQuestionWindow
+	if end > len(withoutPlaceholders) {
+		end = len(withoutPlaceholders)
+	}
+	if bookingQuestionParticleRE.MatchString(withoutPlaceholders[start:end]) {
+		return nil
+	}
+	m := withoutPlaceholders[loc[0]:loc[1]]
+	return []ContractIssue{{
+		Code:   "salon_booking_confirmation",
+		Detail: "reply_text confirms a booking or asserts real-time availability (\"" + strings.TrimSpace(m) + "\") — must always route to the booking link instead",
+	}}
 }
 
 // validateScheduleLiteralContract flags any HH:MM-shaped clock time the

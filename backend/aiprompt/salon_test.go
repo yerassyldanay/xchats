@@ -534,6 +534,14 @@ func TestValidateSalonConfirmationGuard(t *testing.T) {
 		}
 	})
 
+	t.Run("deferring to the booking page with a question is not flagged (interrogative ли, not an assertion)", func(t *testing.T) {
+		raw := `{"reply_text":"Проверьте, есть ли окно свободного времени на странице записи: {{specialist.alina-kim.booking}}","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if containsCode(issues, "salon_booking_confirmation") {
+			t.Fatalf("a question deferring to the booking link must not be flagged, got %v", issueCodes(issues))
+		}
+	})
+
 	t.Run("stating that a slot is NOT free is not flagged (negation, not confirmation)", func(t *testing.T) {
 		raw := `{"reply_text":"К сожалению, свободного окна в это время нет. Уточните другое время по ссылке.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
 		_, issues := ValidateResponseV7(raw, kb, cat)

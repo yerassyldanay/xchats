@@ -278,6 +278,13 @@ export default {
       addonNotStandalone: 'Не продается отдельно',
       categoryCount: '{n} услуг',
       noCategory: 'Без категории',
+      shownForContext: 'активна',
+      shownForContextTitle: 'Эта базовая услуга активна — показана здесь только для контекста архивного варианта/допуслуги.',
+      archiveCascadeConfirm: {
+        title: 'Архивировать базовую услугу?',
+        body: 'У услуги «{name}» есть активные варианты/допуслуги ({count}). Архивирование базовой услуги автоматически архивирует их тоже — восстановить каждую можно будет по отдельности.',
+        confirm: 'Архивировать всё',
+      },
     },
     // specialists.columns.* — SpecialistsTab.vue's roster table headers,
     // TEST.md §4.2's own column names verbatim (its Мастер/Ссылка на запись

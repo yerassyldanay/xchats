@@ -81,12 +81,32 @@ function undoPending() {
 }
 
 function toggleStatus(row: SpecialistRow) {
-  if (pending.value && pending.value.ref !== row.ref) {
+  const samePending = pending.value?.ref === row.ref
+  // The switch flips whatever is CURRENTLY DISPLAYED (row.sales_status,
+  // overridden by a same-row pending toggle if one is in flight) — not the
+  // still-persisted row.sales_status directly. Deriving from the latter
+  // unconditionally meant clicking the switch back within the 5s window to
+  // undo a toggle re-computed the exact SAME "to" value from the unchanged
+  // persisted status instead of reversing it, and the original timer was
+  // never cleared for a same-row re-click — so the PATCH the user thought
+  // they'd cancelled still fired once it elapsed.
+  const current = samePending ? pending.value!.to : row.sales_status
+  const to = current === 'active' ? 'inactive' : 'active'
+
+  if (pending.value) {
     clearTimeout(pending.value.timer)
-    void commitPending()
+    if (!samePending) void commitPending()
   }
+
+  if (samePending && to === row.sales_status) {
+    // Back to the still-persisted value within the window — this IS the
+    // undo: cancel outright instead of scheduling a PATCH that would just
+    // reapply what's already live.
+    pending.value = null
+    return
+  }
+
   const from: 'active' | 'inactive' = row.sales_status === 'active' ? 'active' : 'inactive'
-  const to = from === 'active' ? 'inactive' : 'active'
   const timer = setTimeout(() => void commitPending(), 5000)
   pending.value = { ref: row.ref, name: row.full_name || row.ref, from, to, timer }
 }

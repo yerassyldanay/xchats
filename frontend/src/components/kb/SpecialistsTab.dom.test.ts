@@ -143,6 +143,44 @@ describe('SpecialistsTab — archive/restore: optimistic toggle behind a 5s undo
     expect(pg.live?.specialists[0].sales_status).toBe('active')
   })
 
+  it('clicking the switch itself back within the window reverses it, same as Отменить — no PATCH ever fires', async () => {
+    // Regression test: toggleStatus used to derive from/to from the
+    // still-persisted row.sales_status instead of the currently DISPLAYED
+    // status, so a second click on the same switch (as opposed to the
+    // dedicated Отменить button) recomputed the exact same "archive" target
+    // from stale data instead of reversing it — and the original 5s timer
+    // was never cleared for a same-row re-click, so the PATCH the user
+    // thought they'd undone by flipping the switch back still fired.
+    const { wrapper, pg } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'active' })])
+    const { api } = await import('@/api/client')
+
+    const statusSwitch = wrapper.find('[data-testid="specialist-status-switch-alina-kim"]')
+    await statusSwitch.trigger('click')
+    expect(wrapper.find('[data-testid="specialist-undo-toast"]').exists()).toBe(true)
+
+    await statusSwitch.trigger('click')
+    expect(wrapper.find('[data-testid="specialist-undo-toast"]').exists()).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.patch).not.toHaveBeenCalled()
+    expect(pg.live?.specialists[0].sales_status).toBe('active')
+  })
+
+  it('toggling three times (off, on, off) within the window still ends up pending "off" once', async () => {
+    const { wrapper } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'active' })])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(specialist({ ref: 'alina-kim', sales_status: 'inactive' }))
+
+    const statusSwitch = wrapper.find('[data-testid="specialist-status-switch-alina-kim"]')
+    await statusSwitch.trigger('click') // pending: inactive
+    await statusSwitch.trigger('click') // back to active: cancelled
+    await statusSwitch.trigger('click') // pending: inactive again
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.patch).toHaveBeenCalledTimes(1)
+    expect(api.patch).toHaveBeenCalledWith('/kb/specialists/alina-kim/status', { sales_status: 'inactive' })
+  })
+
   it('restoring from the Archived filter, once the window elapses, calls PATCH with sales_status: "active"', async () => {
     const { wrapper } = mountTab([specialist({ ref: 'alina-kim', sales_status: 'inactive' })])
     const { api } = await import('@/api/client')

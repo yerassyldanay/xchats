@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
 )
@@ -31,10 +32,20 @@ func TestBuildKBFromDraftView_MapsEveryEntityKind(t *testing.T) {
 			{Ref: "almaty", Name: "Алматы", ZoneLevel: "city", DeliveryAvailable: true, DeliveryCost: "1000", DeliveryInDays: "1"},
 		},
 		Contacts: []kbstore.ContactRow{
-			{Phone: "+7 700 000 00 00", Email: "shop@example.com"},
+			{Phone: "+7 700 000 00 00", Email: "shop@example.com", BookingURL: "https://example.com/book",
+				Schedule: aiprompt.Schedule{{Ref: "mon", Day: "Понедельник", Start: "10:00", End: "19:00"}}},
 		},
 		Policies: []kbstore.PolicyRow{
 			{DeliveryCost: "1000", DeliveryInDays: "1-2", Warranty: "12 months"},
+		},
+		Specialists: []kbstore.SpecialistRow{
+			{Ref: "alina-kim", FullName: "Алина Ким", Title: "Стилист", SalesStatus: "active",
+				Schedule: aiprompt.Schedule{{Ref: "tue", Day: "Вторник", Start: "10:00", End: "19:00"}},
+				BookingURL: "https://example.com/book/alina", PortfolioImages: []uuid.UUID{gallery}},
+		},
+		Services: []kbstore.ServiceRow{
+			{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", Price: "10 000 ₸",
+				SpecialistRefs: []string{"alina-kim"}, SalesStatus: "active"},
 		},
 		Materials: []kbstore.Material{
 			{ID: featuredImage, SourceType: "file", Filename: "photo.png", MimeType: "image/png", ProcessingStatus: "parsed", CustomerVisibility: "visible"},
@@ -64,8 +75,18 @@ func TestBuildKBFromDraftView_MapsEveryEntityKind(t *testing.T) {
 	if kb.Contacts == nil || kb.Contacts.Phone != "+7 700 000 00 00" {
 		t.Errorf("Contacts not mapped: %+v", kb.Contacts)
 	}
+	if kb.Contacts == nil || kb.Contacts.BookingURL != "https://example.com/book" || len(kb.Contacts.Schedule) != 1 || kb.Contacts.Schedule[0].Ref != "mon" {
+		t.Errorf("Contacts booking_url/schedule not mapped (the exact regression this test now pins): %+v", kb.Contacts)
+	}
 	if kb.Policies == nil || kb.Policies.Warranty != "12 months" {
 		t.Errorf("Policies not mapped: %+v", kb.Policies)
+	}
+	if len(kb.Specialists) != 1 || kb.Specialists[0].Ref != "alina-kim" || len(kb.Specialists[0].Schedule) != 1 ||
+		kb.Specialists[0].BookingURL != "https://example.com/book/alina" || len(kb.Specialists[0].PortfolioImages) != 1 || kb.Specialists[0].PortfolioImages[0] != gallery.String() {
+		t.Errorf("Specialists not mapped (the exact regression this test now pins — draft simulation used to see zero specialists): %+v", kb.Specialists)
+	}
+	if len(kb.Services) != 1 || kb.Services[0].Ref != "haircut-women" || len(kb.Services[0].SpecialistRefs) != 1 || kb.Services[0].SpecialistRefs[0] != "alina-kim" {
+		t.Errorf("Services not mapped (the exact regression this test now pins — draft simulation used to see zero services): %+v", kb.Services)
 	}
 	if len(kb.Materials) != 1 || kb.Materials[0].ID != featuredImage.String() || kb.Materials[0].Filename != "photo.png" {
 		t.Errorf("Materials not mapped: %+v", kb.Materials)

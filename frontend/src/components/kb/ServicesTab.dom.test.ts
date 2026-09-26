@@ -18,6 +18,16 @@ afterEach(() => {
   mounted = undefined
 })
 
+// reka-ui's Dialog (ConfirmDeleteDialog's own building block) renders
+// through a Teleport into document.body, outside @vue/test-utils' wrapper
+// subtree — same reasoning/pattern as DraftKnowledgeBase.dom.test.ts's own
+// openDialogAccept(). Earlier mounts in this file are never explicitly
+// cleared from document.body, so always take the LAST match.
+function lastInBody(testid: string): HTMLElement | null {
+  const all = document.body.querySelectorAll(`[data-testid="${testid}"]`)
+  return (all[all.length - 1] as HTMLElement | undefined) ?? null
+}
+
 function service(over: Partial<ServiceRow> = {}): ServiceRow {
   return {
     id: 'haircut-women', ref: 'haircut-women', parent_ref: '', service_type: 'base',
@@ -147,6 +157,135 @@ describe('ServicesTab — active/archived filtering', () => {
     const { wrapper } = mountTab([service({ ref: 'haircut-women', sales_status: 'inactive' })])
     await wrapper.find('[data-testid="services-filter-archived"]').trigger('click')
     expect(wrapper.findAll('[data-testid="service-base-row"]')).toHaveLength(1)
+  })
+
+  it('an archived child under a still-ACTIVE base stays reachable in the Archived view, base shown for context', async () => {
+    // Regression test: the tree used to only nest a child under a base row
+    // that ALSO passed the current filter, so an archived variant/addon
+    // whose base stayed active had no base row to nest under in EITHER
+    // view — invisible and unrestorable. Only a base's own archival
+    // cascades to children; archiving one child alone is a valid,
+    // independent action (PLAN.md), so this state is real, not corrupted
+    // data.
+    const { wrapper } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', sales_status: 'active' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', name: 'Короткая', sales_status: 'inactive' }),
+    ])
+    await wrapper.find('[data-testid="services-filter-archived"]').trigger('click')
+
+    expect(wrapper.findAll('[data-testid="service-base-row"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="service-child-row"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Короткая')
+    expect(wrapper.find('[data-testid="service-base-context-badge"]').exists()).toBe(true)
+
+    // The child's own switch/edit are fully functional — it isn't a ghost row.
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'active' }))
+    await wrapper.find('[data-testid="service-status-switch-haircut-short"]').trigger('click')
+    await flushPromises()
+    expect(api.patch).toHaveBeenCalledWith('/kb/services/haircut-short/status', { sales_status: 'active' })
+  })
+
+  it('the Active view is unaffected by the Archived-only context fallback (an active child always has an active base already)', () => {
+    const { wrapper } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', sales_status: 'inactive' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'active' }),
+    ])
+    // Hand-built state validateService (backend) never actually allows —
+    // the Active view must still hide it exactly as before, not extend the
+    // context-only fallback to a direction it was never meant to cover.
+    expect(wrapper.findAll('[data-testid="service-base-row"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid="service-child-row"]')).toHaveLength(0)
+  })
+})
+
+describe('ServicesTab — archiving a base with active children warns before cascading', () => {
+  it('archiving a base WITH active children opens a confirmation dialog instead of PATCHing immediately', async () => {
+    const { wrapper, pg } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', name: 'Женская стрижка', sales_status: 'active' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'active' }),
+      service({ ref: 'hair-spa-mask', parent_ref: 'haircut-women', service_type: 'addon', sales_status: 'active' }),
+    ])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(service({ ref: 'haircut-women', service_type: 'base', name: 'Женская стрижка', sales_status: 'inactive' }))
+
+    await wrapper.find('[data-testid="service-status-switch-haircut-women"]').trigger('click')
+    await flushPromises()
+
+    expect(api.patch).not.toHaveBeenCalled()
+    expect(pg.live?.services[0].sales_status).toBe('active')
+    const dialogBody = lastInBody('confirm-body')
+    expect(dialogBody).toBeTruthy()
+    expect(dialogBody!.textContent).toContain('Женская стрижка')
+    expect(dialogBody!.textContent).toContain('2')
+
+    lastInBody('confirm-accept')!.click()
+    await flushPromises()
+    expect(api.patch).toHaveBeenCalledWith('/kb/services/haircut-women/status', { sales_status: 'inactive' })
+  })
+
+  it('cancelling the dialog leaves the base untouched, no PATCH', async () => {
+    const { wrapper, pg } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', sales_status: 'active' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'active' }),
+    ])
+    const { api } = await import('@/api/client')
+
+    await wrapper.find('[data-testid="service-status-switch-haircut-women"]').trigger('click')
+    expect(lastInBody('confirm-body')).toBeTruthy()
+
+    const cancelBtn = [...document.body.querySelectorAll('button')].filter((b) => b.textContent === 'Отмена').pop()
+    cancelBtn!.click()
+    await flushPromises()
+
+    expect(api.patch).not.toHaveBeenCalled()
+    expect(pg.live?.services[0].sales_status).toBe('active')
+  })
+
+  it('archiving a base with NO active children PATCHes immediately, no dialog (children already archived)', async () => {
+    const { wrapper } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', sales_status: 'active' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'inactive' }),
+    ])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(service({ ref: 'haircut-women', service_type: 'base', sales_status: 'inactive' }))
+    const before = document.body.querySelectorAll('[data-testid="confirm-body"]').length
+
+    await wrapper.find('[data-testid="service-status-switch-haircut-women"]').trigger('click')
+    await flushPromises()
+
+    expect(api.patch).toHaveBeenCalledWith('/kb/services/haircut-women/status', { sales_status: 'inactive' })
+    expect(document.body.querySelectorAll('[data-testid="confirm-body"]').length).toBe(before)
+  })
+
+  it('restoring an archived base never shows the cascade dialog, even with children', async () => {
+    const { wrapper } = mountTab([service({ ref: 'haircut-women', service_type: 'base', sales_status: 'inactive' })])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(service({ ref: 'haircut-women', service_type: 'base', sales_status: 'active' }))
+    await wrapper.find('[data-testid="services-filter-archived"]').trigger('click')
+    const before = document.body.querySelectorAll('[data-testid="confirm-body"]').length
+
+    await wrapper.find('[data-testid="service-status-switch-haircut-women"]').trigger('click')
+    await flushPromises()
+
+    expect(api.patch).toHaveBeenCalledWith('/kb/services/haircut-women/status', { sales_status: 'active' })
+    expect(document.body.querySelectorAll('[data-testid="confirm-body"]').length).toBe(before)
+  })
+
+  it('toggling a variant/addon (not a base) never shows the cascade dialog', async () => {
+    const { wrapper } = mountTab([
+      service({ ref: 'haircut-women', service_type: 'base', sales_status: 'active' }),
+      service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'active' }),
+    ])
+    const { api } = await import('@/api/client')
+    vi.mocked(api.patch).mockResolvedValueOnce(service({ ref: 'haircut-short', parent_ref: 'haircut-women', service_type: 'variant', sales_status: 'inactive' }))
+    const before = document.body.querySelectorAll('[data-testid="confirm-body"]').length
+
+    await wrapper.find('[data-testid="service-status-switch-haircut-short"]').trigger('click')
+    await flushPromises()
+
+    expect(api.patch).toHaveBeenCalledWith('/kb/services/haircut-short/status', { sales_status: 'inactive' })
+    expect(document.body.querySelectorAll('[data-testid="confirm-body"]').length).toBe(before)
   })
 })
 

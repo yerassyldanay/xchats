@@ -118,6 +118,55 @@ func validateSpecialist(sv DraftSpecialist) (DraftSpecialist, error) {
 	return sv, nil
 }
 
+// hasServiceChildren reports whether any OTHER service in the current
+// merged view (db, overlaid by b) names ref as its own parent_ref — used by
+// validateService to block changing ref's own service_type away from
+// "base" while something still depends on it staying one. Mirrors
+// DeleteLiveService's own child check (live.go) for the same reason: once a
+// former base becomes a variant/addon, buildServiceFacts' "parent_ref must
+// resolve to a base" rule (aiprompt/catalog.go) fails for every remaining
+// child, unconditionally of that child's own sales_status — just as fatal
+// to the org's next customer reply as deleting the base outright.
+//
+// A live child already superseded by a pending blob edit is judged by that
+// blob edit, never the (now stale) live row — the same "blob overlay wins"
+// merge every other lookup in this file uses — and a child staged for
+// deletion in the SAME blob is not counted either: it will not exist once
+// this batch of staged changes lands, so it cannot be orphaned by it.
+func (s *Store) hasServiceChildren(ctx context.Context, db dbtx, orgID uuid.UUID, ref string, b *DraftBlob) (bool, error) {
+	deleted := make(map[string]bool, len(b.Deletes))
+	for _, d := range b.Deletes {
+		if d.Kind == deleteKindFor(KBTypeService) {
+			deleted[d.Key] = true
+		}
+	}
+	seen := make(map[string]bool, len(b.Services))
+	for _, sv := range b.Services {
+		seen[sv.Ref] = true
+		if sv.ParentRef == ref && !deleted[sv.Ref] {
+			return true, nil
+		}
+	}
+	rows, err := db.Query(ctx, `SELECT ref FROM ai_services WHERE organization_id=$1 AND parent_ref=$2`, orgID, ref)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var childRef string
+		if err := rows.Scan(&childRef); err != nil {
+			return false, err
+		}
+		// Already judged above via its own blob entry (possibly reparented
+		// away from ref, or staged for deletion) — the live row is stale.
+		if seen[childRef] || deleted[childRef] {
+			continue
+		}
+		return true, nil
+	}
+	return false, rows.Err()
+}
+
 // validateService enforces PLAN.md's service-hierarchy invariants — the
 // same rules aiprompt.buildServiceFacts (catalog.go) encodes at
 // prompt-render time, checked here at write time against the CURRENT merged
@@ -153,6 +202,17 @@ func (s *Store) validateService(ctx context.Context, db dbtx, orgID uuid.UUID, b
 			return DraftService{}, fmt.Errorf("kbstore: base service %q must not have a parent_ref", sv.Ref)
 		}
 	} else {
+		// A service being saved as variant/addon must not currently have
+		// children of its own — e.g. re-saving an existing BASE service with
+		// a new service_type of "variant" while something still names it as
+		// parent_ref. Checked before the parent-resolution logic below
+		// (which is about sv's OWN parent, a separate concern) since this is
+		// about sv itself being a parent that's about to stop qualifying.
+		if hasChildren, err := s.hasServiceChildren(ctx, db, orgID, sv.Ref, b); err != nil {
+			return DraftService{}, err
+		} else if hasChildren {
+			return DraftService{}, fmt.Errorf("kbstore: service %q cannot become a %s — it still has child services that require it to remain a base", sv.Ref, sv.ServiceType)
+		}
 		if sv.ParentRef == "" {
 			return DraftService{}, fmt.Errorf("kbstore: %s service %q requires a parent_ref", sv.ServiceType, sv.Ref)
 		}

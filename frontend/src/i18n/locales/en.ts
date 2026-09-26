@@ -273,6 +273,13 @@ export default {
       addonNotStandalone: 'Not sold on its own',
       categoryCount: '{n} services',
       noCategory: 'Uncategorized',
+      shownForContext: 'active',
+      shownForContextTitle: 'This base service is active — shown here only for context, so its archived variant/add-on has somewhere to nest.',
+      archiveCascadeConfirm: {
+        title: 'Archive this base service?',
+        body: '"{name}" has {count} active variant(s)/add-on(s). Archiving the base service will archive them too — each can be restored individually afterward.',
+        confirm: 'Archive all',
+      },
     },
     // specialists.columns.* — SpecialistsTab.vue's roster table headers,
     // TEST.md §4.2's own column names verbatim (its Master/Booking link

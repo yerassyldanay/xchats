@@ -571,6 +571,19 @@ func serviceGateReasons(services []ServiceRow) []GateReason {
 				sv.Ref, sv.ParentRef, sv.Ref, sv.ParentRef)})
 			continue
 		}
+		// Also unconditional of sv's own sales_status, same reasoning as the
+		// existence check above: validateService (salon_validate.go,
+		// hasServiceChildren) already blocks staging THIS exact change at
+		// write time, but this second, independent check is the same
+		// belt-and-suspenders relationship every other rule in this
+		// function has with its write-time counterpart — never trust a
+		// single point of enforcement to have been perfect.
+		if parent.ServiceType != "base" {
+			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
+				"service %q's base service %q is no longer a base service — only one hierarchy level is supported",
+				sv.Ref, sv.ParentRef)})
+			continue
+		}
 		if sv.SalesStatus == "active" && parent.SalesStatus != "active" {
 			reasons = append(reasons, GateReason{Kind: "services", Key: sv.Ref, Message: fmt.Sprintf(
 				"service %q is active but its base service %q is not — archive %q too, or restore %q, before publishing",

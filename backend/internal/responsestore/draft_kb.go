@@ -92,6 +92,8 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			ContactCardImage:      uuidPtrString(c.ContactCardImage),
 			LocationMapImage:      uuidPtrString(c.LocationMapImage),
 			CompanyLegalDocuments: mediaArray(c.CompanyLegalDocuments),
+			BookingURL:            c.BookingURL,
+			Schedule:              c.Schedule,
 		}
 	}
 	if len(dv.Policies) > 0 {
@@ -103,6 +105,27 @@ func BuildKBFromDraftView(orgID string, dv *kbstore.DraftView) *aiprompt.KB {
 			OutsideZonesNote:        p.OutsideZonesNote,
 			CommercePolicyDocuments: mediaArray(p.CommercePolicyDocuments),
 		}
+	}
+	// Specialists/Services (the salon vertical's addition, PLAN.md) were
+	// missing from this projection entirely: isSalonOrganization(kb) — the
+	// gate every salon-only prompt/contract rule keys off (schedule.go) —
+	// reads kb.Specialists/kb.Services directly, so a draft-simulated
+	// message for an org that HAS staged salon content still silently fell
+	// back to the plain shop-kb frame with zero specialists/services facts
+	// available, same as an org with no salon data at all.
+	for _, sp := range dv.Specialists {
+		kb.Specialists = append(kb.Specialists, aiprompt.Specialist{
+			Ref: sp.Ref, FullName: sp.FullName, Title: sp.Title, Experience: sp.Experience,
+			Schedule: sp.Schedule, BookingURL: sp.BookingURL,
+			PortfolioImages: mediaArray(sp.PortfolioImages), SalesStatus: sp.SalesStatus,
+		})
+	}
+	for _, sv := range dv.Services {
+		kb.Services = append(kb.Services, aiprompt.Service{
+			Ref: sv.Ref, ParentRef: sv.ParentRef, ServiceType: sv.ServiceType, Category: sv.Category,
+			Name: sv.Name, Price: sv.Price, Duration: sv.Duration, Description: sv.Description,
+			SpecialistRefs: sv.SpecialistRefs, SalesStatus: sv.SalesStatus,
+		})
 	}
 	for _, m := range dv.Materials {
 		kb.Materials = append(kb.Materials, aiprompt.Material{

@@ -685,6 +685,70 @@ func TestSetLiveServiceSalesStatus_OnlyChangesStatus(t *testing.T) {
 	}
 }
 
+// TestPutLiveService_RejectsChangingBaseToVariantWithChildren is
+// validateService's regression test for a hierarchy-corruption defect: a
+// base service with a live child could be re-saved as a variant/addon of
+// some OTHER base with no check at all for the child left behind —
+// aiprompt.buildServiceFacts resolves every non-base service's parent_ref
+// AND requires it to be a base, unconditionally of the child's own
+// sales_status, so an orphaned-by-reparenting child is just as fatal to the
+// org's next customer reply as an orphaned-by-deletion one
+// (TestDeleteLiveService_RejectsWhenChildrenExist, above).
+func TestPutLiveService_RejectsChangingBaseToVariantWithChildren(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	must := func(in kbstore.ServiceInput) {
+		t.Helper()
+		if err := kb.PutLiveService(ctx, orgID, actor, in); err != nil {
+			t.Fatalf("PutLiveService(%s): %v", in.Ref, err)
+		}
+	}
+	must(kbstore.ServiceInput{Ref: "math", ServiceType: "base", Name: "Математика", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "exam", ServiceType: "base", Name: "Экзамен", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "individual", ParentRef: "exam", ServiceType: "variant", Name: "Индивидуально", SalesStatus: "active"})
+
+	// Changing exam from a base into a variant of math, while individual
+	// still names it as parent_ref, must be rejected.
+	err := kb.PutLiveService(ctx, orgID, actor, kbstore.ServiceInput{
+		Ref: "exam", ParentRef: "math", ServiceType: "variant", Name: "Экзамен", SalesStatus: "active",
+	})
+	if err == nil {
+		t.Fatal("want an error changing a base service to a variant while it still has a child, got none")
+	}
+
+	live, err := kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sv := findService(live.Services, "exam"); sv == nil || sv.ServiceType != "base" {
+		t.Errorf("exam = %+v, want still service_type=base — the rejected write must not partially apply", sv)
+	}
+
+	// Same rejection through the draft-stage lane (UpsertService) — the
+	// check lives in validateService, the shared write-time rule all three
+	// lanes call.
+	if err := kb.UpsertService(ctx, orgID, actor, kbstore.ServiceInput{
+		Ref: "exam", ParentRef: "math", ServiceType: "variant", Name: "Экзамен", SalesStatus: "active",
+	}); err == nil {
+		t.Fatal("want an error staging the same change as a draft, got none")
+	}
+
+	// The legitimate order — reparent/remove the child FIRST, then convert
+	// the (now childless) former base — must succeed.
+	must(kbstore.ServiceInput{Ref: "individual", ParentRef: "math", ServiceType: "variant", Name: "Индивидуально", SalesStatus: "active"})
+	must(kbstore.ServiceInput{Ref: "exam", ParentRef: "math", ServiceType: "variant", Name: "Экзамен", SalesStatus: "active"})
+
+	live, err = kb.LiveView(ctx, orgID)
+	if err != nil {
+		t.Fatalf("LiveView: %v", err)
+	}
+	if sv := findService(live.Services, "exam"); sv == nil || sv.ServiceType != "variant" || sv.ParentRef != "math" {
+		t.Errorf("exam = %+v, want service_type=variant parent_ref=math once individual no longer depends on it", sv)
+	}
+}
+
 // TestService_SpecialistRefSurvivesArchivedSpecialist proves PLAN.md's rule
 // that archiving a specialist "preserves service relationships" — a
 // specialist_ref set at service creation time must not be invalidated
