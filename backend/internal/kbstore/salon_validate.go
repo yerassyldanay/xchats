@@ -36,9 +36,37 @@ import (
 // dash-separated slugs such as manicure-french").
 var refSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// ErrSalonValidation marks an error as a caller-input mistake against the
+// salon-domain rules validateSpecialist/validateService (and the schedule
+// normalization PatchLiveContacts/validateSpecialist run) enforce — a bad
+// ref shape, a broken base/variant hierarchy, an invalid schedule, deleting
+// a service that still has children, and so on. httpapi's kbFail uses it,
+// the same way it already uses GateError/ErrMediaReference, to answer 422
+// instead of 500.
+//
+// It wraps the underlying message via %w so the original text and any
+// further errors.Is/As chain (e.g. onto aiprompt.NormalizeSchedule's own
+// error) survive unchanged. It is deliberately NOT applied to an error a
+// sub-call (hasServiceChildren, currentServiceIfAny, currentSpecialistIfAny,
+// a raw db.Query/Scan) returns for its own infrastructure reasons — those
+// keep propagating unwrapped so they still fall through to kbFail's 500
+// default instead of being misreported as the caller's fault.
+type ErrSalonValidation struct{ err error }
+
+func (e *ErrSalonValidation) Error() string { return e.err.Error() }
+func (e *ErrSalonValidation) Unwrap() error { return e.err }
+
+// salonInvalid builds an ErrSalonValidation-wrapped error the same way
+// fmt.Errorf builds a plain one. Every validateSpecialist/validateService/
+// PatchLiveContacts rule violation is constructed through this, never a
+// bare fmt.Errorf, so none can be missed and silently fall back to a 500.
+func salonInvalid(format string, args ...any) error {
+	return &ErrSalonValidation{err: fmt.Errorf(format, args...)}
+}
+
 func validSalonRef(field, ref string) error {
 	if !refSlugPattern.MatchString(ref) {
-		return fmt.Errorf("kbstore: %s ref %q must match %s", field, ref, refSlugPattern.String())
+		return salonInvalid("kbstore: %s ref %q must match %s", field, ref, refSlugPattern.String())
 	}
 	return nil
 }
@@ -112,7 +140,7 @@ func validateSpecialist(sv DraftSpecialist) (DraftSpecialist, error) {
 	}
 	schedule, err := aiprompt.NormalizeSchedule(sv.Schedule)
 	if err != nil {
-		return DraftSpecialist{}, fmt.Errorf("kbstore: specialist %s: %w", sv.Ref, err)
+		return DraftSpecialist{}, salonInvalid("kbstore: specialist %s: %w", sv.Ref, err)
 	}
 	sv.Schedule = schedule
 	return sv, nil
@@ -199,7 +227,7 @@ func (s *Store) validateService(ctx context.Context, db dbtx, orgID uuid.UUID, b
 	}
 	if sv.ServiceType == "base" {
 		if sv.ParentRef != "" {
-			return DraftService{}, fmt.Errorf("kbstore: base service %q must not have a parent_ref", sv.Ref)
+			return DraftService{}, salonInvalid("kbstore: base service %q must not have a parent_ref", sv.Ref)
 		}
 	} else {
 		// A service being saved as variant/addon must not currently have
@@ -211,20 +239,20 @@ func (s *Store) validateService(ctx context.Context, db dbtx, orgID uuid.UUID, b
 		if hasChildren, err := s.hasServiceChildren(ctx, db, orgID, sv.Ref, b); err != nil {
 			return DraftService{}, err
 		} else if hasChildren {
-			return DraftService{}, fmt.Errorf("kbstore: service %q cannot become a %s — it still has child services that require it to remain a base", sv.Ref, sv.ServiceType)
+			return DraftService{}, salonInvalid("kbstore: service %q cannot become a %s — it still has child services that require it to remain a base", sv.Ref, sv.ServiceType)
 		}
 		if sv.ParentRef == "" {
-			return DraftService{}, fmt.Errorf("kbstore: %s service %q requires a parent_ref", sv.ServiceType, sv.Ref)
+			return DraftService{}, salonInvalid("kbstore: %s service %q requires a parent_ref", sv.ServiceType, sv.Ref)
 		}
 		parent, ok, err := s.currentServiceIfAny(ctx, db, orgID, sv.ParentRef, b)
 		if err != nil {
 			return DraftService{}, err
 		}
 		if !ok {
-			return DraftService{}, fmt.Errorf("kbstore: service %q references unknown parent_ref %q", sv.Ref, sv.ParentRef)
+			return DraftService{}, salonInvalid("kbstore: service %q references unknown parent_ref %q", sv.Ref, sv.ParentRef)
 		}
 		if parent.ServiceType != "base" {
-			return DraftService{}, fmt.Errorf("kbstore: service %q's parent_ref %q is not a base service — only one hierarchy level is supported", sv.Ref, sv.ParentRef)
+			return DraftService{}, salonInvalid("kbstore: service %q's parent_ref %q is not a base service — only one hierarchy level is supported", sv.Ref, sv.ParentRef)
 		}
 		// Mirrors buildServiceFacts' own rule (aiprompt/catalog.go): an active
 		// child's base must also be active. Without this, restoring ONLY the
@@ -233,18 +261,28 @@ func (s *Store) validateService(ctx context.Context, db dbtx, orgID uuid.UUID, b
 		// silently lands the exact orphaned state BuildCatalog hard-errors on
 		// for every subsequent customer reply for the org — reachable through
 		// the ordinary archive/restore switch, not just a hand-crafted call.
-		if sv.SalesStatus == "active" && parent.SalesStatus != "active" {
-			return DraftService{}, fmt.Errorf("kbstore: service %q cannot be active while its base service %q is not — activate %q first", sv.Ref, sv.ParentRef, sv.ParentRef)
+		//
+		// orDefault on BOTH sides (CodeRabbit PR #119 discussion_r4110715063):
+		// MCPUpsertService/MCPUpsertSpecialist now default a blank sv.SalesStatus
+		// to "active" before calling validateService at all, but parent is read
+		// straight from storage (currentServiceIfAny) — a row written before
+		// that defaulting existed, or by any future write path that forgets it,
+		// could still carry a literal "" here. Comparing raw strings would
+		// silently treat that blank parent as "not active" and let an
+		// explicitly active child through, so this normalizes both sides at
+		// the comparison itself rather than trusting every caller upstream.
+		if orDefault(sv.SalesStatus, "active") == "active" && orDefault(parent.SalesStatus, "active") != "active" {
+			return DraftService{}, salonInvalid("kbstore: service %q cannot be active while its base service %q is not — activate %q first", sv.Ref, sv.ParentRef, sv.ParentRef)
 		}
 	}
 	if sv.Duration != nil && *sv.Duration <= 0 {
-		return DraftService{}, fmt.Errorf("kbstore: service %q: duration must be a positive minute count", sv.Ref)
+		return DraftService{}, salonInvalid("kbstore: service %q: duration must be a positive minute count", sv.Ref)
 	}
 	for _, ref := range sv.SpecialistRefs {
 		if _, ok, err := s.currentSpecialistIfAny(ctx, db, orgID, ref, b); err != nil {
 			return DraftService{}, err
 		} else if !ok {
-			return DraftService{}, fmt.Errorf("kbstore: service %q references unknown specialist_ref %q", sv.Ref, ref)
+			return DraftService{}, salonInvalid("kbstore: service %q references unknown specialist_ref %q", sv.Ref, ref)
 		}
 	}
 	return sv, nil

@@ -307,6 +307,73 @@ func TestScheduleReasoningLines(t *testing.T) {
 	}
 }
 
+// TestSpelledOutHourPattern is CodeRabbit's PR #119 finding
+// (discussion_r4110715044): the original pattern treated any spelled-out
+// number stem followed by "дня" as a clock-time daypart, so ordinary
+// duration/advance-notice phrases like "через два дня" (in two days) or "за
+// четыре дня" (within four days) — genitive uses of "день", nothing to do
+// with a clock — were misclassified as a leaked spelled-out time. Verifying
+// against HEAD (not the finding's prose alone) also turned up two related,
+// unreported gaps fixed the same way: "до четырёх вечера" and bare "в
+// полдень"/"в полночь" did not match at all (the "ё" in "четырёх" fell
+// outside the old `[а-я]` class, and полдень/полночь required a daypart
+// word that never follows them in real usage), and the pattern had no
+// boundary on either side, so RE2's ASCII-only \b could not stop a stem or
+// daypart word from matching as a mere substring of an unrelated longer
+// word ("часто вечерами" matching via "вечера" as a prefix of "вечерами").
+func TestSpelledOutHourPattern(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		// must still be classified as a spelled-out clock time
+		{"hour + утра", "в девять утра", true},
+		{"hour + утра, different stem", "с десяти утра", true},
+		{"hour with ё inflection + вечера", "до четырёх вечера", true},
+		{"час + дня is a genuine clock claim", "в два часа дня", true},
+		{"полдень needs no trailing daypart word", "в полдень", true},
+		{"полночь needs no trailing daypart word", "в полночь", true},
+		{"trailing punctuation does not hide the match", "Алина работает с десяти утра.", true},
+		{"часов + вечера", "девять часов вечера", true},
+		{"одиннадцать + вечера", "в одиннадцать вечера", true},
+		{"twelve + часов + дня", "в двенадцать часов дня", true},
+		{"полночь mid-sentence", "ровно в полночь мастер закрывает салон", true},
+
+		// must NOT be classified as a clock time: ordinary "дня" duration/
+		// advance-notice phrases (genitive of "день"), not a daypart
+		{"reply-time duration", "Мы ответим через два дня", false},
+		{"advance-notice duration", "Запись возможна за четыре дня", false},
+		{"сегодня is unrelated to a дня days-quantity", "Сегодня мастер не работает", false},
+		{"duration with three days", "через три дня мы свяжемся", false},
+		{"weekly cadence in days", "мастер работает пять дней в неделю", false},
+		// twelve is a numeral stem, not "час" — bare "дня" after it stays a
+		// duration reading, same rule as "два дня"/"четыре дня" above
+		// (accepted trade-off: a colloquial "twelve, daytime" meaning noon
+		// is missed here, but "полдень" above still catches that meaning
+		// directly — same documented "catch the common phrasing, not a
+		// complete grammar" tradeoff bookingConfirmationRE makes).
+		{"twelve + bare дня (no час word) stays a duration phrase", "в двенадцать дня", false},
+
+		// must NOT be classified as a clock time: missing boundaries would
+		// otherwise catch these as substrings of unrelated words
+		{"тре inside быстрее is not a stem at a word start", "Мастер закончит быстрее вечера, если будет свободное время", false},
+		{"тре inside быстрее, shorter phrasing", "он всё сделает быстрее вечера", false},
+		{"вечера as a prefix of вечерами", "часто вечерами она свободна", false},
+		{"вечера as a prefix of вечерами, second phrasing", "мастер часто вечерами принимает клиентов", false},
+		{"утра/вечера as prefixes of утрами/вечерами", "он работает утрами и вечерами", false},
+		{"утра as a prefix of утраченных (lost clients, not morning)", "десять утраченных клиентов вернулись", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := spelledOutHourPattern.MatchString(tc.text)
+			if got != tc.want {
+				t.Errorf("spelledOutHourPattern.MatchString(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 // extractTimes pulls every HH:MM-shaped substring out of s, in order — used
 // to assert that a wording change (e.g. a different language) never touches
 // the raw clock times themselves.

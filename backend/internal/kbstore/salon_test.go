@@ -2,12 +2,14 @@ package kbstore_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/kbstore"
 	"github.com/yerassyldanay/xchats/backend/internal/password"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
@@ -128,6 +130,13 @@ func TestUpsertSpecialist_NormalizesSchedule(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error for an overnight (start >= end) schedule day")
 	}
+	// CodeRabbit PR #119 discussion_r4110715047: an invalid schedule must be
+	// classified as ErrSalonValidation (kbFail, httpapi, maps it to HTTP 422)
+	// instead of an opaque error that falls through to a 500.
+	var salonErr *kbstore.ErrSalonValidation
+	if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
+	}
 
 	// Friday before Monday in the input; the stored/read-back result must be
 	// canonically Monday-first (NormalizeSchedule's own contract).
@@ -154,6 +163,215 @@ func TestUpsertSpecialist_NormalizesSchedule(t *testing.T) {
 	}
 }
 
+// TestPatchLiveContacts_RejectsInvalidSchedule is PatchLiveContacts' own
+// schedule-normalization call site (live.go, separate from validateSpecialist's) —
+// CodeRabbit PR #119 discussion_r4110715047: it must also classify an
+// invalid schedule as ErrSalonValidation so kbFail (httpapi) answers 422,
+// not 500.
+func TestPatchLiveContacts_RejectsInvalidSchedule(t *testing.T) {
+	kb, orgID, st, _ := newTestKB(t)
+	actor := testActor(t, st, orgID)
+	ctx := context.Background()
+
+	overlapping := aiprompt.Schedule{{
+		Ref: "mon", Start: "10:00", End: "18:00",
+		Breaks: []aiprompt.ScheduleBreak{{Start: "13:00", End: "14:00"}, {Start: "13:30", End: "14:30"}},
+	}}
+	err := kb.PatchLiveContacts(ctx, orgID, actor, kbstore.ContactPatch{Schedule: &overlapping})
+	if err == nil {
+		t.Fatal("want an error for overlapping breaks")
+	}
+	var salonErr *kbstore.ErrSalonValidation
+	if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
+	}
+
+	// A valid schedule must still be accepted (the guard isn't over-broad).
+	valid := aiprompt.Schedule{{Ref: "mon", Start: "10:00", End: "18:00"}}
+	if err := kb.PatchLiveContacts(ctx, orgID, actor, kbstore.ContactPatch{Schedule: &valid}); err != nil {
+		t.Fatalf("PatchLiveContacts with a valid schedule: %v", err)
+	}
+}
+
+// rawDraftBlob reads the org's draft blob directly out of kbd_draft,
+// bypassing mergedView's OWN blank->"active" display-time defaulting for a
+// pending row (draft.go: "SalesStatus: orDefault(bsp.SalesStatus, active)").
+// Reading through the public Draft() view instead would NOT actually prove
+// what MCPUpsertSpecialist/MCPUpsertService store: mergedView's defaulting
+// papers over a blank value for display regardless of whether the upsert
+// path defaults it first, so a Draft()-only test would pass identically
+// whether or not this fix exists — confirmed empirically (it passed against
+// the pre-fix mcp_write.go too) before being rewritten to this raw read.
+func rawDraftBlob(t *testing.T, db *dbx.DB, orgID uuid.UUID) kbstore.DraftBlob {
+	t.Helper()
+	var raw []byte
+	if err := db.QueryRow(context.Background(), `SELECT draft FROM kbd_draft WHERE organization_id = $1`, orgID).Scan(&raw); err != nil {
+		t.Fatalf("read kbd_draft.draft: %v", err)
+	}
+	var blob kbstore.DraftBlob
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		t.Fatalf("unmarshal draft blob: %v", err)
+	}
+	return blob
+}
+
+func findDraftSpecialist(rows []kbstore.DraftSpecialist, ref string) *kbstore.DraftSpecialist {
+	for i := range rows {
+		if rows[i].Ref == ref {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func findDraftService(rows []kbstore.DraftService, ref string) *kbstore.DraftService {
+	for i := range rows {
+		if rows[i].Ref == ref {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+// TestMCPUpsertSpecialist_OmittedSalesStatusDefaultsToActive is CodeRabbit
+// PR #119 discussion_r4110715063: a brand-new specialist created via
+// kb_specialist_upsert with sales_status omitted entirely (nil, not an
+// explicit "active") must land in the RAW draft blob AS "active" — the same
+// "default before validating" treatment ServiceType already gets
+// (mcp_write.go) — not merely appear that way through Draft()'s own
+// display-time defaulting (see rawDraftBlob's doc comment). Before this fix
+// it was stored blank: validateEnum treats "" as unset (not an error), but
+// active()/specialistVisible (aiprompt/catalog.go) accept only the literal
+// "active", so a blank status silently rendered the new specialist
+// invisible in every prompt despite never having been explicitly archived.
+func TestMCPUpsertSpecialist_OmittedSalesStatusDefaultsToActive(t *testing.T) {
+	kb, orgID, _, db := newTestKB(t)
+	ctx := context.Background()
+
+	res, err := kb.MCPUpsertSpecialist(ctx, orgID, uuid.Nil, "", kbstore.SpecialistChanges{
+		FullName: strp("Алина Ким"),
+	}, nil, kbstore.MCPProvenance{})
+	if err != nil {
+		t.Fatalf("MCPUpsertSpecialist: %v", err)
+	}
+
+	blob := rawDraftBlob(t, db, orgID)
+	sp := findDraftSpecialist(blob.Specialists, res.Key)
+	if sp == nil {
+		t.Fatalf("%s not found in the raw draft blob", res.Key)
+	}
+	if sp.SalesStatus != "active" {
+		t.Errorf("raw blob SalesStatus = %q, want %q (defaulted before storage, not left blank)", sp.SalesStatus, "active")
+	}
+}
+
+// TestMCPUpsertService_OmittedSalesStatusDefaultsToActive is
+// TestMCPUpsertSpecialist_OmittedSalesStatusDefaultsToActive's twin for
+// kb_service_upsert.
+func TestMCPUpsertService_OmittedSalesStatusDefaultsToActive(t *testing.T) {
+	kb, orgID, _, db := newTestKB(t)
+	ctx := context.Background()
+
+	res, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "", kbstore.ServiceChanges{
+		Name: strp("Женская стрижка"),
+	}, nil, kbstore.MCPProvenance{})
+	if err != nil {
+		t.Fatalf("MCPUpsertService: %v", err)
+	}
+
+	blob := rawDraftBlob(t, db, orgID)
+	sv := findDraftService(blob.Services, res.Key)
+	if sv == nil {
+		t.Fatalf("%s not found in the raw draft blob", res.Key)
+	}
+	if sv.SalesStatus != "active" {
+		t.Errorf("raw blob SalesStatus = %q, want %q (defaulted before storage, not left blank)", sv.SalesStatus, "active")
+	}
+}
+
+// TestMCPUpsertService_OmittedStatusParentChildComparison is CodeRabbit PR
+// #119 discussion_r4110715063's core scenario: the parent/child
+// active-status comparison (validateService) must see the DEFAULTED value,
+// not the raw blank one, on BOTH sides of the comparison — otherwise a
+// child left blank (!= "active") silently skips the "active child, inactive
+// base" guard entirely, and the invalid state is not caught until some
+// LATER operation happens to compare literal strings correctly (at worst,
+// never — approval must not be the first place this is detected).
+func TestMCPUpsertService_OmittedStatusParentChildComparison(t *testing.T) {
+	t.Run("omitted-status base + explicit active child succeeds", func(t *testing.T) {
+		kb, orgID, _, _ := newTestKB(t)
+		ctx := context.Background()
+
+		// Base created with sales_status omitted entirely -> defaults active.
+		if _, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "haircut-women", kbstore.ServiceChanges{
+			Name: strp("Женская стрижка"),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("create base: %v", err)
+		}
+		if _, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "haircut-short", kbstore.ServiceChanges{
+			Name: strp("Короткая"), ParentRef: strp("haircut-women"), ServiceType: strp("variant"),
+			SalesStatus: strp("active"),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("create active child under an omitted-status (defaulted active) base: %v", err)
+		}
+	})
+
+	t.Run("omitted-status child under inactive base fails immediately, at upsert time", func(t *testing.T) {
+		kb, orgID, _, _ := newTestKB(t)
+		ctx := context.Background()
+
+		if _, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "haircut-women", kbstore.ServiceChanges{
+			Name: strp("Женская стрижка"), SalesStatus: strp("inactive"),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("create inactive base: %v", err)
+		}
+		// The child's sales_status is OMITTED here, not explicitly "active" —
+		// it must still be compared as active (its defaulted value) against
+		// the base, and rejected, at THIS call, not silently accepted into
+		// the draft and only caught later at approval (or never).
+		_, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "haircut-short", kbstore.ServiceChanges{
+			Name: strp("Короткая"), ParentRef: strp("haircut-women"), ServiceType: strp("variant"),
+		}, nil, kbstore.MCPProvenance{})
+		if err == nil {
+			t.Fatal("want an error creating an omitted-status (defaulted active) child under an inactive base, got none")
+		}
+		var salonErr *kbstore.ErrSalonValidation
+		if !errors.As(err, &salonErr) {
+			t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
+		}
+	})
+
+	// TestMCPUpsertService_OmittedStatusParentChildComparison's other two
+	// subtests exercise callers that ALWAYS default a blank sales_status
+	// before it ever reaches storage (MCPUpsertService's own defaulting,
+	// mcp_write.go — itself defense in depth over upsertServiceRow's own
+	// final orDefault, kbstore.go), so a genuinely blank stored parent row
+	// can only arise from data written before that defaulting existed, or a
+	// write path this audit missed — inserted here directly via raw SQL,
+	// bypassing every Go-level default, to prove validateService's own
+	// comparison (salon_validate.go) still treats it as active rather than
+	// silently rejecting a perfectly valid child, exactly the CodeRabbit PR
+	// #119 discussion_r4110715063 scenario: "sv.SalesStatus == active with
+	// parent.SalesStatus == active" (the base is effectively active) must
+	// not be misread as parent.SalesStatus != active.
+	t.Run("a legacy blank-status parent row (predating this fix) is still treated as active", func(t *testing.T) {
+		kb, orgID, _, db := newTestKB(t)
+		ctx := context.Background()
+		if _, err := db.Exec(ctx, `INSERT INTO ai_services
+			(organization_id, ref, parent_ref, service_type, category, name, price, specialist_refs, sales_status)
+			VALUES ($1, 'haircut-women', '', 'base', '', 'Женская стрижка', '', '[]', '')`, orgID); err != nil {
+			t.Fatalf("seed legacy blank-status parent: %v", err)
+		}
+
+		if _, err := kb.MCPUpsertService(ctx, orgID, uuid.Nil, "haircut-short", kbstore.ServiceChanges{
+			Name: strp("Короткая"), ParentRef: strp("haircut-women"), ServiceType: strp("variant"),
+			SalesStatus: strp("active"),
+		}, nil, kbstore.MCPProvenance{}); err != nil {
+			t.Fatalf("create active child under a legacy blank-status (effectively active) base: %v", err)
+		}
+	})
+}
+
 // TestValidateService_Hierarchy exercises the write-time hierarchy rules
 // (salon_validate.go's validateService) through the live lane — the same
 // rules aiprompt.buildServiceFacts re-checks at render time.
@@ -170,23 +388,41 @@ func TestValidateService_Hierarchy(t *testing.T) {
 	}
 	mustPutLiveService(t, kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
 
+	// wantEnum: this case's ServiceInput trips validateEnum directly
+	// (ErrInvalidEnumValue); every other case is validateService's own rule
+	// (ErrSalonValidation). Both are CodeRabbit PR #119 discussion_r4110715047:
+	// kbFail (httpapi) must map both to HTTP 422, never fall through to 500.
 	cases := []struct {
-		name string
-		in   kbstore.ServiceInput
+		name     string
+		in       kbstore.ServiceInput
+		wantEnum bool
 	}{
-		{"variant without parent_ref", kbstore.ServiceInput{Ref: "x1", ServiceType: "variant", SalesStatus: "active"}},
-		{"addon with unknown parent_ref", kbstore.ServiceInput{Ref: "x2", ServiceType: "addon", ParentRef: "does-not-exist", SalesStatus: "active"}},
-		{"invalid service_type", kbstore.ServiceInput{Ref: "x3", ServiceType: "combo", SalesStatus: "active"}},
+		{"variant without parent_ref", kbstore.ServiceInput{Ref: "x1", ServiceType: "variant", SalesStatus: "active"}, false},
+		{"addon with unknown parent_ref", kbstore.ServiceInput{Ref: "x2", ServiceType: "addon", ParentRef: "does-not-exist", SalesStatus: "active"}, false},
+		{"invalid service_type", kbstore.ServiceInput{Ref: "x3", ServiceType: "combo", SalesStatus: "active"}, true},
 		{"non-positive duration", func() kbstore.ServiceInput {
 			d := 0
 			return kbstore.ServiceInput{Ref: "x4", ServiceType: "base", Duration: &d, SalesStatus: "active"}
-		}()},
-		{"unknown specialist_ref", kbstore.ServiceInput{Ref: "x5", ServiceType: "base", SpecialistRefs: []string{"nobody"}, SalesStatus: "active"}},
+		}(), false},
+		{"unknown specialist_ref", kbstore.ServiceInput{Ref: "x5", ServiceType: "base", SpecialistRefs: []string{"nobody"}, SalesStatus: "active"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := kb.PutLiveService(ctx, orgID, actor, tc.in); err == nil {
+			err := kb.PutLiveService(ctx, orgID, actor, tc.in)
+			if err == nil {
 				t.Fatal("want an error, got none")
+			}
+			var enumErr *kbstore.ErrInvalidEnumValue
+			var salonErr *kbstore.ErrSalonValidation
+			switch {
+			case tc.wantEnum:
+				if !errors.As(err, &enumErr) {
+					t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrInvalidEnumValue", err, err)
+				}
+			default:
+				if !errors.As(err, &salonErr) {
+					t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
+				}
 			}
 		})
 	}
@@ -236,6 +472,12 @@ func TestPutLiveService_RejectsActivatingChildUnderArchivedBase(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("want an error activating a child whose base is still archived, got none")
+	}
+	// CodeRabbit PR #119 discussion_r4110715047: this must be classified as
+	// ErrSalonValidation so kbFail (httpapi) answers 422, not 500.
+	var salonErr *kbstore.ErrSalonValidation
+	if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
 	}
 
 	live, err := kb.LiveView(ctx, orgID)
@@ -421,8 +663,14 @@ func TestDeleteLiveService_RejectsWhenChildrenExist(t *testing.T) {
 	must(kbstore.ServiceInput{Ref: "haircut-women", ServiceType: "base", Name: "Женская стрижка", SalesStatus: "active"})
 	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "active"})
 
+	// CodeRabbit PR #119 discussion_r4110715047: deleting a base service with
+	// children must be classified as ErrSalonValidation so kbFail (httpapi)
+	// answers 422, not 500.
+	var salonErr *kbstore.ErrSalonValidation
 	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-women"); err == nil {
 		t.Fatal("want an error deleting a base service with an active child, got none")
+	} else if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
 	}
 
 	// Archiving the child (not removing it) must still block the delete —
@@ -431,6 +679,8 @@ func TestDeleteLiveService_RejectsWhenChildrenExist(t *testing.T) {
 	must(kbstore.ServiceInput{Ref: "haircut-short", ParentRef: "haircut-women", ServiceType: "variant", Name: "Короткая", SalesStatus: "inactive"})
 	if err := kb.DeleteLiveService(ctx, orgID, actor, "haircut-women"); err == nil {
 		t.Fatal("want an error deleting a base service with an INACTIVE child, got none")
+	} else if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
 	}
 
 	live, err := kb.LiveView(ctx, orgID)
@@ -679,9 +929,17 @@ func TestSetLiveServiceSalesStatus_OnlyChangesStatus(t *testing.T) {
 	}
 
 	// Restoring ONLY the child while the base is still archived must be
-	// rejected.
-	if _, err := kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-short", "active"); err == nil {
+	// rejected. CodeRabbit PR #119 discussion_r4110715047: this must be
+	// classified as ErrSalonValidation so kbFail (httpapi) answers 422, not
+	// 500 — SetLiveServiceSalesStatus enforces this rule with its own inline
+	// check (live.go), a separate call site from validateService's.
+	_, err = kb.SetLiveServiceSalesStatus(ctx, orgID, actor, "haircut-short", "active")
+	if err == nil {
 		t.Fatal("want an error activating a child whose base is still archived, got none")
+	}
+	var salonErr *kbstore.ErrSalonValidation
+	if !errors.As(err, &salonErr) {
+		t.Fatalf("err = %v (%T), want it to be (or wrap) *kbstore.ErrSalonValidation", err, err)
 	}
 }
 

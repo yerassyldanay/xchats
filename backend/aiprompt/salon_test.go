@@ -369,6 +369,156 @@ func TestResolveFactLang_ScheduleStaleRejection(t *testing.T) {
 	}
 }
 
+// TestResolveFactLang_ScheduleNormalizedBeforeResolution is CodeRabbit's
+// PR #119 finding (discussion_r4110715039): currentFactValue used to hand
+// scheduleFactValue the RAW, possibly non-canonically-ordered schedule
+// straight from kb.Contacts/specialist.Schedule instead of running it
+// through NormalizeSchedule first, the way BuildCatalog's buildFacts always
+// does (catalog.go) before ever deciding a schedule/schedule_<day> token
+// exists. A schedule stored with weekdays out of order or a day's breaks out
+// of start-time order would resolve to a DIFFERENT string at answer time
+// than the canonical one BuildCatalog used to mint the token.
+func TestResolveFactLang_ScheduleNormalizedBeforeResolution(t *testing.T) {
+	t.Run("contact schedule: unsorted weekdays and unsorted breaks", func(t *testing.T) {
+		kb := salonKB()
+		kb.Contacts.Schedule = Schedule{
+			day(Friday, "10:00", "20:00",
+				ScheduleBreak{Start: "15:00", End: "15:30"}, ScheduleBreak{Start: "13:00", End: "14:00"}),
+			day(Monday, "09:00", "18:00"),
+			day(Wednesday, "09:00", "18:00"),
+		}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// The oracle: the exact same normalize-then-render path BuildCatalog
+		// itself uses (catalog.go's buildFacts), computed independently here
+		// so this test catches a divergence in either direction.
+		normalized, err := NormalizeSchedule(kb.Contacts.Schedule)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantFull := scheduleFullText(normalized, "ru")
+		wantFri := scheduleDayText(*normalized.DayByRef(Friday), "ru")
+
+		gotFull, err := ResolveFactLang("{{contact.main.schedule}}", kb, cat, "ru")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotFull != wantFull {
+			t.Fatalf("schedule = %q, want %q (weekday/break storage order must not leak into the resolved value)", gotFull, wantFull)
+		}
+
+		gotFri, err := ResolveFactLang("{{contact.main.schedule_fri}}", kb, cat, "ru")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotFri != wantFri {
+			t.Fatalf("schedule_fri = %q, want %q (breaks must resolve sorted by start time)", gotFri, wantFri)
+		}
+	})
+
+	t.Run("specialist schedule: unsorted weekdays and unsorted breaks", func(t *testing.T) {
+		kb := salonKB()
+		kb.Specialists[0].Schedule = Schedule{
+			day(Wednesday, "10:00", "19:00",
+				ScheduleBreak{Start: "16:00", End: "16:15"}, ScheduleBreak{Start: "13:00", End: "14:00"}),
+			day(Tuesday, "10:00", "19:00"),
+		}
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		normalized, err := NormalizeSchedule(kb.Specialists[0].Schedule)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		wantFull := scheduleFullText(normalized, "ru")
+		wantWed := scheduleDayText(*normalized.DayByRef(Wednesday), "ru")
+
+		gotFull, err := ResolveFactLang("{{specialist.alina-kim.schedule}}", kb, cat, "ru")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotFull != wantFull {
+			t.Fatalf("schedule = %q, want %q", gotFull, wantFull)
+		}
+
+		gotWed, err := ResolveFactLang("{{specialist.alina-kim.schedule_wed}}", kb, cat, "ru")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotWed != wantWed {
+			t.Fatalf("schedule_wed = %q, want %q", gotWed, wantWed)
+		}
+	})
+}
+
+// TestResolveFactLang_InvalidScheduleAtResolveTimeFailsClosed covers the
+// other half of the same CodeRabbit finding: currentFactValue must run the
+// CURRENT schedule through NormalizeSchedule on every resolution — not just
+// once, back when BuildCatalog first built the request catalog — and an
+// invalid schedule must fail closed with an error that both names the
+// affected fact token and preserves the underlying NormalizeSchedule error
+// (wrapped with %w), rather than rendering from unvalidated data or
+// silently ignoring the failure.
+func TestResolveFactLang_InvalidScheduleAtResolveTimeFailsClosed(t *testing.T) {
+	t.Run("contact", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		invalid := Schedule{day(Monday, "10:00", "18:00",
+			ScheduleBreak{Start: "13:00", End: "14:00"}, ScheduleBreak{Start: "13:30", End: "14:30"})} // overlapping breaks
+		kb.Contacts.Schedule = invalid
+		_, wantErr := NormalizeSchedule(invalid)
+		if wantErr == nil {
+			t.Fatal("fixture is not actually invalid")
+		}
+
+		const token = "{{contact.main.schedule}}"
+		if _, err := ResolveFactLang(token, kb, cat, "ru"); err == nil {
+			t.Fatal("want an error once the contact schedule becomes invalid")
+		} else {
+			if !strings.Contains(err.Error(), token) {
+				t.Errorf("error %q does not name the fact token %q", err.Error(), token)
+			}
+			if !strings.Contains(err.Error(), wantErr.Error()) {
+				t.Errorf("error %q does not preserve the underlying NormalizeSchedule error %q", err.Error(), wantErr.Error())
+			}
+		}
+	})
+
+	t.Run("specialist", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		invalid := Schedule{{Ref: Monday, Start: "10:00", End: "10:00"}} // start == end
+		kb.Specialists[0].Schedule = invalid
+		_, wantErr := NormalizeSchedule(invalid)
+		if wantErr == nil {
+			t.Fatal("fixture is not actually invalid")
+		}
+
+		const token = "{{specialist.alina-kim.schedule}}"
+		if _, err := ResolveFactLang(token, kb, cat, "ru"); err == nil {
+			t.Fatal("want an error once alina-kim's schedule becomes invalid")
+		} else {
+			if !strings.Contains(err.Error(), token) {
+				t.Errorf("error %q does not name the fact token %q", err.Error(), token)
+			}
+			if !strings.Contains(err.Error(), wantErr.Error()) {
+				t.Errorf("error %q does not preserve the underlying NormalizeSchedule error %q", err.Error(), wantErr.Error())
+			}
+		}
+	})
+}
+
 func TestValidateResponseV7_StaleScheduleTokenIsAContractIssue(t *testing.T) {
 	kb := salonKB()
 	cat, err := BuildCatalog(kb)
@@ -451,6 +601,35 @@ func TestValidateScheduleLiteralContract(t *testing.T) {
 		_, issues := ValidateResponseV7(raw, kb, cat)
 		if !containsCode(issues, "schedule_time_literal") {
 			t.Fatalf("want schedule_time_literal for a spelled-out hour, got %v", issueCodes(issues))
+		}
+	})
+
+	// TestSpelledOutHourPattern (schedule_test.go) covers the regex itself
+	// exhaustively; this end-to-end pair confirms the fix is actually wired
+	// through validateScheduleLiteralContract, not just correct in isolation.
+	t.Run("an ordinary duration phrase ending in дня is not flagged", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Мы ответим вам через два дня.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if containsCode(issues, "schedule_time_literal") {
+			t.Fatalf("did not want schedule_time_literal for an ordinary duration phrase, got %v", issueCodes(issues))
+		}
+	})
+
+	t.Run("a real spelled-out afternoon hour is still flagged", func(t *testing.T) {
+		kb := salonKB()
+		cat, err := BuildCatalog(kb)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		raw := `{"reply_text":"Алина освободится в два часа дня.","reply_language":"ru","media_files_to_send":[],"escalate":false}`
+		_, issues := ValidateResponseV7(raw, kb, cat)
+		if !containsCode(issues, "schedule_time_literal") {
+			t.Fatalf("want schedule_time_literal for a genuine spelled-out afternoon hour, got %v", issueCodes(issues))
 		}
 	})
 
@@ -581,6 +760,68 @@ func TestValidateSalonConfirmationGuard(t *testing.T) {
 			t.Fatalf("an active specialist with an empty schedule must still count as a salon org, got %v", issueCodes(issues))
 		}
 	})
+}
+
+// TestValidateSalonConfirmationGuard_SentenceScopedQuestionExemption is
+// CodeRabbit PR #119 discussion_r4111656325: the "ли" question exemption
+// must be scoped to the SPECIFIC match's own sentence, not a fixed ±40-byte
+// window around it (this file's previous approach) — a window can straddle
+// a real sentence boundary and let an unrelated "ли" in one sentence
+// wrongly exempt a genuine confirmation in the NEXT one. Every match is
+// checked independently (not just the first), and the exemption never
+// leaks across a sentence boundary in either direction.
+func TestValidateSalonConfirmationGuard_SentenceScopedQuestionExemption(t *testing.T) {
+	kb := salonKB()
+	cases := []struct {
+		name string
+		text string
+		want bool // want salon_booking_confirmation
+	}{
+		{
+			"valid question only",
+			"Проверьте, есть ли окно свободного времени на странице записи.",
+			false,
+		},
+		{
+			"question followed by assertion — the assertion's own sentence has no ли",
+			"Проверьте, есть ли окно свободного времени? Вы записаны.",
+			true,
+		},
+		{
+			"assertion followed by question — the assertion's own sentence has no ли",
+			"Вы записаны. Проверьте, есть ли окно свободного времени?",
+			true,
+		},
+		{
+			"multiple assertions, neither sentence has ли",
+			"Вы записаны. Бронь подтверждена.",
+			true,
+		},
+		{
+			"two questions and no assertions — both matches share a ли sentence",
+			"Есть ли окно? Ждём ли вас?",
+			false,
+		},
+		{
+			"a distant, previous-sentence ли must not mask an assertion in the next sentence",
+			"Проверьте, есть ли окно? Вы записаны, ждите нас.",
+			true,
+		},
+		{
+			"existing direct confirmation phrase, no ли anywhere, still rejected",
+			"Хорошо, вы записаны на завтра.",
+			true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			issues := validateSalonConfirmationGuard(kb, tc.text)
+			got := containsCode(issues, "salon_booking_confirmation")
+			if got != tc.want {
+				t.Errorf("text %q: salon_booking_confirmation = %v, want %v (issues: %v)", tc.text, got, tc.want, issueCodes(issues))
+			}
+		})
+	}
 }
 
 func TestSalonPromptNoRawLeaks(t *testing.T) {

@@ -10,6 +10,22 @@ vi.mock('@/api/client', async (importOriginal) => {
   return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() } }
 })
 
+// vitest's own clearMocks default (vitest.config.ts has no override) already
+// resets each mock's CALL HISTORY before every test — this instead guards
+// the other half: a mockResolvedValue/mockImplementation (as opposed to a
+// scoped …Once call) sets a PERSISTENT implementation that clearMocks does
+// NOT touch, so it would otherwise survive into every later test in this
+// file. Every test that needs a specific response sets its own
+// mockResolvedValueOnce/mockRejectedValueOnce inside its own body, AFTER
+// this runs, so resetting here never fights that.
+beforeEach(async () => {
+  const { api } = await import('@/api/client')
+  vi.mocked(api.get).mockReset()
+  vi.mocked(api.post).mockReset()
+  vi.mocked(api.patch).mockReset()
+  vi.mocked(api.del).mockReset()
+})
+
 // useKbModal's session is a module-level singleton (see its own doc
 // comment) — unmount after every test so an Edit click in one test can't
 // leak an open dialog session into the next.
@@ -211,7 +227,7 @@ describe('SpecialistsTab — archive/restore: optimistic toggle behind a 5s undo
       specialist({ ref: 'diana-nur', full_name: 'Диана Нур', sales_status: 'active' }),
     ])
     const { api } = await import('@/api/client')
-    vi.mocked(api.patch).mockResolvedValue(specialist({ ref: 'alina-kim', sales_status: 'inactive' }))
+    vi.mocked(api.patch).mockResolvedValueOnce(specialist({ ref: 'alina-kim', sales_status: 'inactive' }))
 
     await wrapper.find('[data-testid="specialist-status-switch-alina-kim"]').trigger('click')
     expect(api.patch).not.toHaveBeenCalled()

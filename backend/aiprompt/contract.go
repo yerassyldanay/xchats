@@ -496,15 +496,34 @@ var bookingConfirmationRE = regexp.MustCompile(`(?i)` +
 // does the job \b would if it worked here.
 var bookingQuestionParticleRE = regexp.MustCompile(`(?i)(?:^|[^а-я])ли(?:[^а-я]|$)`)
 
-// bookingQuestionWindow bounds how far from a bookingConfirmationRE match
-// validateSalonConfirmationGuard looks for "ли" — generous enough for a
-// realistic Russian question construction ("Проверьте, есть ли ... на
-// странице записи"), short enough that an unrelated "ли" several sentences
-// away in a longer reply cannot mask a genuine, separate confirmation
-// elsewhere in the same text. Byte offsets, not rune-aligned — matches this
-// file's existing pragmatic-not-a-parser tolerance for a stray boundary
-// landing mid-rune at the very edge of the window.
-const bookingQuestionWindow = 40
+// sentenceBoundaryRE marks where one Russian sentence ends and the next
+// begins (a run of ., !, or ? — covering "?!" and "..." too). Not a full
+// segmenter — an abbreviation or a "." inside a URL would also split — but
+// the failure mode of an unwanted extra split only ever NARROWS a
+// question's own sentence span (a documented, accepted tradeoff, the same
+// spirit as bookingConfirmationRE's own "eager, not exhaustive" doc
+// comment), never widens a match's span to wrongly borrow a question marker
+// from a genuinely separate sentence, which is the actual failure this
+// replaces (see validateSalonConfirmationGuard's doc comment below).
+var sentenceBoundaryRE = regexp.MustCompile(`[.!?]+`)
+
+// sentenceSpan returns the [start,end) byte bounds of the sentence
+// containing the byte range [matchStart,matchEnd) in text, given every
+// sentenceBoundaryRE match in text — the nearest boundary ending at or
+// before matchStart (or 0), and the nearest one starting at or after
+// matchEnd (or len(text)).
+func sentenceSpan(text string, boundaries [][]int, matchStart, matchEnd int) (start, end int) {
+	start, end = 0, len(text)
+	for _, b := range boundaries {
+		if b[1] <= matchStart && b[1] > start {
+			start = b[1]
+		}
+		if b[0] >= matchEnd && b[0] < end {
+			end = b[0]
+		}
+	}
+	return start, end
+}
 
 // validateSalonConfirmationGuard is bookingConfirmationRE's contract-check
 // wrapper — gated by isSalonOrganization like validateScheduleLiteralContract,
@@ -512,30 +531,38 @@ const bookingQuestionWindow = 40
 // only as prompt text (kb.config.guardrails) — every other check in this
 // file is token/leak-shaped, none of them semantic, so nothing in code
 // stopped a model that simply ignored the instruction.
+//
+// Every match is checked, not just the first (a reply can legitimately
+// contain more than one trigger phrase), and each match's "ли" question
+// exemption is scoped to that match's OWN sentence — never a fixed byte
+// window around it. A window (this file's previous approach) can straddle a
+// real sentence boundary: "Проверьте, есть ли окно? Вы записаны." has the
+// question's "ли" only ~14 bytes before "Вы записаны" starts, well inside a
+// ±40-byte window, which would have wrongly exempted a genuine confirmation
+// in the NEXT sentence. Scoping to the sentence instead of a byte count
+// fixes that by construction: a "ли" only ever exempts a match that shares
+// its own sentence.
 func validateSalonConfirmationGuard(kb *KB, withoutPlaceholders string) []ContractIssue {
 	if !isSalonOrganization(kb) {
 		return nil
 	}
-	loc := bookingConfirmationRE.FindStringIndex(withoutPlaceholders)
-	if loc == nil {
+	matches := bookingConfirmationRE.FindAllStringIndex(withoutPlaceholders, -1)
+	if matches == nil {
 		return nil
 	}
-	start := loc[0] - bookingQuestionWindow
-	if start < 0 {
-		start = 0
+	boundaries := sentenceBoundaryRE.FindAllStringIndex(withoutPlaceholders, -1)
+	for _, loc := range matches {
+		start, end := sentenceSpan(withoutPlaceholders, boundaries, loc[0], loc[1])
+		if bookingQuestionParticleRE.MatchString(withoutPlaceholders[start:end]) {
+			continue // this match's own sentence asks a question — exempt only THIS match
+		}
+		m := withoutPlaceholders[loc[0]:loc[1]]
+		return []ContractIssue{{
+			Code:   "salon_booking_confirmation",
+			Detail: "reply_text confirms a booking or asserts real-time availability (\"" + strings.TrimSpace(m) + "\") — must always route to the booking link instead",
+		}}
 	}
-	end := loc[1] + bookingQuestionWindow
-	if end > len(withoutPlaceholders) {
-		end = len(withoutPlaceholders)
-	}
-	if bookingQuestionParticleRE.MatchString(withoutPlaceholders[start:end]) {
-		return nil
-	}
-	m := withoutPlaceholders[loc[0]:loc[1]]
-	return []ContractIssue{{
-		Code:   "salon_booking_confirmation",
-		Detail: "reply_text confirms a booking or asserts real-time availability (\"" + strings.TrimSpace(m) + "\") — must always route to the booking link instead",
-	}}
+	return nil
 }
 
 // validateScheduleLiteralContract flags any HH:MM-shaped clock time the
@@ -567,10 +594,10 @@ func validateScheduleLiteralContract(kb *KB, withoutPlaceholders string) []Contr
 			Detail: "reply_text contains a model-authored clock time " + m + " instead of a schedule token",
 		}}
 	}
-	if m := spelledOutHourPattern.FindString(withoutPlaceholders); m != "" {
+	if m := spelledOutHourPattern.FindStringSubmatch(withoutPlaceholders); m != nil {
 		return []ContractIssue{{
 			Code:   "schedule_time_literal",
-			Detail: "reply_text contains a model-authored spelled-out time " + strings.TrimSpace(m) + " instead of a schedule token",
+			Detail: "reply_text contains a model-authored spelled-out time " + strings.TrimSpace(m[1]) + " instead of a schedule token",
 		}}
 	}
 	return nil
@@ -703,7 +730,17 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 		if fact.Ref != SingletonRef || kb.Contacts == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has a contacts row", fact.Token)
 		}
-		if v, ok := scheduleFactValue(fact.Column, kb.Contacts.BookingURL, kb.Contacts.Schedule, lang); ok {
+		// Normalized the same way BuildCatalog normalizes it before ever
+		// generating the schedule/schedule_<day> tokens in the first place
+		// (catalog.go) — NormalizeSchedule sorts weekdays and each day's
+		// breaks, so resolving against the raw, possibly non-canonically
+		// ordered stored value could render different text than what the
+		// token was originally created from.
+		schedule, err := NormalizeSchedule(kb.Contacts.Schedule)
+		if err != nil {
+			return "", fmt.Errorf("aiprompt: fact token %q: %w", fact.Token, err)
+		}
+		if v, ok := scheduleFactValue(fact.Column, kb.Contacts.BookingURL, schedule, lang); ok {
 			value = v
 			break
 		}
@@ -718,8 +755,20 @@ func currentFactValue(kb *KB, fact *FactEntry, lang string) (string, error) {
 		if specialist == nil {
 			return "", fmt.Errorf("aiprompt: fact token %q no longer has an active specialist row", fact.Token)
 		}
+		schedule, err := NormalizeSchedule(specialist.Schedule)
+		if err != nil {
+			return "", fmt.Errorf("aiprompt: fact token %q: %w", fact.Token, err)
+		}
 		booking := resolvedBookingURL(specialist.BookingURL, contactBookingURL(kb))
-		v, _ := scheduleFactValue(fact.Column, booking, specialist.Schedule, lang)
+		v, ok := scheduleFactValue(fact.Column, booking, schedule, lang)
+		if !ok {
+			// Every registered specialist fact column IS a schedule column
+			// (factColumns["specialist"] is exactly scheduleFactColumns'
+			// output, registry.go) — this is unreachable today, but fails
+			// loudly instead of silently resolving to "" if that ever stops
+			// being true, the same discipline every other branch here uses.
+			return "", fmt.Errorf("aiprompt: fact token %q: unrecognized specialist fact column %q", fact.Token, fact.Column)
+		}
 		value = v
 	case "service":
 		service := currentService(kb, fact.Ref)

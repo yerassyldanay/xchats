@@ -18,6 +18,8 @@ import (
 func (s *Server) kbFail(c *gin.Context, err error) {
 	var ge *kbstore.GateError
 	var me *kbstore.ErrMediaReference
+	var ee *kbstore.ErrInvalidEnumValue
+	var se *kbstore.ErrSalonValidation
 	switch {
 	case errors.As(err, &ge):
 		// KB-09: the gate validates the WHOLE resulting KB even for a
@@ -38,6 +40,21 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 		// rejection reasons are ordinary domain messages (same class as
 		// GateError above), not something to hide behind a generic 500.
 		fail(c, http.StatusUnprocessableEntity, ErrValidation, me.Error())
+	case errors.As(err, &ee):
+		// A closed-enum field (service_type, sales_status, zone_level, ...)
+		// given a value outside it — validateEnum's own doc comment. Same
+		// class of ordinary, caller-facing input mistake as GateError/
+		// ErrMediaReference above; previously fell to the 500 default below.
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, ee.Error())
+	case errors.As(err, &se):
+		// validateSpecialist/validateService/PatchLiveContacts's own rule
+		// violations (bad ref shape, broken base/variant hierarchy, invalid
+		// schedule, deleting a service that still has children, ...) —
+		// salon_validate.go's ErrSalonValidation doc comment. Deliberately
+		// checked last among the typed cases so a DB/infrastructure error a
+		// sub-call returns unwrapped (never given this type) still falls
+		// through to the 500 default, exactly as before.
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, se.Error())
 	case errors.Is(err, kbstore.ErrUnknownKind):
 		fail(c, http.StatusBadRequest, ErrValidation, "unknown row kind")
 	case errors.Is(err, kbstore.ErrStale):

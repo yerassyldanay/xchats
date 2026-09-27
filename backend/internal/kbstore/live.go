@@ -398,7 +398,7 @@ func (s *Store) DeleteLiveService(ctx context.Context, orgID uuid.UUID, actor uu
 		return err
 	}
 	if hasChildren {
-		return fmt.Errorf("kbstore: cannot delete service %q — it still has variant/addon services referencing it as parent_ref", ref)
+		return salonInvalid("kbstore: cannot delete service %q — it still has variant/addon services referencing it as parent_ref", ref)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM ai_services WHERE organization_id=$1 AND ref=$2`, orgID, ref); err != nil {
 		return err
@@ -489,7 +489,7 @@ func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, 
 			return ServiceRow{}, err
 		}
 		if !parentExists || parent.SalesStatus != "active" {
-			return ServiceRow{}, fmt.Errorf("kbstore: service %q cannot be active while its base service %q is not — activate %q first", ref, cur.ParentRef, cur.ParentRef)
+			return ServiceRow{}, salonInvalid("kbstore: service %q cannot be active while its base service %q is not — activate %q first", ref, cur.ParentRef, cur.ParentRef)
 		}
 	}
 
@@ -570,7 +570,7 @@ func (s *Store) PatchLiveContacts(ctx context.Context, orgID uuid.UUID, actor uu
 	if p.Schedule != nil {
 		schedule, err := aiprompt.NormalizeSchedule(*p.Schedule)
 		if err != nil {
-			return fmt.Errorf("kbstore: contact: %w", err)
+			return salonInvalid("kbstore: contact: %w", err)
 		}
 		cur.Schedule = schedule
 	}

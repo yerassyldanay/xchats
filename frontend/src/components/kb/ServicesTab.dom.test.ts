@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, type VueWrapper } from '@vue/test-utils'
 import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
@@ -8,6 +8,22 @@ import type { DraftView, ServiceRow, SpecialistRow } from '@/types'
 vi.mock('@/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/client')>()
   return { ...actual, api: { ...actual.api, get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() } }
+})
+
+// vitest's own clearMocks default (vitest.config.ts has no override) already
+// resets each mock's CALL HISTORY before every test — this instead guards
+// the other half: a mockResolvedValue/mockImplementation (as opposed to a
+// scoped …Once call) sets a PERSISTENT implementation that clearMocks does
+// NOT touch, so it would otherwise survive into every later test in this
+// file. Every test that needs a specific response sets its own
+// mockResolvedValueOnce/mockRejectedValueOnce inside its own body, AFTER
+// this runs, so resetting here never fights that.
+beforeEach(async () => {
+  const { api } = await import('@/api/client')
+  vi.mocked(api.get).mockReset()
+  vi.mocked(api.post).mockReset()
+  vi.mocked(api.patch).mockReset()
+  vi.mocked(api.del).mockReset()
 })
 
 // useKbModal's session is a module-level singleton (see SpecialistsTab.dom.
@@ -20,9 +36,15 @@ afterEach(() => {
 
 // reka-ui's Dialog (ConfirmDeleteDialog's own building block) renders
 // through a Teleport into document.body, outside @vue/test-utils' wrapper
-// subtree — same reasoning/pattern as DraftKnowledgeBase.dom.test.ts's own
-// openDialogAccept(). Earlier mounts in this file are never explicitly
-// cleared from document.body, so always take the LAST match.
+// subtree — same shape as DraftKnowledgeBase.dom.test.ts's own
+// openDialogAccept(), though that file's "always take the last match"
+// reasoning does not carry over verbatim: THIS file's own afterEach above
+// unmounts every mount (Vue tears its Teleport content down along with it —
+// verified empirically: document.body is empty again immediately after),
+// so in the normal case there is only ever one match by the time a test
+// queries document.body. "Last match" is kept anyway as a cheap defensive
+// fallback — free, and correct either way — rather than something this file
+// currently depends on.
 function lastInBody(testid: string): HTMLElement | null {
   const all = document.body.querySelectorAll(`[data-testid="${testid}"]`)
   return (all[all.length - 1] as HTMLElement | undefined) ?? null

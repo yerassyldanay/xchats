@@ -837,6 +837,14 @@ func (s *Store) MCPUpsertSpecialist(ctx context.Context, orgID uuid.UUID, userID
 		if creating && strings.TrimSpace(cur.FullName) == "" {
 			return &ErrRequiredFieldMissing{Field: "full_name"}
 		}
+		// Default BEFORE validating, same as service_type below (and
+		// PutLiveSpecialist, live.go): a blank sales_status must become
+		// "active" — validateEnum treats "" as "not specified" (not an
+		// error), but active()/specialistVisible (aiprompt/catalog.go)
+		// treat anything other than the literal "active" as archived, so a
+		// specialist left blank here would silently render invisible at
+		// prompt-render time despite never having been explicitly archived.
+		cur.SalesStatus = orDefault(cur.SalesStatus, "active")
 		cur, err = validateSpecialist(cur)
 		if err != nil {
 			return err
@@ -936,6 +944,14 @@ func (s *Store) MCPUpsertService(ctx context.Context, orgID uuid.UUID, userID uu
 		// service_type omitted would wrongly fall into the variant/addon
 		// branch and demand a parent_ref.
 		cur.ServiceType = orDefault(cur.ServiceType, "base")
+		// Same reasoning for sales_status (MCPUpsertSpecialist's own comment,
+		// above): default to "active" BEFORE validateService's parent/child
+		// active-status comparison runs, or a blank child status (!=
+		// "active") would silently skip that check — "approval is not the
+		// first place an invalid parent/child state is detected" — while
+		// still rendering invisible later via active()/buildServiceFacts,
+		// which accept only the literal "active".
+		cur.SalesStatus = orDefault(cur.SalesStatus, "active")
 		cur, err = s.validateService(ctx, db, orgID, b, cur)
 		if err != nil {
 			return err

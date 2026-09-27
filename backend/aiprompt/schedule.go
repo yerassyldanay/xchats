@@ -345,10 +345,27 @@ var scheduleTimePattern = regexp.MustCompile(`\b([01]?\d|2[0-3]):[0-5]\d\b`)
 // can still slip through. The same documented, accepted tradeoff
 // bookingConfirmationRE (contract.go) makes: catching the common real
 // phrasings beats matching nothing while chasing a complete grammar.
-// No leading \b: RE2's word-boundary class is ASCII-only ([0-9A-Za-z_]), so
-// \b never matches at a Cyrillic-letter boundary — the same reason
-// bookingConfirmationRE (above) carries no \b either.
-var spelledOutHourPattern = regexp.MustCompile(`(?i)(час|полдень|полночь|одиннадцат|двенадцат|десят|девят|восем|сем|шест|пят|четыр|тр[её]|дв[ае]х?|одн[оа])[а-я]*\s+(утра|дня|вечера|ночи)`)
+//
+// Explicit Cyrillic-aware boundaries on both sides, consumed OUTSIDE the
+// capturing group so FindStringSubmatch's group 1 is always the clean
+// matched phrase: RE2's \b is ASCII-only and never fires at a Cyrillic
+// letter boundary (bookingQuestionParticleRE, contract.go, works around the
+// same gap the same way), so without them a stem or daypart word matches as
+// a mere substring of an unrelated longer word — e.g. "сем" inside
+// "восемьдесят", or the daypart "вечера" as the prefix of "вечерами" (so
+// "часто вечерами" would otherwise misfire as a clock claim).
+//
+// "дня" is deliberately paired only with the "час" stem, never the bare
+// numeral stems: "два дня"/"четыре дня" are ordinary duration/advance-notice
+// phrases (genitive of "день"), not "two/four o'clock in the afternoon" —
+// that reading only arises after an explicit "час"/"часа"/"часов" word ("в
+// два часа дня"). "полдень"/"полночь" are complete time references on their
+// own and take no trailing daypart word at all.
+var spelledOutHourPattern = regexp.MustCompile(`(?i)(?:^|[^а-яёА-ЯЁ])` +
+	`(час[а-яё]*\s+(?:утра|дня|вечера|ночи)` +
+	`|(?:одиннадцат|двенадцат|десят|девят|восем|сем|шест|пят|четыр|тр[её]|дв[ае]х?|одн[оа])[а-яё]*\s+(?:утра|вечера|ночи)` +
+	`|полдень|полночь)` +
+	`(?:$|[^а-яёА-ЯЁ])`)
 
 // isSalonOrganization reports whether kb carries any structured salon data
 // (PLAN.md "Beauty Salon Knowledge Base Extension") — scopes
