@@ -35,10 +35,11 @@ var targetTypeToTool = map[string]string{
 	"topics": "kb_topic_upsert", "products": "kb_product_upsert", "tariffs": "kb_tariff_upsert",
 	"contacts": "kb_contacts_upsert", "policies": "kb_policies_upsert", "tariff_info": "kb_tariff_info_upsert",
 	"delivery_zones": "kb_delivery_zone_upsert",
+	"specialists":    "kb_specialist_upsert", "services": "kb_service_upsert",
 }
 
 // allowedToolsForTarget returns the tool set a synthesis prompt may use:
-// all six content tools for "auto" (the model picks), or exactly one for an
+// every content tool for "auto" (the model picks), or exactly one for an
 // explicit target_type.
 func allowedToolsForTarget(targetType string) []string {
 	if tool, ok := targetTypeToTool[targetType]; ok {
@@ -57,7 +58,7 @@ const outputContractDescription = `Ответь ОДНИМ JSON-объектом
   "notes": "краткое резюме на русском: что сделано и почему",
   "unmapped": ["список фактов или материалов, которые не удалось однозначно сопоставить с записью"]
 }
-Каждый элемент "calls" — это ОДИН вызов одного из перечисленных ниже инструментов. "args" должен в точности соответствовать JSON Schema этого инструмента: для kb_topic_upsert используй "slug" и "changes"; для kb_product_upsert/kb_tariff_upsert/kb_delivery_zone_upsert используй "ref" и "changes"; для kb_contacts_upsert/kb_policies_upsert/kb_tariff_info_upsert используй только "changes". Поле "changes" заполняй только полями из схемы инструмента. В медиа-поля (например featured_image, gallery_images) подставляй ТОЛЬКО значения handle из манифеста материалов ниже (например "upload.1") — никогда не изобретай UUID и не используй handle с префиксом "evidence.". Если существующая запись в разделе "Текущая база знаний" уже соответствует материалу — обнови её тем же ключом (ref/slug), не создавай дубликат. Если инструкции оператора не хватает и есть сомнения — не создавай запись, опиши проблему в "unmapped". Если подходящих записей нет вовсе — верни "calls": [].`
+Каждый элемент "calls" — это ОДИН вызов одного из перечисленных ниже инструментов. "args" должен в точности соответствовать JSON Schema этого инструмента: для kb_topic_upsert используй "slug" и "changes"; для kb_product_upsert/kb_tariff_upsert/kb_delivery_zone_upsert используй "ref" и "changes"; для kb_contacts_upsert/kb_policies_upsert/kb_tariff_info_upsert используй только "changes". Поле "changes" заполняй только полями из схемы инструмента. В медиа-поля (например featured_image, gallery_images) подставляй ТОЛЬКО значения handle из манифеста материалов ниже (например "upload.1") — никогда не изобретай UUID и не используй handle с префиксом "evidence.". Если существующая запись в разделе "Текущая база знаний" уже соответствует материалу — обнови её тем же ключом (ref/slug), не создавай дубликат. Для kb_specialist_upsert используй "ref" и "changes"; для kb_service_upsert используй "ref" и "changes", где "changes.parent_ref" — это ref базовой услуги (только для service_type "variant"/"addon") и "changes.specialist_refs" — список ref специалистов, которые её выполняют. Каждый ref в parent_ref/specialist_refs должен либо уже существовать (см. "Текущая база знаний"), либо создаваться отдельным вызовом kb_specialist_upsert/kb_service_upsert в ЭТОМ ЖЕ ответе — порядок вызовов в массиве "calls" не важен, они применяются в правильном порядке автоматически (специалисты → базовые услуги → варианты/доп. услуги), но каждая ссылка должна на что-то указывать. Если инструкции оператора не хватает и есть сомнения — не создавай запись, опиши проблему в "unmapped". Если подходящих записей нет вовсе — верни "calls": [].`
 
 const correctiveAppendixParse = `
 
@@ -151,7 +152,7 @@ func targetTypeInstruction(targetType string) string {
 	if tool, ok := targetTypeToTool[targetType]; ok {
 		return fmt.Sprintf("Оператор явно выбрал тип записи — используй ТОЛЬКО инструмент %q. Не вызывай никакой другой инструмент.", tool)
 	}
-	return "Оператор не указал конкретный тип — определи подходящий тип записи (тема, товар, тариф, контакты, политика, общая тарифная информация, зона доставки) по содержимому материалов самостоятельно."
+	return "Оператор не указал конкретный тип — определи подходящий тип записи (тема, товар, тариф, контакты, политика, общая тарифная информация, зона доставки, специалист, услуга) по содержимому материалов самостоятельно."
 }
 
 func materialLabel(m kbstore.ImportMaterial) string {

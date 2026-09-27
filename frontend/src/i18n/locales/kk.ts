@@ -100,6 +100,8 @@ export default {
       topics: { singular: 'Тақырып', plural: 'Тақырыптар' },
       products: { singular: 'Тауар', plural: 'Тауарлар' },
       tariffs: { singular: 'Тариф', plural: 'Тарифтер' },
+      specialists: { singular: 'Маман', plural: 'Мамандар' },
+      services: { singular: 'Қызмет', plural: 'Қызметтер' },
       delivery_zones: { singular: 'Жеткізу аймағы', plural: 'Жеткізу аймақтары' },
       contacts: { singular: 'Байланыстар', plural: 'Байланыстар' },
       policies: { singular: 'Саясаттар', plural: 'Саясаттар' },
@@ -137,6 +139,19 @@ export default {
       deliveryCost: 'Жеткізу құны',
       deliveryInDays: 'Жеткізу мерзімі (күн)',
       notes: 'Ескертпе',
+      // Сұлулық салоны өрістері (мамандар/қызметтер) ----------------------
+      fullName: 'Толық аты-жөні',
+      specialistTitle: 'Лауазымы',
+      experience: 'Тәжірибесі',
+      bookingUrl: 'Онлайн жазылу сілтемесі',
+      bookingUrlFallback: 'Салонның негізгі сілтемесі',
+      bookingUrlPersonal: 'Жеке жазылу сілтемесі',
+      schedule: 'Ауысым кестесі',
+      duration: 'Ұзақтығы',
+      durationMinutes: '{n} мин',
+      serviceType: 'Қызмет түрі',
+      parentService: 'Аталық қызмет',
+      specialistRefs: 'Мамандар',
       phone: 'Телефон',
       website: 'Сайт',
       workingHours: 'Жұмыс кестесі',
@@ -169,6 +184,7 @@ export default {
       businessCard: 'Визитка',
       map: 'Карта',
       legalDocuments: 'Деректемелер',
+      portfolio: 'Портфолио',
     },
     mediaStrip: {
       unavailable: 'Қолжетімсіз',
@@ -186,6 +202,8 @@ export default {
     pricingType: { fixed: 'Тіркелген', percentage: 'Пайыз', tiered: 'Шектік' },
     zoneLevel: { city: 'Қала', region: 'Аймақ', country: 'Ел' },
     availabilityStatus: { in_stock: 'Қоймада бар', preorder: 'Алдын ала тапсырыс', on_demand: 'Тапсырыс бойынша', unavailable: 'Қолжетімсіз' },
+    // serviceType — ServiceRow.service_type, TEST.md §4.3-тегі тег белгілер.
+    serviceType: { base: 'Негізгі қызмет', variant: 'Нұсқа', addon: 'Қосымша қызмет' },
     state: { published: 'Жарияланды', new: 'Жаңа', changed: 'Өзгертілді', to_delete: 'Жоюға' },
     actions: { edit: 'Өзгерту', publish: 'Жариялау', cancel: 'Өзгерісті болдырмау', removeFromDraft: 'Жобадан жою', delete: 'Жою' },
     facts: {
@@ -212,6 +230,67 @@ export default {
       empty: '— белгіленбеген —',
       publishSection: 'Көмекші өзгерістерін жариялау',
       cancelAllSection: 'Көмекшінің барлық өзгерісін болдырмау',
+    },
+    // schedule.* — ScheduleEditor.vue компонентінің мәтіні: аптаның 7 күніне
+    // арналған (дүйсенбіден басталатын) ауысым/үзіліс редакторы, ContactsForm
+    // (салонның негізгі уақыты) мен SpecialistFormDialog (маман ауысымы) үшін ортақ.
+    schedule: {
+      weekday: {
+        mon: 'Дүйсенбі', tue: 'Сейсенбі', wed: 'Сәрсенбі', thu: 'Бейсенбі', fri: 'Жұма', sat: 'Сенбі', sun: 'Жексенбі',
+      },
+      weekdayShort: { mon: 'Дс', tue: 'Сс', wed: 'Ср', thu: 'Бс', fri: 'Жм', sat: 'Сб', sun: 'Жс' },
+      dayOff: 'Демалыс күні',
+      start: 'Басталуы',
+      end: 'Аяқталуы',
+      breaks: 'Үзіліс',
+      breakStart: 'Үзіліс басталуы',
+      breakEnd: 'Үзіліс аяқталуы',
+      addBreak: 'Үзіліс қосу',
+      removeBreak: 'Үзілісті жою',
+      errStartEnd: 'Ауысымның басталуы аяқталуынан ерте болуы керек',
+      errBreakOrder: 'Үзілістің басталуы оның аяқталуынан ерте болуы керек',
+      errBreakOutside: 'Үзіліс ауысым уақыты ішінде болуы керек',
+      errBreakOverlap: 'Үзілістер бір-бірімен қабаттаспауы керек',
+      applyWeekdays: 'Жұмыс күндеріне көшіру (Дс–Жм)',
+      applyAllDays: 'Барлық күндерге қолдану',
+    },
+    // archive.* — Белсенді/Мұрағатта сегментті сүзгісі және
+    // SpecialistsTab.vue/ServicesTab.vue-дегі лезде ауыстырғыш — растауды
+    // қажет етпейтін, campaigns.templates.archive/restore-мен бірдей UX.
+    archive: {
+      active: 'Белсенді',
+      archived: 'Мұрағатта',
+      filterActive: 'Белсенді',
+      filterArchived: 'Мұрағатта',
+      toggleAria: 'Жазбаның белсенділік күйін ауыстыру',
+      toastChanged: '«{name}»: мәртебесі «{status}» болып өзгертілді.',
+      undo: 'Болдырмау',
+    },
+    // services.* — ServicesTab.vue/ServiceRecord.vue/ServiceFormDialog.vue
+    // компоненттерінің ортақ kb.fields.*/kb.serviceType.* сөздігінен тыс мәтіні.
+    services: {
+      addonNotStandalone: 'Жеке сатылмайды',
+      categoryCount: '{n} қызмет',
+      noCategory: 'Санатсыз',
+      shownForContext: 'белсенді',
+      shownForContextTitle: 'Бұл негізгі қызмет белсенді — мұнда тек архивтелген нұсқа/қосымша қызметтің контексті үшін көрсетілген.',
+      archiveCascadeConfirm: {
+        title: 'Негізгі қызметті мұрағаттау керек пе?',
+        body: '«{name}» қызметінің белсенді нұсқалары/қосымша қызметтері бар ({count}). Негізгі қызметті мұрағаттау оларды да автоматты түрде мұрағаттайды — әрқайсысын кейін жеке қалпына келтіруге болады.',
+        confirm: 'Барлығын мұрағаттау',
+      },
+    },
+    // specialists.columns.* — SpecialistsTab.vue кестесінің баған атаулары,
+    // TEST.md §4.2-нің өз сөздері бойынша — форма өрісінде қолданылатын
+    // толық kb.fields.bookingUrl-дан бөлек, қысқа нұсқа.
+    specialists: {
+      columns: {
+        master: 'Маман',
+        workingDays: 'Жұмыс күндері',
+        shiftHours: 'Ауысым сағаттары',
+        bookingUrl: 'Жазылу сілтемесі',
+        status: 'Күйі',
+      },
     },
     stats: { added: 'Қосылды', updated: 'Өзгертілді', removed: 'Жойылды', total: 'Барлығы' },
     draft: {
@@ -372,10 +451,14 @@ export default {
         contacts: 'Клиент адаммен қалай байланысады — телефон, email, жұмыс уақыты.',
         policies: 'Клиентке көрсетілетін қайтару, кепілдік және жеткізу шарттары.',
         tariff_info: 'Барлық тарифке ортақ фактілер (мыс. сынақ мерзімі), белгілі бір тарифке байланбаған.',
+        specialists: 'Салон мамандары: ауысым кестесі, үзілістер, портфолио және онлайн жазылу сілтемесі.',
+        services: 'Қызметтер каталогы: негізгі қызметтер, нұсқалар және қосымша қызметтер, бағасы мен ұзақтығымен.',
       },
       addTopic: 'Тақырып қосу',
       addProduct: 'Тауар қосу',
       addTariff: 'Тариф қосу',
+      addSpecialist: 'Маман қосу',
+      addService: 'Қызмет қосу',
       addZone: 'Аймақ қосу',
       editContacts: 'Байланыстарды өзгерту',
       editPolicies: 'Саясаттарды өзгерту',
@@ -383,6 +466,8 @@ export default {
       emptyTopics: 'Әзірге тақырып жоқ.',
       emptyProducts: 'Әзірге тауар жоқ.',
       emptyTariffs: 'Әзірге тариф жоқ.',
+      emptySpecialists: 'Әзірге маман жоқ.',
+      emptyServices: 'Әзірге қызмет жоқ.',
       emptyZones: 'Әзірге жеткізу аймағы жоқ.',
       loading: 'Білім базасы жүктелуде…',
       promptTab: 'Промпт',
@@ -393,6 +478,7 @@ export default {
       materialsEmpty: 'Әзірге материал жоқ.',
       materialsCreated: 'Жасалды:',
       materialsDownload: 'Жүктеп алу',
+      photosCount: '{n} фото',
     },
     forms: {
       save: 'Сақтау',
@@ -405,6 +491,10 @@ export default {
       editTariff: 'Тарифті өзгерту',
       newZone: 'Жаңа жеткізу аймағы',
       editZone: 'Жеткізу аймағын өзгерту',
+      newSpecialist: 'Жаңа маман',
+      editSpecialist: 'Маманды өзгерту',
+      newService: 'Жаңа қызмет',
+      editService: 'Қызметті өзгерту',
       editContacts: 'Байланыстарды өзгерту',
       editPolicies: 'Саясаттарды өзгерту',
       editTariffInfo: 'Тарифтік ақпаратты өзгерту',
@@ -413,6 +503,10 @@ export default {
       slugHint: 'мыс. tariffs',
       ref: 'Артикул',
       refHint: 'мыс. coffee-machine',
+      specialistRefHint: 'мыс. alina-kim',
+      serviceRefHint: 'мыс. strizhka-zhenskaya',
+      selectParentService: 'Негізгі қызметті таңдаңыз',
+      noActiveSpecialists: 'Белсенді маман жоқ.',
       tariffRef: 'Тариф коды',
       zoneRef: 'Аймақ ref-і',
       staleTitle: 'Жоба өзгерді',

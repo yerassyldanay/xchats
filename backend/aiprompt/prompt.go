@@ -48,6 +48,19 @@ import (
 // the v4/v5 ones, so an old pinned frame's rendering never changes shape.
 // SlotTariffInfo carries the organization-wide tariff_info singleton's own
 // virtual facts, which have no per-tariff or per-product block to live in.
+//
+// SlotServices/SlotSpecialists are the salon-kb@v1 addition (PLAN.md "Beauty
+// Salon Knowledge Base Extension"): a category-grouped, base/variant/addon
+// service tree (renderServices) and a specialist roster carrying both the
+// deterministic schedule/booking placeholders and a machine-readable
+// schedule-reasoning block of raw weekday/shift/break boundaries
+// (renderSpecialists) — see schedule.go's doc comment for why those raw
+// boundaries legitimately appear in the prompt while the model's reply may
+// never contain them as literal text (validateScheduleLiteralContract,
+// contract.go). Only salon-kb@v1 fills these slots; shop-kb@v* frames never
+// contain the markers, so renderServices/renderSpecialists never run for a
+// non-salon organization (strings.ReplaceAll is a no-op on a frame that
+// doesn't carry the marker at all).
 const (
 	SlotAssistant           = "%%ASSISTANT%%"
 	SlotKnowledgeBase       = "%%KNOWLEDGE_BASE%%"
@@ -66,6 +79,8 @@ const (
 	SlotBusinessFacts       = "%%BUSINESS_FACTS%%"
 	SlotDeliveryZones       = "%%DELIVERY_ZONES%%"
 	SlotResponseSchema      = "%%RESPONSE_SCHEMA%%"
+	SlotServices            = "%%SERVICES%%"
+	SlotSpecialists         = "%%SPECIALISTS%%"
 )
 
 // BuildPrompt is the explicit two-step orchestration: BuildCatalog validates
@@ -155,6 +170,8 @@ func renderPromptWithSchema(frame string, input *PromptInput, cat *Catalog, sche
 	out = strings.ReplaceAll(out, SlotTopics, renderTopicBlocks(input, cat))
 	out = strings.ReplaceAll(out, SlotBusinessFacts, renderBusinessFacts(cat.Facts))
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
+	out = strings.ReplaceAll(out, SlotServices, renderServices(input, cat))
+	out = strings.ReplaceAll(out, SlotSpecialists, renderSpecialists(input, cat))
 	out = strings.ReplaceAll(out, SlotResponseSchema, schemaJSON)
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
@@ -691,6 +708,186 @@ func renderDeliveryZones(zones []DeliveryZone) string {
 // separator in renderDeliveryZones's pipe-delimited line format.
 func sanitizeZoneField(s string) string {
 	return strings.ReplaceAll(s, "|", "／")
+}
+
+// renderServiceSpecialists renders the active specialists a service lists,
+// as "ref (Full Name)" pairs so the model has both the natural-prose name
+// and the ref it needs to compose a {{specialist.<ref>...}} token — an
+// archived specialist's ref is silently skipped (PLAN.md: archiving
+// "removes that specialist from prompt-visible associations" without
+// touching the service row itself).
+func renderServiceSpecialists(input *PromptInput, refs []string) []string {
+	var out []string
+	for _, ref := range refs {
+		for i := range input.Specialists {
+			s := &input.Specialists[i]
+			if s.Ref == ref && active(s.SalesStatus) {
+				out = append(out, ref+" ("+s.FullName+")")
+				break
+			}
+		}
+	}
+	return out
+}
+
+// renderServiceBlock renders one service's field lines (shared by a base
+// service and each of its variant/addon children in renderServices) —
+// indent nests a child visually under its parent in the rendered text, in
+// addition to the explicit parent_ref line every non-base service carries.
+func renderServiceBlock(input *PromptInput, cat *Catalog, sv *Service, indent string) []string {
+	lines := []string{indent + "service: " + sv.Ref}
+	if sv.ParentRef != "" {
+		lines = append(lines, indent+"parent_ref: "+sv.ParentRef)
+	}
+	lines = append(lines, indent+"type: "+sv.ServiceType)
+	if sv.ServiceType == "addon" {
+		lines = append(lines, indent+"standalone: forbidden — this add-on must be booked together with its parent base service (see parent_ref); if the client asks for it alone, decline and offer the base service instead")
+	}
+	lines = append(lines, indent+"name: "+sv.Name)
+	if cat.FactByToken("{{service."+sv.Ref+".price}}") != nil {
+		lines = append(lines, indent+"price_placeholder: {{service."+sv.Ref+".price}}")
+	}
+	if cat.FactByToken("{{service."+sv.Ref+".duration}}") != nil {
+		lines = append(lines, indent+"duration_placeholder: {{service."+sv.Ref+".duration}}")
+	}
+	if s := strings.TrimSpace(sv.Description); s != "" {
+		lines = append(lines, indent+"description: "+s)
+	}
+	if refs := renderServiceSpecialists(input, sv.SpecialistRefs); len(refs) > 0 {
+		lines = append(lines, indent+"specialists: "+strings.Join(refs, ", "))
+	}
+	return lines
+}
+
+// renderServices renders the salon-kb@v1 %%SERVICES%% slot: active services
+// grouped by category (in first-seen order), each base service immediately
+// followed by its active variants/addons (PLAN.md: "variants and add-ons
+// nested under their base service") — an add-on's block always carries an
+// explicit "standalone: forbidden" instruction so the frame's add-on rule
+// has a concrete per-service anchor, never just prose the model must
+// remember unaided.
+func renderServices(input *PromptInput, cat *Catalog) string {
+	type categoryBlock struct {
+		name  string
+		lines []string
+	}
+	var order []string
+	byCategory := map[string]*categoryBlock{}
+	ensure := func(name string) *categoryBlock {
+		if b, ok := byCategory[name]; ok {
+			return b
+		}
+		b := &categoryBlock{name: name}
+		byCategory[name] = b
+		order = append(order, name)
+		return b
+	}
+
+	childrenOf := map[string][]*Service{}
+	for i := range input.Services {
+		sv := &input.Services[i]
+		if !active(sv.SalesStatus) || sv.ServiceType == "base" {
+			continue
+		}
+		childrenOf[sv.ParentRef] = append(childrenOf[sv.ParentRef], sv)
+	}
+
+	for i := range input.Services {
+		sv := &input.Services[i]
+		if !active(sv.SalesStatus) || sv.ServiceType != "base" {
+			continue
+		}
+		b := ensure(sv.Category)
+		if len(b.lines) > 0 {
+			b.lines = append(b.lines, "")
+		}
+		b.lines = append(b.lines, renderServiceBlock(input, cat, sv, "")...)
+		for _, child := range childrenOf[sv.Ref] {
+			b.lines = append(b.lines, "")
+			b.lines = append(b.lines, renderServiceBlock(input, cat, child, "  ")...)
+		}
+	}
+
+	var blocks []string
+	for _, name := range order {
+		b := byCategory[name]
+		blocks = append(blocks, "category: "+name+"\n"+strings.Join(b.lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// serviceRefsFor lists the active services a specialist performs, in KB
+// slice order — the inverse lookup of Service.SpecialistRefs, rendered in
+// renderSpecialists so a specialist's block names their own services
+// without the model having to cross-reference the whole SERVICES slot.
+func serviceRefsFor(input *PromptInput, specialistRef string) []string {
+	var out []string
+	for i := range input.Services {
+		sv := &input.Services[i]
+		if !active(sv.SalesStatus) {
+			continue
+		}
+		for _, ref := range sv.SpecialistRefs {
+			if ref == specialistRef {
+				out = append(out, sv.Ref)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// renderSpecialists renders the salon-kb@v1 %%SPECIALISTS%% slot: one block
+// per active specialist with trusted-prose fields (name/title/experience),
+// the services they perform, a machine-readable schedule_reasoning section
+// of raw weekday/shift/break boundaries (schedule.go's
+// scheduleReasoningLines — see this file's slot doc comment on why raw
+// times legitimately appear here), every populated schedule/booking
+// placeholder the model must use INSTEAD of writing those boundaries in a
+// reply, and any portfolio media reference.
+func renderSpecialists(input *PromptInput, cat *Catalog) string {
+	var blocks []string
+	for i := range input.Specialists {
+		s := &input.Specialists[i]
+		if !active(s.SalesStatus) {
+			continue
+		}
+		lines := []string{"specialist: " + s.Ref, "full_name: " + s.FullName}
+		if t := strings.TrimSpace(s.Title); t != "" {
+			lines = append(lines, "title: "+t)
+		}
+		if e := strings.TrimSpace(s.Experience); e != "" {
+			lines = append(lines, "experience: "+e)
+		}
+		if refs := serviceRefsFor(input, s.Ref); len(refs) > 0 {
+			lines = append(lines, "services: "+strings.Join(refs, ", "))
+		}
+		lines = append(lines, "schedule_reasoning:")
+		for _, l := range scheduleReasoningLines(s.Schedule) {
+			lines = append(lines, "  "+l)
+		}
+		if cat.FactByToken("{{specialist."+s.Ref+".schedule}}") != nil {
+			lines = append(lines, "schedule_placeholder: {{specialist."+s.Ref+".schedule}}")
+		}
+		for _, ref := range weekdayOrder {
+			token := "{{specialist." + s.Ref + ".schedule_" + string(ref) + "}}"
+			if cat.FactByToken(token) != nil {
+				lines = append(lines, "schedule_"+string(ref)+"_placeholder: "+token)
+			}
+		}
+		if cat.FactByToken("{{specialist."+s.Ref+".booking}}") != nil {
+			lines = append(lines, "booking_placeholder: {{specialist."+s.Ref+".booking}}")
+		}
+		lines = append(lines, mediaRefLines(cat, "specialists", s.Ref)...)
+		blocks = append(blocks, strings.Join(lines, "\n"))
+	}
+	if len(blocks) == 0 {
+		return "—"
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 var (

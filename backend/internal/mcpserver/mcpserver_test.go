@@ -84,8 +84,8 @@ func TestInitialize_ReturnsProtocolShape(t *testing.T) {
 	}
 }
 
-// TestToolsList_HasAllFourteenTools confirms the closed contract's shape.
-func TestToolsList_HasAllFourteenTools(t *testing.T) {
+// TestToolsList_HasAllSixteenTools confirms the closed contract's shape.
+func TestToolsList_HasAllSixteenTools(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	if resp.Error != nil {
@@ -93,8 +93,8 @@ func TestToolsList_HasAllFourteenTools(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]mcpserver.Tool)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d", len(tools))
+	if len(tools) != 16 {
+		t.Fatalf("expected 16 tools, got %d", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
@@ -106,6 +106,7 @@ func TestToolsList_HasAllFourteenTools(t *testing.T) {
 	for _, want := range []string{
 		"kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
 		"kb_contacts_upsert", "kb_policies_upsert", "kb_tariff_info_upsert", "kb_delivery_zone_upsert",
+		"kb_specialist_upsert", "kb_service_upsert",
 		"kb_read", "kb_delete", "kb_summary", "kb_info", "kb_media_upload", "kb_media_attach",
 	} {
 		if !names[want] {
@@ -1068,6 +1069,7 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 	for _, name := range []string{
 		"kb_assistant_upsert", "kb_topic_upsert", "kb_product_upsert", "kb_tariff_upsert",
 		"kb_contacts_upsert", "kb_policies_upsert", "kb_delivery_zone_upsert",
+		"kb_specialist_upsert", "kb_service_upsert",
 	} {
 		ann := byName[name].Annotations
 		if ann == nil || ann.IdempotentHint == nil || *ann.IdempotentHint {
@@ -1076,7 +1078,7 @@ func TestToolsList_DeclaresAnnotations(t *testing.T) {
 	}
 }
 
-// TestToolsList_DeclaresOutputSchema confirms every one of the 14 tools
+// TestToolsList_DeclaresOutputSchema confirms every one of the 16 tools
 // documents its structuredContent shape (plan Task 9) — every tool sets
 // structuredContent via handlers.go's toolResult, kb_delete included (via
 // kbstore.DeleteResult).
@@ -1084,8 +1086,8 @@ func TestToolsList_DeclaresOutputSchema(t *testing.T) {
 	srv, principal := newTestServer(t)
 	resp := srv.Handle(context.Background(), principal, mcpserver.Request{JSONRPC: "2.0", ID: rpcID(1), Method: "tools/list"})
 	tools := resp.Result.(map[string]any)["tools"].([]mcpserver.Tool)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d", len(tools))
+	if len(tools) != 16 {
+		t.Fatalf("expected 16 tools, got %d", len(tools))
 	}
 	for _, tool := range tools {
 		if tool.OutputSchema == nil {

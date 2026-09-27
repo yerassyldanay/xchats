@@ -163,6 +163,8 @@ const (
 	toolKBPoliciesUpsert     = "kb_policies_upsert"
 	toolKBTariffInfoUpsert   = "kb_tariff_info_upsert"
 	toolKBDeliveryZoneUpsert = "kb_delivery_zone_upsert"
+	toolKBSpecialistUpsert   = "kb_specialist_upsert"
+	toolKBServiceUpsert      = "kb_service_upsert"
 	toolKBRead               = "kb_read"
 	toolKBDelete             = "kb_delete"
 	toolKBSummary            = "kb_summary"
@@ -180,6 +182,8 @@ var requiredScope = map[string]string{
 	toolKBPoliciesUpsert:     mcpauth.ScopeKBDraftWrite,
 	toolKBTariffInfoUpsert:   mcpauth.ScopeKBDraftWrite,
 	toolKBDeliveryZoneUpsert: mcpauth.ScopeKBDraftWrite,
+	toolKBSpecialistUpsert:   mcpauth.ScopeKBDraftWrite,
+	toolKBServiceUpsert:      mcpauth.ScopeKBDraftWrite,
 	toolKBRead:               mcpauth.ScopeKBRead,
 	toolKBDelete:             mcpauth.ScopeKBDraftWrite,
 	toolKBSummary:            mcpauth.ScopeKBRead,
@@ -216,6 +220,10 @@ func (s *Server) callTool(ctx context.Context, orgID uuid.UUID, userID uuid.UUID
 		return s.handleTariffInfoUpsert(ctx, orgID, userID, args)
 	case toolKBDeliveryZoneUpsert:
 		return s.handleDeliveryZoneUpsert(ctx, orgID, userID, args)
+	case toolKBSpecialistUpsert:
+		return s.handleSpecialistUpsert(ctx, orgID, userID, args)
+	case toolKBServiceUpsert:
+		return s.handleServiceUpsert(ctx, orgID, userID, args)
 	case toolKBRead:
 		return s.handleKBRead(ctx, orgID, userID, args)
 	case toolKBDelete:
@@ -524,8 +532,8 @@ func (s *Server) handleTariffUpsert(ctx context.Context, orgID uuid.UUID, userID
 // parseAssistantChanges's doc comment for why this is factored out.
 func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsChanges, error) {
 	if err := rejectUnknownFields(changes, "whatsapp", "email", "address", "legal_information", "callback_time",
-		"working_hours", "phone", "website", "instagram", "contact_card_image", "location_map_image",
-		"company_legal_documents"); err != nil {
+		"working_hours", "phone", "website", "instagram", "booking_url", "schedule", "contact_card_image",
+		"location_map_image", "company_legal_documents"); err != nil {
 		return kbstore.ContactsChanges{}, err
 	}
 	ch := kbstore.ContactsChanges{}
@@ -533,6 +541,7 @@ func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsC
 		"whatsapp": &ch.WhatsApp, "email": &ch.Email, "address": &ch.Address,
 		"legal_information": &ch.LegalInformation, "callback_time": &ch.CallbackTime,
 		"working_hours": &ch.WorkingHours, "phone": &ch.Phone, "website": &ch.Website, "instagram": &ch.Instagram,
+		"booking_url": &ch.BookingURL,
 	} {
 		v, err := optString(changes, field)
 		if err != nil {
@@ -541,6 +550,9 @@ func parseContactsChanges(changes map[string]json.RawMessage) (kbstore.ContactsC
 		*dst = v
 	}
 	var err error
+	if ch.Schedule, err = optSchedule(changes, "schedule"); err != nil {
+		return kbstore.ContactsChanges{}, err
+	}
 	if ch.ContactCardImage, err = optMaterialID(changes, "contact_card_image"); err != nil {
 		return kbstore.ContactsChanges{}, err
 	}
@@ -716,6 +728,126 @@ func (s *Server) handleDeliveryZoneUpsert(ctx context.Context, orgID uuid.UUID, 
 		return mapKBError(kerr), nil
 	}
 	return s.toolResult(upsertSummary("delivery zone", res), res, "draft", orgID, userID), nil
+}
+
+// parseSpecialistChanges is kb_specialist_upsert's `changes` parser — see
+// parseAssistantChanges's doc comment for why this is factored out.
+func parseSpecialistChanges(changes map[string]json.RawMessage) (kbstore.SpecialistChanges, error) {
+	if err := rejectUnknownFields(changes, "full_name", "title", "experience", "schedule", "booking_url",
+		"sales_status", "portfolio_images"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	ch := kbstore.SpecialistChanges{}
+	var err error
+	if ch.FullName, err = optString(changes, "full_name"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.Title, err = optString(changes, "title"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.Experience, err = optString(changes, "experience"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.BookingURL, err = optString(changes, "booking_url"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.Schedule, err = optSchedule(changes, "schedule"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.SalesStatus, err = optString(changes, "sales_status"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	if ch.PortfolioImages, err = optMaterialIDs(changes, "portfolio_images"); err != nil {
+		return kbstore.SpecialistChanges{}, err
+	}
+	return ch, nil
+}
+
+func (s *Server) handleSpecialistUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	changes, err := rawObject(args["changes"])
+	if err != nil {
+		return nil, fmt.Errorf("changes: %w", err)
+	}
+	ch, err := parseSpecialistChanges(changes)
+	if err != nil {
+		return nil, err
+	}
+	expected, err := optExpectedVersion(args)
+	if err != nil {
+		return nil, err
+	}
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertSpecialist(ctx, orgID, userID, stringField(args, "ref"), ch, expected, prov)
+	if kerr != nil {
+		return mapKBError(kerr), nil
+	}
+	return s.toolResult(upsertSummary("specialist", res), res, "draft", orgID, userID), nil
+}
+
+// parseServiceChanges is kb_service_upsert's `changes` parser — see
+// parseAssistantChanges's doc comment for why this is factored out.
+func parseServiceChanges(changes map[string]json.RawMessage) (kbstore.ServiceChanges, error) {
+	if err := rejectUnknownFields(changes, "parent_ref", "service_type", "category", "name", "price", "duration",
+		"description", "specialist_refs", "sales_status"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	ch := kbstore.ServiceChanges{}
+	var err error
+	if ch.ParentRef, err = optString(changes, "parent_ref"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.ServiceType, err = optString(changes, "service_type"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.Category, err = optString(changes, "category"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.Name, err = optString(changes, "name"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.Price, err = optString(changes, "price"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.Duration, err = optIntPtr(changes, "duration"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.Description, err = optString(changes, "description"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.SpecialistRefs, err = optStringSlice(changes, "specialist_refs"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	if ch.SalesStatus, err = optString(changes, "sales_status"); err != nil {
+		return kbstore.ServiceChanges{}, err
+	}
+	return ch, nil
+}
+
+func (s *Server) handleServiceUpsert(ctx context.Context, orgID uuid.UUID, userID uuid.UUID, args map[string]json.RawMessage) (map[string]any, error) {
+	changes, err := rawObject(args["changes"])
+	if err != nil {
+		return nil, fmt.Errorf("changes: %w", err)
+	}
+	ch, err := parseServiceChanges(changes)
+	if err != nil {
+		return nil, err
+	}
+	expected, err := optExpectedVersion(args)
+	if err != nil {
+		return nil, err
+	}
+	prov, err := parseProvenance(args)
+	if err != nil {
+		return nil, err
+	}
+	res, kerr := s.Deps.KB.MCPUpsertService(ctx, orgID, userID, stringField(args, "ref"), ch, expected, prov)
+	if kerr != nil {
+		return mapKBError(kerr), nil
+	}
+	return s.toolResult(upsertSummary("service", res), res, "draft", orgID, userID), nil
 }
 
 func upsertSummary(label string, res kbstore.UpsertResult) string {

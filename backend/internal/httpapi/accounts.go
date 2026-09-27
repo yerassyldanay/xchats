@@ -251,6 +251,25 @@ func (s *Server) handleDebugWaEvent(c *gin.Context) {
 			return
 		}
 		accountID = acct.ID.String()
+	} else {
+		// A caller-supplied account_id must belong to the caller's own
+		// organization — without this, any authenticated caller could
+		// inject a synthetic inbound message into ANY organization's
+		// WhatsApp/simulator account by guessing or enumerating its id.
+		// orgAccount is the exact same ownership + wa_*-gateway-channel
+		// check /whatsapp-accounts/:id already enforces (accounts.go's own
+		// doc comment on it) — reused here rather than duplicated, and it
+		// stops the request itself (404) on any violation.
+		id, err := uuid.Parse(accountID)
+		if err != nil {
+			fail(c, http.StatusBadRequest, ErrValidation, "account_id must be a valid UUID")
+			return
+		}
+		acct, okAcct := s.orgAccount(c, id)
+		if !okAcct {
+			return
+		}
+		accountID = acct.ID.String() // the validated account's own canonical id, never the raw request string
 	}
 
 	res, err := s.wa.InjectDebugEvent(ctx(c), whatsapp.DebugEvent{

@@ -60,6 +60,9 @@ var mediaAttachmentFields = map[string][]MediaAttachmentField{
 	KBTypePolicies: {
 		{Field: "commerce_policy_documents", Kind: "document", Multiple: true},
 	},
+	KBTypeSpecialist: {
+		{Field: "portfolio_images", Kind: "image", Multiple: true},
+	},
 }
 
 // derivedMediaColumnKind holds media columns that are real, validatable

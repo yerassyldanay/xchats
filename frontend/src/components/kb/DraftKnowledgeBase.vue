@@ -80,7 +80,7 @@ watch(
 // excluded: they render exactly one card on a tab of their own, so a
 // checkbox there is noise, and config has its own «Отменить все изменения
 // ассистента» already.
-const SELECTABLE_KINDS: ChangeKind[] = ['topics', 'products', 'tariffs', 'delivery_zones']
+const SELECTABLE_KINDS: ChangeKind[] = ['topics', 'products', 'tariffs', 'specialists', 'services', 'delivery_zones']
 const selectableTargets = computed<SelectionTarget[]>(() =>
   SELECTABLE_KINDS.flatMap((kind) => entriesFor(kind).map((e) => ({ kind, key: e.key })))
 )
@@ -321,6 +321,12 @@ const confirmAcceptKey = computed(() => {
           </div>
           <div v-show="active === 'tariffs'" class="space-y-3" data-testid="draft-tab-tariffs">
             <ChangeList kind="tariffs" />
+          </div>
+          <div v-show="active === 'specialists'" class="space-y-3" data-testid="draft-tab-specialists">
+            <ChangeList kind="specialists" />
+          </div>
+          <div v-show="active === 'services'" class="space-y-3" data-testid="draft-tab-services">
+            <ChangeList kind="services" />
           </div>
 
           <div v-show="active === 'delivery_zones'" class="space-y-3">

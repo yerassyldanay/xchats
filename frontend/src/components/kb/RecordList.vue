@@ -10,32 +10,34 @@ import { computed } from 'vue'
 import { usePlayground } from '@/stores/playground'
 import { usePendingIndex } from '@/composables/usePendingIndex'
 import { useKbModal } from '@/composables/useKbModal'
-import type { ProductRow, TariffRow, TopicRow } from '@/types'
+import type { ProductRow, ServiceRow, SpecialistRow, TariffRow, TopicRow } from '@/types'
 import { kbActions } from './records/actions'
 import TopicRecord from './records/TopicRecord.vue'
 import ProductRecord from './records/ProductRecord.vue'
 import TariffRecord from './records/TariffRecord.vue'
+import SpecialistRecord from './records/SpecialistRecord.vue'
+import ServiceRecord from './records/ServiceRecord.vue'
 
-const props = defineProps<{ kind: 'topics' | 'products' | 'tariffs' }>()
+const props = defineProps<{ kind: 'topics' | 'products' | 'tariffs' | 'specialists' | 'services' }>()
 const emit = defineEmits<{ delete: [key: string] }>()
 
 const pg = usePlayground()
 const { markFor } = usePendingIndex()
 const modal = useKbModal()
 
-const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord }
+const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord, specialists: SpecialistRecord, services: ServiceRecord }
 const component = computed(() => COMPONENTS[props.kind])
 const rows = computed(() => pg.live?.[props.kind] ?? [])
 const actions = kbActions({ page: 'live' })
 
-function edit(row: TopicRow | ProductRow | TariffRow) {
+function edit(row: TopicRow | ProductRow | TariffRow | SpecialistRow | ServiceRow) {
   modal.openEdit(props.kind, row, { target: 'live' })
 }
 
 // asRow exists for ONE reason: <component :is> can't let TypeScript narrow
 // a prop type by the runtime `kind` match the way a static
 // <TopicRecord v-if=...> chain could — see ChangeList.vue's identical note.
-function asRow(row: TopicRow | ProductRow | TariffRow) {
+function asRow(row: TopicRow | ProductRow | TariffRow | SpecialistRow | ServiceRow) {
   return row as any
 }
 </script>

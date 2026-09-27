@@ -194,6 +194,26 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 			e.Title, e.ExistsInDraft = z.Name, true
 		}
 	}
+	if typeWanted(want, KBTypeSpecialist) {
+		for _, sp := range live.Specialists {
+			e := get(KBTypeSpecialist, sp.Ref)
+			e.Title, e.ExistsInLive = sp.FullName, true
+		}
+		for _, sp := range draft.Specialists {
+			e := get(KBTypeSpecialist, sp.Ref)
+			e.Title, e.ExistsInDraft = sp.FullName, true
+		}
+	}
+	if typeWanted(want, KBTypeService) {
+		for _, sv := range live.Services {
+			e := get(KBTypeService, sv.Ref)
+			e.Title, e.ExistsInLive = sv.Name, true
+		}
+		for _, sv := range draft.Services {
+			e := get(KBTypeService, sv.Ref)
+			e.Title, e.ExistsInDraft = sv.Name, true
+		}
+	}
 
 	qnorm := normalizeTitle(query)
 	out := make([]Identity, 0, len(order))
@@ -324,6 +344,8 @@ func MediaIDsIn(page ReadPage) []uuid.UUID {
 			addAll(d.CompanyLegalDocuments)
 		case PolicyRow:
 			addAll(d.CommercePolicyDocuments)
+		case SpecialistRow:
+			addAll(d.PortfolioImages)
 		}
 	}
 	return out
@@ -446,6 +468,20 @@ func flattenRecords(v *DraftView, source string, want map[string]bool, key, qnor
 		for _, z := range v.Zones {
 			if (key == "" || key == z.Ref) && match(z.Name) {
 				out = append(out, KBRecord{Type: KBTypeDeliveryZone, Source: source, Data: z})
+			}
+		}
+	}
+	if typeWanted(want, KBTypeSpecialist) {
+		for _, sp := range v.Specialists {
+			if (key == "" || key == sp.Ref) && match(sp.FullName) {
+				out = append(out, KBRecord{Type: KBTypeSpecialist, Source: source, Data: sp})
+			}
+		}
+	}
+	if typeWanted(want, KBTypeService) {
+		for _, sv := range v.Services {
+			if (key == "" || key == sv.Ref) && match(sv.Name) {
+				out = append(out, KBRecord{Type: KBTypeService, Source: source, Data: sv})
 			}
 		}
 	}

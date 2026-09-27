@@ -18,6 +18,8 @@ import (
 func (s *Server) kbFail(c *gin.Context, err error) {
 	var ge *kbstore.GateError
 	var me *kbstore.ErrMediaReference
+	var ee *kbstore.ErrInvalidEnumValue
+	var se *kbstore.ErrSalonValidation
 	switch {
 	case errors.As(err, &ge):
 		// KB-09: the gate validates the WHOLE resulting KB even for a
@@ -38,6 +40,21 @@ func (s *Server) kbFail(c *gin.Context, err error) {
 		// rejection reasons are ordinary domain messages (same class as
 		// GateError above), not something to hide behind a generic 500.
 		fail(c, http.StatusUnprocessableEntity, ErrValidation, me.Error())
+	case errors.As(err, &ee):
+		// A closed-enum field (service_type, sales_status, zone_level, ...)
+		// given a value outside it — validateEnum's own doc comment. Same
+		// class of ordinary, caller-facing input mistake as GateError/
+		// ErrMediaReference above; previously fell to the 500 default below.
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, ee.Error())
+	case errors.As(err, &se):
+		// validateSpecialist/validateService/PatchLiveContacts's own rule
+		// violations (bad ref shape, broken base/variant hierarchy, invalid
+		// schedule, deleting a service that still has children, ...) —
+		// salon_validate.go's ErrSalonValidation doc comment. Deliberately
+		// checked last among the typed cases so a DB/infrastructure error a
+		// sub-call returns unwrapped (never given this type) still falls
+		// through to the 500 default, exactly as before.
+		fail(c, http.StatusUnprocessableEntity, ErrValidation, se.Error())
 	case errors.Is(err, kbstore.ErrUnknownKind):
 		fail(c, http.StatusBadRequest, ErrValidation, "unknown row kind")
 	case errors.Is(err, kbstore.ErrStale):
@@ -381,18 +398,136 @@ func (s *Server) handlePlaygroundDeleteZone(c *gin.Context) {
 	s.kbChanged(c, orgID)
 }
 
+// --- specialists / services (salon vertical, PLAN.md) -----------------------
+
+// specialistReq is shared by the draft lane (below) and the live lane
+// (handleKBUpsertSpecialist, kb_live.go). Unlike topicReq/tariffReq/
+// productReq's historical pointer-vs-value inconsistency, EVERY field here
+// is a plain value representing the full desired state — a whole-value PUT,
+// the same contract zoneReq/kbstore.DeliveryZoneInput already establish, not
+// a partial PATCH (schedule/portfolio_images are always fully replaced on
+// every upsert; there is no separate "leave unchanged" spelling at this
+// layer — the MCP lane's kb_specialist_upsert is where a genuine partial
+// patch belongs).
+type specialistReq struct {
+	Ref             string            `json:"ref"`
+	FullName        string            `json:"full_name"`
+	Title           string            `json:"title"`
+	Experience      string            `json:"experience"`
+	Schedule        aiprompt.Schedule `json:"schedule"`
+	BookingURL      string            `json:"booking_url"`
+	PortfolioImages []uuid.UUID       `json:"portfolio_images"`
+	SalesStatus     string            `json:"sales_status"`
+}
+
+// serviceReq is specialistReq's twin for services. Duration is the one
+// exception to "every field a plain value": *int, since nil is itself a
+// meaningful persisted state (unspecified duration), not an "unchanged"
+// sentinel — see kbstore.ServiceInput.Duration's own doc comment.
+type serviceReq struct {
+	Ref            string   `json:"ref"`
+	ParentRef      string   `json:"parent_ref"`
+	ServiceType    string   `json:"service_type"`
+	Category       string   `json:"category"`
+	Name           string   `json:"name"`
+	Price          string   `json:"price"`
+	Duration       *int     `json:"duration"`
+	Description    string   `json:"description"`
+	SpecialistRefs []string `json:"specialist_refs"`
+	SalesStatus    string   `json:"sales_status"`
+}
+
+func (s *Server) handlePlaygroundUpsertSpecialist(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req specialistReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
+		return
+	}
+	portfolio, ok := s.validateMediaList(c, "portfolio_images", &req.PortfolioImages)
+	if !ok {
+		return
+	}
+	if err := s.kb.UpsertSpecialist(ctx(c), orgID, currentUser(c).ID, kbstore.SpecialistInput{
+		Ref: req.Ref, FullName: req.FullName, Title: req.Title, Experience: req.Experience,
+		Schedule: req.Schedule, BookingURL: req.BookingURL, SalesStatus: req.SalesStatus,
+		Media: kbstore.SpecialistMedia{PortfolioImages: portfolio},
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+func (s *Server) handlePlaygroundDeleteSpecialist(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteSpecialist(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+func (s *Server) handlePlaygroundUpsertService(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	var req serviceReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.Ref == "" {
+		fail(c, http.StatusBadRequest, ErrValidation, "ref required")
+		return
+	}
+	if err := s.kb.UpsertService(ctx(c), orgID, currentUser(c).ID, kbstore.ServiceInput{
+		Ref: req.Ref, ParentRef: req.ParentRef, ServiceType: req.ServiceType, Category: req.Category,
+		Name: req.Name, Price: req.Price, Duration: req.Duration, Description: req.Description,
+		SpecialistRefs: req.SpecialistRefs, SalesStatus: req.SalesStatus,
+	}); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
+func (s *Server) handlePlaygroundDeleteService(c *gin.Context) {
+	orgID, proceed := s.pgWrite(c)
+	if !proceed {
+		return
+	}
+	if err := s.kb.DeleteService(ctx(c), orgID, currentUser(c).ID, c.Param("ref")); err != nil {
+		s.kbFail(c, err)
+		return
+	}
+	s.kbChanged(c, orgID)
+}
+
 // contactsReq is shared by the draft lane (below) and the live lane
 // (handleKBPatchContacts, kb_live.go).
+// contactsReq's BookingURL/Schedule are the salon vertical's addition
+// (PLAN.md) — the same nil-means-unchanged convention as every sibling
+// field here: BookingURL is absent-or-null (both collapse to nil under
+// encoding/json) leaves it unchanged, a string sets it; Schedule absent (nil)
+// leaves it unchanged, present (even []) replaces it with
+// aiprompt.NormalizeSchedule's canonical result. The existing working_hours
+// field and its behavior are untouched.
 type contactsReq struct {
-	WhatsApp         *string `json:"whatsapp"`
-	Email            *string `json:"email"`
-	Address          *string `json:"address"`
-	LegalInformation *string `json:"legal_information"`
-	CallbackTime     *string `json:"callback_time"`
-	WorkingHours     *string `json:"working_hours"`
-	Phone            *string `json:"phone"`
-	Website          *string `json:"website"`
-	Instagram        *string `json:"instagram"`
+	WhatsApp         *string            `json:"whatsapp"`
+	Email            *string            `json:"email"`
+	Address          *string            `json:"address"`
+	LegalInformation *string            `json:"legal_information"`
+	CallbackTime     *string            `json:"callback_time"`
+	WorkingHours     *string            `json:"working_hours"`
+	Phone            *string            `json:"phone"`
+	Website          *string            `json:"website"`
+	Instagram        *string            `json:"instagram"`
+	BookingURL       *string            `json:"booking_url"`
+	Schedule         *aiprompt.Schedule `json:"schedule"`
 
 	ContactCardImage      optionalUUID `json:"contact_card_image"`
 	LocationMapImage      optionalUUID `json:"location_map_image"`
@@ -417,6 +552,7 @@ func (s *Server) handlePlaygroundPatchContacts(c *gin.Context) {
 		WhatsApp: req.WhatsApp, Email: req.Email, Address: req.Address,
 		LegalInformation: req.LegalInformation, CallbackTime: req.CallbackTime,
 		WorkingHours: req.WorkingHours, Phone: req.Phone, Website: req.Website, Instagram: req.Instagram,
+		BookingURL: req.BookingURL, Schedule: req.Schedule,
 		Media: kbstore.ContactsMedia{
 			ContactCardImage:      req.ContactCardImage.ptr(),
 			LocationMapImage:      req.LocationMapImage.ptr(),
@@ -595,9 +731,9 @@ func (s *Server) handlePlaygroundApproveEntity(c *gin.Context) {
 	}
 	kind := c.Param("kind")
 	switch kind {
-	case "topics", "tariffs", "products", "contacts", "policies", "tariff_info", "delivery_zones", "config":
+	case "topics", "tariffs", "products", "contacts", "policies", "tariff_info", "delivery_zones", "specialists", "services", "config":
 	default:
-		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|tariff_info|delivery_zones|config")
+		fail(c, http.StatusBadRequest, ErrValidation, "kind must be topics|tariffs|products|contacts|policies|tariff_info|delivery_zones|specialists|services|config")
 		return
 	}
 	key := c.Param("id")

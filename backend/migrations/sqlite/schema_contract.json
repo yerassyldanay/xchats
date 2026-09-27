@@ -337,6 +337,24 @@
           "has_default": true,
           "default_kind": "raw:'{}'::uuid[]",
           "default_raw": "'{}'::uuid[]"
+        },
+        {
+          "name": "booking_url",
+          "position": 20,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "schedule",
+          "position": 21,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
         }
       ],
       "primary_key": [
@@ -1390,6 +1408,312 @@
         },
         {
           "name": "ai_products_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "ai_services": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "ref",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "parent_ref",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "service_type",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:base",
+          "default_raw": "'base'::text"
+        },
+        {
+          "name": "category",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "name",
+          "position": 7,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "price",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "duration",
+          "position": 9,
+          "pg_type": "integer",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "description",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "specialist_refs",
+          "position": 11,
+          "pg_type": "_text[]",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "raw:'{}'::text[]",
+          "default_raw": "'{}'::text[]"
+        },
+        {
+          "name": "sales_status",
+          "position": 12,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:active",
+          "default_raw": "'active'::text"
+        },
+        {
+          "name": "created_at",
+          "position": 13,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 14,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "ai_services_organization_id_ref_key",
+          "columns": [
+            "organization_id",
+            "ref"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_services_organization_id_ref_key",
+          "columns": [
+            "organization_id",
+            "ref"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "ai_services_organization_id_fkey",
+          "columns": [
+            "organization_id"
+          ],
+          "ref_table": "organizations",
+          "ref_columns": [
+            "id"
+          ],
+          "on_delete": "CASCADE",
+          "on_update": "NO ACTION"
+        }
+      ]
+    },
+    "ai_specialists": {
+      "columns": [
+        {
+          "name": "id",
+          "position": 1,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "uuid_v4",
+          "default_raw": "uuid_generate_v4()"
+        },
+        {
+          "name": "organization_id",
+          "position": 2,
+          "pg_type": "uuid",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "ref",
+          "position": 3,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": false
+        },
+        {
+          "name": "full_name",
+          "position": 4,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "title",
+          "position": 5,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "experience",
+          "position": 6,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "schedule",
+          "position": 7,
+          "pg_type": "jsonb",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_json_array",
+          "default_raw": "'[]'::jsonb"
+        },
+        {
+          "name": "booking_url",
+          "position": 8,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "empty_string",
+          "default_raw": "''::text"
+        },
+        {
+          "name": "portfolio_images",
+          "position": 9,
+          "pg_type": "_uuid[]",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "raw:'{}'::uuid[]",
+          "default_raw": "'{}'::uuid[]"
+        },
+        {
+          "name": "sales_status",
+          "position": 10,
+          "pg_type": "text",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "literal:active",
+          "default_raw": "'active'::text"
+        },
+        {
+          "name": "created_at",
+          "position": 11,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        },
+        {
+          "name": "updated_at",
+          "position": 12,
+          "pg_type": "timestamp with time zone",
+          "nullable": false,
+          "has_default": true,
+          "default_kind": "now",
+          "default_raw": "now()"
+        }
+      ],
+      "primary_key": [
+        "id"
+      ],
+      "unique_constraints": [
+        {
+          "name": "ai_specialists_organization_id_ref_key",
+          "columns": [
+            "organization_id",
+            "ref"
+          ]
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ai_specialists_organization_id_ref_key",
+          "columns": [
+            "organization_id",
+            "ref"
+          ],
+          "unique": true,
+          "backs_constraint": true
+        }
+      ],
+      "foreign_keys": [
+        {
+          "name": "ai_specialists_organization_id_fkey",
           "columns": [
             "organization_id"
           ],

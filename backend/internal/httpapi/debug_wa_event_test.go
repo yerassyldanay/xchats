@@ -1,14 +1,18 @@
 package httpapi_test
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/yerassyldanay/xchats/backend/internal/config"
 	"github.com/yerassyldanay/xchats/backend/internal/httpapi"
+	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
 // TestDebugWaEventHTTP_Message drives POST /debug/wa-event over real HTTP —
@@ -134,6 +138,118 @@ func TestDebugWaEventHTTP_ValidationErrors(t *testing.T) {
 	})
 	if resp.StatusCode != http.StatusBadRequest || errcodeOf(env) != "VALIDATION_ERROR" {
 		t.Fatalf("unknown event_type: status=%d errcode=%q, want 400 VALIDATION_ERROR", resp.StatusCode, errcodeOf(env))
+	}
+}
+
+// TestDebugWaEventHTTP_OwnSimulatorAccountSucceeds proves an EXPLICITLY
+// supplied account_id — not just the omitted-account_id default path
+// TestDebugWaEventHTTP_DefaultsToSimulatorAccount already covers — still
+// works for the caller's own organization's simulator account: orgAccount's
+// wa_*-gateway allowlist (isWaGatewayChannel, accounts.go) includes the
+// simulator channel alongside whatsapp, so this must not be rejected.
+func TestDebugWaEventHTTP_OwnSimulatorAccountSucceeds(t *testing.T) {
+	h := newHarness(t)
+	acct, err := h.store.GetOrCreateSimulatorAccount(context.Background(), h.orgID)
+	if err != nil {
+		t.Fatalf("GetOrCreateSimulatorAccount: %v", err)
+	}
+
+	resp, env := h.postJSON("/xchats/api/v1/debug/wa-event", map[string]any{
+		"event_type": "message", "account_id": acct.ID.String(),
+		"sender_jid": "77099999999@s.whatsapp.net", "external_id": "SIMEXPLICIT1", "text": "explicit simulator account_id",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %v", resp.StatusCode, env)
+	}
+}
+
+// TestDebugWaEventHTTP_ForeignOrgAccountRejected is CodeRabbit PR #119
+// discussion_r4111514582's core scenario: before this fix, a caller-supplied
+// account_id was used verbatim with NO ownership check at all, so any
+// authenticated caller could inject a synthetic inbound message into ANY
+// organization's account by supplying its id. It must now be rejected — the
+// same 404 shape orgAccount already gives /whatsapp-accounts/:id for the
+// same reason — and, just as important, InjectDebugEvent (whatsapp.Fake)
+// must never actually run: verified independently of the HTTP status by
+// confirming no chat was ever created for the foreign account/sender pair.
+func TestDebugWaEventHTTP_ForeignOrgAccountRejected(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	foreignOrg, err := h.store.SeedOrganization(ctx, "debug-wa-event-foreign-org")
+	if err != nil {
+		t.Fatalf("seed foreign org: %v", err)
+	}
+	const foreignJID = "77011112222@s.whatsapp.net"
+	foreignAcct, err := h.store.UpsertConnectedAccount(ctx, store.Account{
+		ID:                 config.AccountID(foreignJID),
+		OrganizationID:     uuid.NullUUID{UUID: foreignOrg.ID, Valid: true},
+		DisplayName:        "Foreign Org WhatsApp",
+		ExternalAccountRef: config.CanonicalJID(foreignJID),
+		ExternalHandle:     config.PhoneFromJID(foreignJID),
+		ConnectionState:    "connected",
+	})
+	if err != nil {
+		t.Fatalf("seed foreign account: %v", err)
+	}
+
+	const senderJID = "77099999999@s.whatsapp.net"
+	resp, env := h.postJSON("/xchats/api/v1/debug/wa-event", map[string]any{
+		"event_type": "message", "account_id": foreignAcct.ID.String(),
+		"sender_jid": senderJID, "external_id": "FOREIGNORG1", "text": "should never land",
+	})
+	if resp.StatusCode != http.StatusNotFound || errcodeOf(env) != "NOT_FOUND" {
+		t.Fatalf("status=%d errcode=%q, want 404 NOT_FOUND", resp.StatusCode, errcodeOf(env))
+	}
+
+	if _, found, err := h.store.ExistingChatForIdentity(ctx, foreignAcct.ID, senderJID); err != nil {
+		t.Fatalf("ExistingChatForIdentity: %v", err)
+	} else if found {
+		t.Fatal("a chat was created for the foreign account — InjectDebugEvent ran despite the ownership check")
+	}
+}
+
+// TestDebugWaEventHTTP_NonWhatsAppGatewayAccountRejected proves the
+// ownership check is not a bare organization-match: it also enforces the
+// same wa_*-gateway-channel allowlist orgAccount already applies to
+// /whatsapp-accounts/:id — a Telegram account, even one that genuinely
+// belongs to the CALLER'S OWN organization, must still be rejected, since
+// InjectDebugEvent (whatsmeow-shaped) has no idea what to do with it.
+func TestDebugWaEventHTTP_NonWhatsAppGatewayAccountRejected(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	const botID = int64(987654321)
+	tgAcct, err := h.store.ClaimTelegramAccount(ctx, store.TelegramClaim{
+		ID:             config.ChannelAccountID(config.TelegramOwnerRef(botID)),
+		OrganizationID: h.orgID,
+		DisplayName:    "Debug WA Event Test Bot",
+		BotID:          botID,
+		BotUsername:    "debug_wa_event_test_bot",
+		BotToken:       "987654321:test-token",
+	})
+	if err != nil {
+		t.Fatalf("claim telegram account: %v", err)
+	}
+
+	resp, env := h.postJSON("/xchats/api/v1/debug/wa-event", map[string]any{
+		"event_type": "message", "account_id": tgAcct.ID.String(),
+		"sender_jid": "77099999999@s.whatsapp.net", "external_id": "TGREJECT1", "text": "wrong gateway",
+	})
+	if resp.StatusCode != http.StatusNotFound || errcodeOf(env) != "NOT_FOUND" {
+		t.Fatalf("status=%d errcode=%q, want 404 NOT_FOUND", resp.StatusCode, errcodeOf(env))
+	}
+}
+
+// TestDebugWaEventHTTP_InvalidAccountIDReturns400 covers the malformed-UUID
+// shape CodeRabbit PR #119 discussion_r4111514582 calls out explicitly: a
+// non-UUID account_id must fail closed with 400, not be forwarded to
+// orgAccount (which takes a parsed uuid.UUID) or to InjectDebugEvent.
+func TestDebugWaEventHTTP_InvalidAccountIDReturns400(t *testing.T) {
+	h := newHarness(t)
+	resp, env := h.postJSON("/xchats/api/v1/debug/wa-event", map[string]any{
+		"event_type": "message", "account_id": "not-a-valid-uuid",
+	})
+	if resp.StatusCode != http.StatusBadRequest || errcodeOf(env) != "VALIDATION_ERROR" {
+		t.Fatalf("status=%d errcode=%q, want 400 VALIDATION_ERROR", resp.StatusCode, errcodeOf(env))
 	}
 }
 

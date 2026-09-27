@@ -506,6 +506,24 @@ export interface ProductRow {
   draft: boolean
   updated_at: string
 }
+// Schedule shape (backend contract) shared by ContactRow (the salon's own
+// fallback hours) and SpecialistRow (a specific master's shift) — at most 7
+// entries, one per WORKED weekday; a missing weekday is simply absent from
+// the array (an off-day), never an entry with empty times.
+export type WeekdayRef = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+export interface ScheduleBreak {
+  start: string // "HH:MM"
+  end: string // "HH:MM"
+}
+export interface ScheduleDay {
+  ref: WeekdayRef
+  day: string // free-text display label captured at authoring time (e.g. "Вторник") — ref is what the backend actually keys on
+  start: string // "HH:MM"
+  end: string // "HH:MM"
+  breaks: ScheduleBreak[]
+}
+export type Schedule = ScheduleDay[]
+
 export interface ContactRow {
   id: string // = the 'support' singleton slug — one row per org
   slug: string
@@ -518,6 +536,12 @@ export interface ContactRow {
   phone: string
   website: string
   instagram: string
+  // booking_url/schedule — the salon booking link + weekly hours a
+  // specialist without their own booking_url falls back to (aiprompt's
+  // booking-fallback rule, PLAN.md §3). working_hours above stays untouched
+  // — legacy free text for non-salon tenants.
+  booking_url: string
+  schedule: Schedule
   contact_card_image: string | null
   location_map_image: string | null
   company_legal_documents: string[]
@@ -570,6 +594,42 @@ export interface DeliveryZoneRow {
   draft: boolean
   updated_at: string
 }
+// SpecialistRow — one ai_specialists row (a salon master): shift/break
+// schedule, an optional per-specialist booking link (falls back to
+// ContactRow.booking_url when blank), and a portfolio media gallery.
+// Mirrors backend/kbstore's Draft* struct for this table exactly.
+export interface SpecialistRow {
+  id: string // = ref
+  ref: string
+  full_name: string
+  title: string
+  experience: string
+  schedule: Schedule
+  booking_url: string
+  portfolio_images: string[] // material UUIDs, same convention as ProductRow.gallery_images
+  sales_status: string // active | inactive
+  draft: boolean
+  updated_at: string
+}
+// ServiceRow — one ai_services row: a base service, or a variant/addon
+// nested one level under a base (parent_ref) — see kbEntities.ts's
+// SERVICE_TYPES. An addon is never presented as bookable on its own
+// anywhere in the customer-facing UI copy (PLAN.md's core invariant).
+export interface ServiceRow {
+  id: string // = ref
+  ref: string
+  parent_ref: string // '' for a base service
+  service_type: string // base | variant | addon
+  category: string
+  name: string
+  price: string
+  duration: number | null // minutes — blank/unset, never 0
+  description: string
+  specialist_refs: string[]
+  sales_status: string // active | inactive
+  draft: boolean
+  updated_at: string
+}
 export interface KbMaterial {
   id: string
   source_type: string
@@ -614,6 +674,8 @@ export interface DraftView {
   topics: TopicRow[]
   tariffs: TariffRow[]
   products: ProductRow[]
+  specialists: SpecialistRow[]
+  services: ServiceRow[]
   contacts: ContactRow[]
   policies: PolicyRow[]
   tariff_info: TariffInfoRow[]
@@ -648,6 +710,8 @@ export interface DraftChangeSet {
   topics: TopicRow[]
   tariffs: TariffRow[]
   products: ProductRow[]
+  specialists: SpecialistRow[]
+  services: ServiceRow[]
   contacts: ContactRow[]
   policies: PolicyRow[]
   tariff_info: TariffInfoRow[]
@@ -659,7 +723,7 @@ export interface DraftChangeSet {
 // vocabulary POST /playground/draft/approve/:kind/:id and DELETE
 // /playground/draft/changes/:kind/:key use.
 export interface DraftChangeDelete {
-  kind: string // topics|tariffs|products|contacts|policies|tariff_info|delivery_zones
+  kind: string // topics|tariffs|products|specialists|services|contacts|policies|tariff_info|delivery_zones
   key: string
 }
 

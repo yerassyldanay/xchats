@@ -29,6 +29,12 @@ const (
 	KBTypePolicies     = "policies"
 	KBTypeTariffInfo   = "tariff_info"
 	KBTypeDeliveryZone = "delivery_zone"
+	// KBTypeSpecialist/KBTypeService are the beauty-salon vertical's two
+	// catalog entities (PLAN.md "Beauty Salon Knowledge Base Extension") —
+	// multi-row, ref-keyed, sales_status-gated, following KBTypeProduct's
+	// own shape exactly (salon.go).
+	KBTypeSpecialist = "specialist"
+	KBTypeService    = "service"
 )
 
 // AllKBTypes is the closed, ordered vocabulary — used to validate a
@@ -36,6 +42,7 @@ const (
 var AllKBTypes = []string{
 	KBTypeAssistant, KBTypeTopic, KBTypeProduct, KBTypeTariff,
 	KBTypeContacts, KBTypePolicies, KBTypeTariffInfo, KBTypeDeliveryZone,
+	KBTypeSpecialist, KBTypeService,
 }
 
 // NaturalKeyMain is the fixed stable key for every singleton KB type

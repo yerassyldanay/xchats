@@ -176,6 +176,18 @@ func (s *Store) MCPAttachMedia(ctx context.Context, orgID, userID uuid.UUID, in 
 			cur.CommercePolicyDocuments, result.AlreadyPresent = appendUnique(cur.CommercePolicyDocuments, in.MaterialID)
 			b.upsertPolicy(cur)
 			b.removeDelete(deleteKindFor(KBTypePolicies), NaturalKeyMain)
+		case KBTypeSpecialist:
+			cur, err := s.currentSpecialist(ctx, db, orgID, key, b)
+			if err != nil {
+				return err
+			}
+			target, ok := specialistMediaFieldTarget(&cur, in.Field)
+			if !ok {
+				return fmt.Errorf("kbstore: unhandled attachment field %q for specialist", in.Field)
+			}
+			*target, result.AlreadyPresent = appendUnique(*target, in.MaterialID)
+			b.upsertSpecialist(cur)
+			b.removeDelete(deleteKindFor(KBTypeSpecialist), key)
 		default:
 			return fmt.Errorf("kbstore: unhandled attachment type %q", in.Type)
 		}
@@ -229,6 +241,17 @@ func tariffMediaFieldTarget(t *DraftTariff, field string) (*[]uuid.UUID, bool) {
 		return &t.ExplainerVideos, true
 	case "terms_documents":
 		return &t.TermsDocuments, true
+	default:
+		return nil, false
+	}
+}
+
+// specialistMediaFieldTarget is topicMediaFieldTarget's twin for
+// ai_specialists — portfolio_images is its only attachment field.
+func specialistMediaFieldTarget(sp *DraftSpecialist, field string) (*[]uuid.UUID, bool) {
+	switch field {
+	case "portfolio_images":
+		return &sp.PortfolioImages, true
 	default:
 		return nil, false
 	}

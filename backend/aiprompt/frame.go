@@ -181,3 +181,36 @@ var frameShopKBV7TGRU string
 func FrameShopKBV7TGRU() string {
 	return frameShopKBV7TGRU
 }
+
+// PromptRefSalonKBV1 identifies the beauty-salon vertical's frame (PLAN.md
+// "Beauty Salon Knowledge Base Extension"): a new lineage, not a shop-kb
+// edit, because it replaces the whole PRODUCTS/TARIFFS/DELIVERY_ZONES
+// content model with %%SERVICES%%/%%SPECIALISTS%% (prompt.go's
+// renderServices/renderSpecialists) — a salon-vertical organization has no
+// use for a shop catalog frame, and vice versa. It shares shop-kb@v7's
+// response JSON contract unchanged (RenderPromptV7/ValidateResponseV7 —
+// PLAN.md: "Keep the existing response schema... unchanged"), including
+// the optional kb_gap diagnostic, so only the frame text and its two new
+// slots differ.
+//
+// response.frameFor/PromptRefFor (response/engine.go) select this frame
+// whenever the organization's KB carries any specialist or service row,
+// regardless of channel — there is no Telegram variant yet (PLAN.md's
+// scope is silent on Telegram for the salon vertical); a Telegram-channel
+// salon organization still gets this WhatsApp-worded persona line rather
+// than falling back to the shop frame, which would render %%SERVICES%%/
+// %%SPECIALISTS%% markers unfilled.
+const PromptRefSalonKBV1 = "salon-kb@v1"
+
+// frameSalonKBV1RU is the salon-kb@v1 frame text. frame_test.go pins its
+// SHA256 so any accidental drift fails loudly, exactly like every
+// shop-kb-v* frame above.
+//
+//go:embed frames/salon-kb-v1-ru.txt
+var frameSalonKBV1RU string
+
+// FrameSalonKBV1RU returns the salon-kb@v1 frame text, ready for
+// RenderPromptV7.
+func FrameSalonKBV1RU() string {
+	return frameSalonKBV1RU
+}

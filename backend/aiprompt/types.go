@@ -115,6 +115,11 @@ type TariffInfo struct {
 
 // Contacts mirrors the ai_contacts singleton (natural ref "main").
 // contact_card_image and location_map_image are singular uuid columns.
+// WorkingHours is free-text and stays untouched for non-salon tenants — it
+// is never parsed into Schedule; Schedule is the structured salon-kb@v1
+// contract, authoritative only where the salon frame is selected.
+// BookingURL is the salon-wide fallback a Specialist without their own
+// BookingURL resolves to (resolvedBookingURL, catalog.go).
 type Contacts struct {
 	WhatsApp              string
 	Email                 string
@@ -128,6 +133,8 @@ type Contacts struct {
 	ContactCardImage      string
 	LocationMapImage      string
 	CompanyLegalDocuments []string
+	BookingURL            string
+	Schedule              Schedule
 }
 
 // Policies mirrors the ai_policies singleton (natural ref "main").
@@ -177,6 +184,45 @@ type DeliveryZone struct {
 	SalesStatus       string // active | inactive
 }
 
+// Specialist mirrors one ai_specialists row: a salon staff member with a
+// weekly Schedule (schedule.go) and their own optional booking link —
+// SpecialistVisible (catalog.go) gates prompt visibility on SalesStatus
+// alone, mirroring how Tariff/DeliveryZone use active() directly (a
+// specialist has no product-style availability_status). BookingURL falls
+// back to Contacts.BookingURL when blank (resolvedBookingURL, catalog.go);
+// PortfolioImages is the specialists.<ref>.portfolio media column.
+type Specialist struct {
+	Ref             string
+	FullName        string
+	Title           string
+	Experience      string
+	Schedule        Schedule
+	BookingURL      string
+	PortfolioImages []string
+	SalesStatus     string // active | inactive
+}
+
+// Service mirrors one ai_services row. Base services have a blank
+// ParentRef; variant/addon services name a base service's Ref from the
+// same organization via ParentRef — only one hierarchy level is supported
+// (a variant/addon's own ParentRef is never itself a variant/addon).
+// SpecialistRefs lists which active Specialist.Ref values perform this
+// service; an addon can never be booked standalone — the salon-kb@v1 frame
+// carries that rule as an explicit per-service instruction
+// (renderServices, prompt.go), not as code that blocks a reply.
+type Service struct {
+	Ref            string
+	ParentRef      string
+	ServiceType    string // base | variant | addon
+	Category       string
+	Name           string
+	Price          string
+	Duration       *int // minutes; nil means unspecified, never rendered as a token
+	Description    string
+	SpecialistRefs []string
+	SalesStatus    string // active | inactive
+}
+
 // KB is one organization's complete approved live knowledge base plus the
 // kbd_materials registry rows its media columns reference. KB is the input to
 // BuildCatalog, which is the only place kbd_materials data is read. KB is
@@ -192,6 +238,8 @@ type KB struct {
 	Policies       *Policies
 	TariffInfo     *TariffInfo
 	DeliveryZones  []DeliveryZone
+	Specialists    []Specialist
+	Services       []Service
 	Materials      []Material
 }
 
@@ -221,6 +269,8 @@ type PromptInput struct {
 	Policies      *Policies
 	TariffInfo    *TariffInfo
 	DeliveryZones []DeliveryZone
+	Specialists   []Specialist
+	Services      []Service
 }
 
 // PromptInput derives the model-visible projection of kb: approved ai_*
@@ -235,5 +285,7 @@ func (kb *KB) PromptInput() *PromptInput {
 		Policies:      kb.Policies,
 		TariffInfo:    kb.TariffInfo,
 		DeliveryZones: kb.DeliveryZones,
+		Specialists:   kb.Specialists,
+		Services:      kb.Services,
 	}
 }

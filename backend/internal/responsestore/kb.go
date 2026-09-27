@@ -98,6 +98,12 @@ func (r *KnowledgeBaseRepo) Load(ctx context.Context, organizationID string) (*a
 	if kb.DeliveryZones, err = loadDeliveryZones(ctx, tx, orgID); err != nil {
 		return nil, err
 	}
+	if kb.Specialists, err = loadSpecialists(ctx, tx, orgID); err != nil {
+		return nil, err
+	}
+	if kb.Services, err = loadServices(ctx, tx, orgID); err != nil {
+		return nil, err
+	}
 	if kb.Materials, err = loadMaterials(ctx, tx, orgID); err != nil {
 		return nil, err
 	}
@@ -253,11 +259,12 @@ func loadContacts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.C
 	var companyLegal []uuid.UUID
 	err := tx.QueryRow(ctx, `
 		SELECT whatsapp, email, address, legal_information, callback_time, working_hours, phone, website, instagram,
-		       contact_card_image, location_map_image, company_legal_documents
+		       contact_card_image, location_map_image, company_legal_documents, booking_url, schedule
 		FROM ai_contacts WHERE organization_id = $1`, orgID).
 		Scan(&c.WhatsApp, &c.Email, &c.Address, &legalInfo, &c.CallbackTime,
 			&c.WorkingHours, &c.Phone, &c.Website, &c.Instagram,
-			&contactCard, &locationMap, (*dbx.UUIDArray)(&companyLegal))
+			&contactCard, &locationMap, (*dbx.UUIDArray)(&companyLegal),
+			&c.BookingURL, (*aiprompt.ScheduleColumn)(&c.Schedule))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return nil, nil
 	}
@@ -273,6 +280,59 @@ func loadContacts(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.C
 	}
 	c.CompanyLegalDocuments = mediaArray(companyLegal)
 	return &c, nil
+}
+
+// loadSpecialists reads every ai_specialists row for orgID — including
+// inactive ones: aiprompt.BuildCatalog/specialistVisible, not this loader,
+// decides what an archived specialist is eligible to render, matching
+// loadProducts' own "load everything, let aiprompt gate visibility"
+// division of responsibility.
+func loadSpecialists(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.Specialist, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status
+		FROM ai_specialists WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("responsestore: load specialists: %w", err)
+	}
+	defer rows.Close()
+	var out []aiprompt.Specialist
+	for rows.Next() {
+		var s aiprompt.Specialist
+		var portfolio []uuid.UUID
+		if err := rows.Scan(&s.Ref, &s.FullName, &s.Title, &s.Experience,
+			(*aiprompt.ScheduleColumn)(&s.Schedule), &s.BookingURL, (*dbx.UUIDArray)(&portfolio), &s.SalesStatus); err != nil {
+			return nil, fmt.Errorf("responsestore: scan specialist: %w", err)
+		}
+		s.PortfolioImages = mediaArray(portfolio)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// loadServices reads every ai_services row for orgID — base, variant, and
+// addon alike, active or archived; aiprompt.BuildCatalog enforces the
+// hierarchy/visibility rules, same division of responsibility as
+// loadSpecialists above.
+func loadServices(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) ([]aiprompt.Service, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status
+		FROM ai_services WHERE organization_id = $1 ORDER BY created_at`, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("responsestore: load services: %w", err)
+	}
+	defer rows.Close()
+	var out []aiprompt.Service
+	for rows.Next() {
+		var s aiprompt.Service
+		var duration *int
+		if err := rows.Scan(&s.Ref, &s.ParentRef, &s.ServiceType, &s.Category, &s.Name, &s.Price,
+			&duration, &s.Description, (*dbx.StringArray)(&s.SpecialistRefs), &s.SalesStatus); err != nil {
+			return nil, fmt.Errorf("responsestore: scan service: %w", err)
+		}
+		s.Duration = duration
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func loadPolicies(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.Policies, error) {

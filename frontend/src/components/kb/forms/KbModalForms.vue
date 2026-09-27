@@ -6,6 +6,8 @@
 import TopicForm from './TopicForm.vue'
 import ProductForm from './ProductForm.vue'
 import TariffForm from './TariffForm.vue'
+import SpecialistFormDialog from './SpecialistFormDialog.vue'
+import ServiceFormDialog from './ServiceFormDialog.vue'
 import DeliveryZoneForm from './DeliveryZoneForm.vue'
 import ContactsForm from './ContactsForm.vue'
 import PoliciesForm from './PoliciesForm.vue'
@@ -17,6 +19,8 @@ import AssistantFieldForm from './AssistantFieldForm.vue'
   <TopicForm />
   <ProductForm />
   <TariffForm />
+  <SpecialistFormDialog />
+  <ServiceFormDialog />
   <DeliveryZoneForm />
   <ContactsForm />
   <PoliciesForm />

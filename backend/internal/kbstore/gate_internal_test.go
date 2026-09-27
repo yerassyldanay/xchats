@@ -59,3 +59,30 @@ func TestGate_StepNumbersOK(t *testing.T) {
 		t.Fatalf("step numbers / bare counts should pass, got %v", r)
 	}
 }
+
+// TestServiceGateReasons_ParentNoLongerBase is a direct unit test of
+// serviceGateReasons' own logic for a state validateService's
+// hasServiceChildren (salon_validate.go) already makes unreachable through
+// any real write path today — defense in depth, same reasoning as this
+// file's own gate() tests above: never trust a single point of enforcement
+// to have been perfect. "exam" used to be a base with child "individual";
+// this is the resulting view AFTER something (hypothetically bypassing
+// validateService) changed exam into a variant of "math" without first
+// checking individual still depends on it staying a base.
+func TestServiceGateReasons_ParentNoLongerBase(t *testing.T) {
+	services := []ServiceRow{
+		{Ref: "math", ServiceType: "base", SalesStatus: "active"},
+		{Ref: "exam", ServiceType: "variant", ParentRef: "math", SalesStatus: "active"},
+		{Ref: "individual", ServiceType: "variant", ParentRef: "exam", SalesStatus: "active"},
+	}
+	reasons := serviceGateReasons(services)
+	found := false
+	for _, r := range reasons {
+		if r.Kind == "services" && r.Key == "individual" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("serviceGateReasons(%+v) = %+v, want a reason naming individual (its parent exam is no longer a base service)", services, reasons)
+	}
+}

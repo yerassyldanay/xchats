@@ -142,6 +142,29 @@ type MediaColumn struct {
 	Singular bool // true: nullable uuid; false: ordered uuid[]
 }
 
+// scheduleFactColumns is the closed 9-column set every schedule-bearing
+// table (contact, specialist) registers: a booking-link token plus the
+// full-week and one-per-weekday schedule tokens (schedule.go). Shared
+// rather than repeated so the two tables can never silently drift.
+func scheduleFactColumns(bookingLabel string) []FactColumn {
+	cols := []FactColumn{
+		{Column: "booking", Label: bookingLabel, Kind: KindTextComplete},
+		{Column: "schedule", Label: "график работы (вся неделя)", Kind: KindTextComplete},
+	}
+	dayLabels := map[WeekdayRef]string{
+		Monday: "понедельник", Tuesday: "вторник", Wednesday: "среда",
+		Thursday: "четверг", Friday: "пятница", Saturday: "суббота", Sunday: "воскресенье",
+	}
+	for _, ref := range weekdayOrder {
+		cols = append(cols, FactColumn{
+			Column: "schedule_" + string(ref),
+			Label:  "график работы — " + dayLabels[ref],
+			Kind:   KindTextComplete,
+		})
+	}
+	return cols
+}
+
 // factColumns maps the SINGULAR fact-table segment to its exact-value columns,
 // in FACTS render order.
 var factColumns = map[string][]FactColumn{
@@ -152,14 +175,19 @@ var factColumns = map[string][]FactColumn{
 		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
 		{Column: "fee", Label: "комиссия", Kind: KindMoneyDisplay},
 	},
-	"contact": {
+	"service": {
+		{Column: "price", Label: "цена", Kind: KindMoneyDisplay},
+		{Column: "duration", Label: "продолжительность", Kind: KindNumber, Unit: "минут", UnitKK: "минут"},
+	},
+	"contact": append([]FactColumn{
 		{Column: "phone", Label: "телефон", Kind: KindTextComplete},
 		{Column: "whatsapp", Label: "WhatsApp", Kind: KindTextComplete},
 		{Column: "email", Label: "email", Kind: KindTextComplete},
 		{Column: "website", Label: "сайт", Kind: KindTextComplete},
 		{Column: "instagram", Label: "Instagram", Kind: KindTextComplete},
 		{Column: "working_hours", Label: "часы работы", Kind: KindTimeDisplay},
-	},
+	}, scheduleFactColumns("ссылка на онлайн-запись (салон)")...),
+	"specialist": scheduleFactColumns("ссылка на онлайн-запись (специалист)"),
 	"policy": {
 		{Column: "delivery_cost", Label: "стоимость доставки", Kind: KindMoneyDisplay},
 		{Column: "delivery_in_days", Label: "срок доставки, в днях", Kind: KindNumberRange, Unit: "дня", UnitKK: "күн"},
@@ -207,6 +235,9 @@ var mediaColumns = map[string][]MediaColumn{
 	},
 	"policies": {
 		{Column: "commerce_policy_documents", Label: "документы об условиях", Kind: MediaDocument},
+	},
+	"specialists": {
+		{Column: "portfolio", Label: "портфолио работ", Kind: MediaImage},
 	},
 }
 

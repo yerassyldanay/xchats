@@ -17,7 +17,7 @@ import (
 // /kb/imports' target_type accepts — "auto" plus one entry per content
 // KB type pass 2 may synthesize into. assistant is deliberately absent: a
 // persona is never inferred from imported content.
-var TargetTypes = []string{"auto", "topics", "products", "tariffs", "contacts", "policies", "tariff_info", "delivery_zones"}
+var TargetTypes = []string{"auto", "topics", "products", "tariffs", "contacts", "policies", "tariff_info", "delivery_zones", "specialists", "services"}
 
 func isValidTargetType(t string) bool {
 	for _, v := range TargetTypes {

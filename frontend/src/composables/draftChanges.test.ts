@@ -14,7 +14,7 @@ function topic(over: Partial<TopicRow> = {}): TopicRow {
 function emptyChanges(over: Partial<DraftChangeSet> = {}): DraftChangeSet {
   return {
     base_version: 1, updated_at: '2026-08-01T00:00:00Z', config: null,
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], deletes: [],
+    topics: [], tariffs: [], products: [], specialists: [], services: [], contacts: [], policies: [], tariff_info: [], zones: [], deletes: [],
     ...over,
   }
 }
@@ -25,7 +25,7 @@ function emptyLive(over: Partial<DraftView> = {}): DraftView {
       organization_id: 'org-1', persona: '', mission: '', guardrails: '', language_policy: '',
       reply_max_words: 120, draft: false, base_version: 0, updated_at: '',
     },
-    topics: [], tariffs: [], products: [], contacts: [], policies: [], tariff_info: [], zones: [], materials: [], requests: [],
+    topics: [], tariffs: [], products: [], specialists: [], services: [], contacts: [], policies: [], tariff_info: [], zones: [], materials: [], requests: [],
     ...over,
   }
 }

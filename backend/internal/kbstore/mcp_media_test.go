@@ -32,6 +32,7 @@ func TestMediaColumnKind_ClosedList(t *testing.T) {
 		"location_map_image":        "image",
 		"company_legal_documents":   "document",
 		"commerce_policy_documents": "document",
+		"portfolio_images":          "image",
 	}
 
 	got := kbstore.MediaFieldKinds()

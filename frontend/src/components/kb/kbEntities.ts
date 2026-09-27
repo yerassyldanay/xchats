@@ -5,9 +5,9 @@
 // map/pricing-type options (previously ~150 duplicated lines across the two
 // pages).
 import type { Component } from 'vue'
-import { Globe, Hash, Info, ListTree, MapPinned, Package, Phone, Receipt, ShieldCheck, Sparkles, Target, Truck, UserRound } from 'lucide-vue-next'
+import { Globe, Hash, Info, ListTree, MapPinned, Package, Phone, Receipt, Scissors, ShieldCheck, Sparkles, Target, Truck, Users, UserRound } from 'lucide-vue-next'
 import type { ChangeKind, KbRow } from '@/composables/draftChanges'
-import type { DraftChangeSet, DraftView } from '@/types'
+import type { DraftChangeSet, DraftView, WeekdayRef } from '@/types'
 
 // NATURAL_KEY_MAIN is the fixed key for a true singleton entity's
 // whole-entity operations (approveEntity('config', NATURAL_KEY_MAIN),
@@ -19,10 +19,14 @@ export const NATURAL_KEY_MAIN = 'main'
 
 // KB_ENTITY_ORDER is the fixed display order — Обзор first (it is the
 // assistant config, conceptually "above" the content tables), then content
-// kinds in the same order the pre-redesign pages already used. Черновик
-// filters this down to kinds with pending entries (useEntityTabs); Знаний
-// база shows all seven plus Промпт/Файлы.
-export const KB_ENTITY_ORDER: ChangeKind[] = ['config', 'topics', 'products', 'tariffs', 'tariff_info', 'delivery_zones', 'contacts', 'policies']
+// kinds in the same order the pre-redesign pages already used. specialists/
+// services sit right after tariffs — catalog-shaped content, the same tier
+// as products/tariffs — and before tariff_info. Черновик filters this down
+// to kinds with pending entries (useEntityTabs); Знаний база shows all nine
+// plus Промпт/Файлы.
+export const KB_ENTITY_ORDER: ChangeKind[] = [
+  'config', 'topics', 'products', 'tariffs', 'specialists', 'services', 'tariff_info', 'delivery_zones', 'contacts', 'policies',
+]
 
 // payloadField is DraftChangeSet/DraftView's own field name for this kind —
 // almost always identical to the kind, with ONE deliberate exception:
@@ -30,7 +34,7 @@ export const KB_ENTITY_ORDER: ChangeKind[] = ['config', 'topics', 'products', 't
 // struct tag `json:"zones"` — see kbstore.DraftView.Zones's doc comment).
 // Every array lookup goes through this, never `changes[kind]` directly, so
 // that trap can only ever be wrong in one place.
-type PayloadField = 'config' | 'topics' | 'tariffs' | 'products' | 'contacts' | 'policies' | 'tariff_info' | 'zones'
+type PayloadField = 'config' | 'topics' | 'tariffs' | 'products' | 'specialists' | 'services' | 'contacts' | 'policies' | 'tariff_info' | 'zones'
 
 export interface EntityMeta {
   icon: Component
@@ -47,6 +51,10 @@ export const ENTITY_META: Record<ChangeKind, EntityMeta> = {
   topics: { icon: ListTree, i18nKey: 'kb.entities.topics', singleton: false, keyOf: idOf, payloadField: 'topics' },
   products: { icon: Package, i18nKey: 'kb.entities.products', singleton: false, keyOf: idOf, payloadField: 'products' },
   tariffs: { icon: Receipt, i18nKey: 'kb.entities.tariffs', singleton: false, keyOf: idOf, payloadField: 'tariffs' },
+  // Users (roster of masters) is deliberately distinct from UserRound, which
+  // CONFIG_SECTIONS already uses for the single-persona Обзор card below.
+  specialists: { icon: Users, i18nKey: 'kb.entities.specialists', singleton: false, keyOf: idOf, payloadField: 'specialists' },
+  services: { icon: Scissors, i18nKey: 'kb.entities.services', singleton: false, keyOf: idOf, payloadField: 'services' },
   delivery_zones: { icon: MapPinned, i18nKey: 'kb.entities.delivery_zones', singleton: false, keyOf: idOf, payloadField: 'zones' },
   contacts: { icon: Phone, i18nKey: 'kb.entities.contacts', singleton: true, keyOf: idOf, payloadField: 'contacts' },
   policies: { icon: Truck, i18nKey: 'kb.entities.policies', singleton: true, keyOf: idOf, payloadField: 'policies' },
@@ -72,6 +80,21 @@ export type ZoneLevel = (typeof ZONE_LEVELS)[number]
 // prompt, unavailable suppresses all of it down to the name alone.
 export const AVAILABILITY_STATUSES = ['in_stock', 'preorder', 'on_demand', 'unavailable'] as const
 export type AvailabilityStatus = (typeof AVAILABILITY_STATUSES)[number]
+
+// SERVICE_TYPES mirrors ServiceRow.service_type's closed vocabulary (backend
+// contract). Hierarchy rule: a base service has no parent; variant/addon
+// must pick an existing base as parent_ref, only one level deep — see
+// ServiceFormDialog.vue. An addon can never be presented as bookable on its
+// own anywhere in the UI (PLAN.md's core invariant, TEST.md §4.3).
+export const SERVICE_TYPES = ['base', 'variant', 'addon'] as const
+export type ServiceType = (typeof SERVICE_TYPES)[number]
+
+// WEEKDAY_ORDER is the fixed Monday-first display order every schedule UI
+// (ScheduleEditor, SpecialistsTab's weekday pills, SpecialistRecord) shares
+// — the backend's Schedule array itself carries no ordering guarantee (it is
+// simply the subset of WORKED weekdays), so every reader of a Schedule that
+// needs a stable 7-slot layout goes through this same list.
+export const WEEKDAY_ORDER: WeekdayRef[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 // --- Обзор (assistant config) sections --------------------------------------
 

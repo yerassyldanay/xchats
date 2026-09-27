@@ -18,8 +18,10 @@ import { kbActions } from './records/actions'
 import TopicRecord from './records/TopicRecord.vue'
 import ProductRecord from './records/ProductRecord.vue'
 import TariffRecord from './records/TariffRecord.vue'
+import SpecialistRecord from './records/SpecialistRecord.vue'
+import ServiceRecord from './records/ServiceRecord.vue'
 
-const props = defineProps<{ kind: 'topics' | 'products' | 'tariffs' }>()
+const props = defineProps<{ kind: 'topics' | 'products' | 'tariffs' | 'specialists' | 'services' }>()
 
 const pg = usePlayground()
 const { entriesFor } = useDraftChanges()
@@ -28,7 +30,7 @@ const selection = useDraftSelection()
 const cancelConfirm = useCancelConfirm()
 const { t } = useI18n()
 
-const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord }
+const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord, specialists: SpecialistRecord, services: ServiceRecord }
 const component = computed(() => COMPONENTS[props.kind])
 const entries = computed(() => entriesFor(props.kind))
 

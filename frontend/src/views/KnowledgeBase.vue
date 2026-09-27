@@ -24,6 +24,8 @@ import PromptTab from '@/components/kb/PromptTab.vue'
 import GapsTab from '@/components/kb/GapsTab.vue'
 import EntityTabs from '@/components/kb/EntityTabs.vue'
 import RecordList from '@/components/kb/RecordList.vue'
+import SpecialistsTab from '@/components/kb/SpecialistsTab.vue'
+import ServicesTab from '@/components/kb/ServicesTab.vue'
 import DraftBanner from '@/components/kb/DraftBanner.vue'
 import DeliveryZoneRecord from '@/components/kb/records/DeliveryZoneRecord.vue'
 import ContactsRecord from '@/components/kb/records/ContactsRecord.vue'
@@ -41,7 +43,7 @@ const { markFor } = usePendingIndex()
 // KB-06: the entity guide's fixed kind order — all six content tabs (config/
 // materials/prompt are structural, not "which kind does this fact belong
 // to", so they're excluded), matching KB_ENTITY_ORDER's own order.
-const ENTITY_GUIDE_KINDS = ['topics', 'products', 'tariffs', 'tariff_info', 'delivery_zones', 'contacts', 'policies'] as const
+const ENTITY_GUIDE_KINDS = ['topics', 'products', 'tariffs', 'specialists', 'services', 'tariff_info', 'delivery_zones', 'contacts', 'policies'] as const
 
 onMounted(async () => {
   // Both slices: `live` is what this page lists, `changes` is what
@@ -87,6 +89,10 @@ const toolbar = computed(() => {
       return { label: t('kb.page.addProduct'), action: () => modal.openCreate('products', LIVE) }
     case 'tariffs':
       return { label: t('kb.page.addTariff'), action: () => modal.openCreate('tariffs', LIVE) }
+    case 'specialists':
+      return { label: t('kb.page.addSpecialist'), action: () => modal.openCreate('specialists', LIVE) }
+    case 'services':
+      return { label: t('kb.page.addService'), action: () => modal.openCreate('services', LIVE) }
     case 'delivery_zones':
       return { label: t('kb.page.addZone'), action: () => modal.openCreate('delivery_zones', LIVE) }
     case 'contacts':
@@ -201,6 +207,14 @@ watch(active, (a) => {
       <div v-show="active === 'tariffs'" class="space-y-3" data-testid="live-tab-tariffs">
         <p v-if="!pg.live?.tariffs.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyTariffs') }}</p>
         <RecordList kind="tariffs" @delete="(key) => askDelete('tariffs', key)" />
+      </div>
+
+      <div v-show="active === 'specialists'" data-testid="live-tab-specialists">
+        <SpecialistsTab />
+      </div>
+
+      <div v-show="active === 'services'" data-testid="live-tab-services">
+        <ServicesTab />
       </div>
 
       <div v-show="active === 'delivery_zones'" class="space-y-3" data-testid="live-tab-delivery_zones">

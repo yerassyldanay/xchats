@@ -3,6 +3,7 @@ package aiprompt
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -263,7 +264,22 @@ func buildFacts(kb *KB, cat *Catalog) error {
 			"phone": c.Phone, "whatsapp": c.WhatsApp, "email": c.Email,
 			"website": c.Website, "instagram": c.Instagram, "working_hours": c.WorkingHours,
 		}
+		schedule, err := NormalizeSchedule(c.Schedule)
+		if err != nil {
+			return fmt.Errorf("aiprompt: contact: %w", err)
+		}
+		if isSalonOrganization(kb) && len(schedule) > 0 {
+			// The structured schedule is authoritative once a salon has one
+			// (migration 0020's comment) — legacy working_hours free text is
+			// no longer an approved fact, so it can't contradict schedule/
+			// schedule_<day> with a different, stale set of hours.
+			vals["working_hours"] = ""
+		}
 		for _, col := range factColumns["contact"] {
+			if v, ok := scheduleFactValue(col.Column, c.BookingURL, schedule, "ru"); ok {
+				addFact(cat, "contact", SingletonRef, col, v)
+				continue
+			}
 			addFact(cat, "contact", SingletonRef, col, vals[col.Column])
 		}
 	}
@@ -281,7 +297,175 @@ func buildFacts(kb *KB, cat *Catalog) error {
 	if err := buildDeliveryZoneFacts(kb, cat); err != nil {
 		return err
 	}
+	if err := buildSpecialistFacts(kb, cat); err != nil {
+		return err
+	}
+	if err := buildServiceFacts(kb, cat); err != nil {
+		return err
+	}
 	return nil
+}
+
+// scheduleFactValue computes the value for one of scheduleFactColumns' 9
+// columns — booking, schedule, or schedule_<day> — or reports ok=false for
+// any other column, so callers can fall through to their own field lookup.
+// Shared by BuildCatalog (build time, always lang "ru" — only used to
+// decide whether a token exists at all, via addFact's blank check) and
+// ResolveFactLang's currentFactValue (contract.go; resolve time, the
+// response's actual ReplyLanguage) so the two can never compute a
+// schedule/booking value two different ways.
+func scheduleFactValue(column, bookingURL string, schedule Schedule, lang string) (string, bool) {
+	switch {
+	case column == "booking":
+		return bookingURL, true
+	case column == "schedule":
+		return scheduleFullText(schedule, lang), true
+	case strings.HasPrefix(column, "schedule_"):
+		ref := WeekdayRef(strings.TrimPrefix(column, "schedule_"))
+		if d := schedule.DayByRef(ref); d != nil {
+			return scheduleDayText(*d, lang), true
+		}
+		return "", true // off-day (or no-longer-scheduled at resolve time): blank -> no/failed token
+	default:
+		return "", false
+	}
+}
+
+// resolvedBookingURL implements the specialist booking-link fallback rule
+// (PLAN.md): a specialist's own link always wins; a blank one falls back to
+// the salon's contact.main.booking; if both are blank the token is simply
+// absent (addFact's blank check) — never an error, since booking handoff
+// escalates naturally when the model has no link to offer.
+func resolvedBookingURL(specialistURL, salonURL string) string {
+	if strings.TrimSpace(specialistURL) != "" {
+		return specialistURL
+	}
+	return salonURL
+}
+
+func contactBookingURL(kb *KB) string {
+	if kb.Contacts == nil {
+		return ""
+	}
+	return kb.Contacts.BookingURL
+}
+
+// specialistVisible reports whether a specialist is eligible for ANY prompt
+// visibility (roster prose, schedule/booking facts, portfolio media) — a
+// specialist has no product-style availability_status, only sales_status.
+func specialistVisible(s *Specialist) bool { return active(s.SalesStatus) }
+
+// buildSpecialistFacts derives each active specialist's booking/schedule
+// fact tokens. An archived specialist (specialistVisible false) is fully
+// suppressed here — PLAN.md: "removes that specialist from prompt-visible
+// associations" — but buildServiceFacts still renders their ref in a
+// service's specialist list only when they are visible (see
+// activeSpecialistRefs), so archiving never breaks a service's own facts.
+func buildSpecialistFacts(kb *KB, cat *Catalog) error {
+	for i := range kb.Specialists {
+		s := &kb.Specialists[i]
+		if !specialistVisible(s) {
+			continue
+		}
+		if err := validRef(s.Ref); err != nil {
+			return err
+		}
+		schedule, err := NormalizeSchedule(s.Schedule)
+		if err != nil {
+			return fmt.Errorf("aiprompt: specialist %s: %w", s.Ref, err)
+		}
+		booking := resolvedBookingURL(s.BookingURL, contactBookingURL(kb))
+		for _, col := range factColumns["specialist"] {
+			if v, ok := scheduleFactValue(col.Column, booking, schedule, "ru"); ok {
+				addFact(cat, "specialist", s.Ref, col, v)
+			}
+		}
+	}
+	return nil
+}
+
+var validServiceTypes = map[string]bool{"base": true, "variant": true, "addon": true}
+
+// buildServiceFacts enforces the service-hierarchy invariants (PLAN.md
+// "Service refs use lowercase dash-separated slugs...", "Base services have
+// no parent; variants and add-ons require a base parent from the same
+// organization", "Only one parent-child level is supported") and derives
+// each active service's price/duration fact tokens. Any violation is a hard
+// BuildCatalog error, matching buildDeliveryZoneFacts' fail-closed
+// treatment of a contradictory row — internal/kbstore validates the same
+// rules at write time (defense in depth, the same belt-and-suspenders
+// relationship ValidateFacts has with its own write-path callers).
+func buildServiceFacts(kb *KB, cat *Catalog) error {
+	byRef := make(map[string]*Service, len(kb.Services))
+	for i := range kb.Services {
+		sv := &kb.Services[i]
+		if err := validRef(sv.Ref); err != nil {
+			return err
+		}
+		if byRef[sv.Ref] != nil {
+			return fmt.Errorf("aiprompt: duplicate service ref %q", sv.Ref)
+		}
+		byRef[sv.Ref] = sv
+		if !validServiceTypes[sv.ServiceType] {
+			return fmt.Errorf("aiprompt: service %q has invalid service_type %q", sv.Ref, sv.ServiceType)
+		}
+	}
+	for _, sv := range byRef {
+		if sv.ServiceType == "base" {
+			if sv.ParentRef != "" {
+				return fmt.Errorf("aiprompt: base service %q must not have a parent_ref", sv.Ref)
+			}
+			continue
+		}
+		if sv.ParentRef == "" {
+			return fmt.Errorf("aiprompt: service %q (%s) requires a parent_ref", sv.Ref, sv.ServiceType)
+		}
+		parent, ok := byRef[sv.ParentRef]
+		if !ok {
+			return fmt.Errorf("aiprompt: service %q references unknown parent_ref %q", sv.Ref, sv.ParentRef)
+		}
+		if parent.ServiceType != "base" {
+			return fmt.Errorf("aiprompt: service %q's parent_ref %q is not a base service — only one hierarchy level is supported", sv.Ref, sv.ParentRef)
+		}
+		if active(sv.SalesStatus) && !active(parent.SalesStatus) {
+			return fmt.Errorf("aiprompt: service %q is active but its base service %q is not — archiving a base must archive its active children", sv.Ref, sv.ParentRef)
+		}
+	}
+	for i := range kb.Services {
+		sv := &kb.Services[i]
+		if !active(sv.SalesStatus) {
+			continue
+		}
+		for _, col := range factColumns["service"] {
+			switch col.Column {
+			case "price":
+				addFact(cat, "service", sv.Ref, col, sv.Price)
+			case "duration":
+				if sv.Duration != nil && *sv.Duration > 0 {
+					addFact(cat, "service", sv.Ref, col, strconv.Itoa(*sv.Duration))
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// activeSpecialistRefs filters refs to the ones naming a currently visible
+// (active) specialist, preserving order — used to render a service's
+// specialist list without erroring on a ref an operator has since archived
+// (PLAN.md: archiving a specialist "preserves service relationships but
+// removes that specialist from prompt-visible associations").
+func activeSpecialistRefs(kb *KB, refs []string) []string {
+	var out []string
+	for _, ref := range refs {
+		for i := range kb.Specialists {
+			if kb.Specialists[i].Ref == ref && specialistVisible(&kb.Specialists[i]) {
+				out = append(out, ref)
+				break
+			}
+		}
+	}
+	return out
 }
 
 var validZoneLevels = map[string]bool{"city": true, "region": true, "country": true}
@@ -434,6 +618,17 @@ func policiesMedia(p *Policies) map[string][]string {
 	}
 }
 
+// specialistMedia maps PortfolioImages onto the registry's "portfolio"
+// column name (registry.go's mediaColumns["specialists"]) — deliberately
+// not "portfolio_images", so the model-facing token reads
+// specialists.<ref>.portfolio (PLAN.md) rather than exposing the DB column
+// name verbatim.
+func specialistMedia(s *Specialist) map[string][]string {
+	return map[string][]string{
+		"portfolio": s.PortfolioImages,
+	}
+}
+
 func singular(id string) []string {
 	if id == "" {
 		return nil
@@ -473,6 +668,13 @@ func buildMedia(kb *KB, cat *Catalog) error {
 	}
 	if kb.Policies != nil {
 		owners = append(owners, owner{"policies", SingletonRef, "Условия", policiesMedia(kb.Policies)})
+	}
+	for i := range kb.Specialists {
+		s := &kb.Specialists[i]
+		if !specialistVisible(s) {
+			continue // archived: no media token, no Absent entry either
+		}
+		owners = append(owners, owner{"specialists", s.Ref, s.FullName, specialistMedia(s)})
 	}
 
 	for _, o := range owners {
