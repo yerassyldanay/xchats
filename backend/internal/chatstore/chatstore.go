@@ -27,7 +27,7 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrNotFound is returned when a conversation lookup matches no row within
@@ -58,7 +58,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func (s *Store) Conversation(ctx context.Context, scope Scope, id uuid.UUID) (Co
 func (s *Store) SetTitle(ctx context.Context, scope Scope, id uuid.UUID, title string) (Conversation, error) {
 	tag, err := s.db.Exec(ctx, `
 		UPDATE chat_conversations
-		SET title = $1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET title = $1, updated_at = xchats_now()
 		WHERE id = $2 AND organization_id = $3 AND user_id = $4`,
 		title, id, scope.OrgID, scope.UserID)
 	if err != nil {
@@ -235,7 +235,7 @@ func (s *Store) AppendMessage(ctx context.Context, scope Scope, conversationID u
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE chat_conversations
-		SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET updated_at = xchats_now()
 		WHERE id = $1 AND organization_id = $2 AND user_id = $3`,
 		conversationID, scope.OrgID, scope.UserID)
 	if err != nil {

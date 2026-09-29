@@ -1,30 +1,4 @@
-// Package dbx is a thin, pgx-shaped facade over database/sql +
-// modernc.org/sqlite (pure Go, no cgo). It exists so the persistence
-// packages ported from pgx (internal/store, internal/kbstore,
-// internal/responsestore, internal/mcpauth, internal/dbtest) keep
-// ctx-first Query/QueryRow/Exec/Begin call sites unchanged in shape —
-// only the receiver type changes.
-//
-// dbx is internal plumbing of those repository packages only. Nothing
-// outside the persistence boundary may import it — see
-// internal/dbtest's architecture test, which enforces this at build time.
-//
-// The whole package is built around ONE controlled pool per database file:
-// a single *sql.DB with MaxOpenConns(1) and _txlock=immediate. That combi
-// nation is correct by construction — every write transaction serializes
-// through Go's own connection-pool queueing (not SQLite's busy-retry loop),
-// "INSERT ... RETURNING" read through QueryRow is always safe, and there is
-// no possibility of the classic SQLite busy-upgrade deadlock (a connection
-// that BEGINs deferred, reads, then tries to upgrade to a write while a
-// second connection does the same). A split reader pool is a post-bench
-// mark optimization only (see ReadQuery/BeginRead), never implicit routing.
-//
-// store, kbstore, mcpauth, and responsestore all need to share that ONE
-// pool for a given database file (see plan's Layering discussion) — Open
-// is safe to call more than once for the same path: callers past the first
-// get back the same, refcounted *DB, and the underlying *sql.DB is only
-// actually closed (and the single-process lock file released) once every
-// caller has called Close.
+// Package dbx provides the shared SQLite/PostgreSQL persistence boundary.
 package dbx
 
 import (
@@ -35,7 +9,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/gofrs/flock"
 	_ "modernc.org/sqlite"
@@ -47,11 +25,11 @@ import (
 // old pgx.ErrNoRows call sites being ported.
 var ErrNoRows = sql.ErrNoRows
 
-// DB is a single shared connection handle to one SQLite database file. Open
-// returns the same *DB (refcounted) for repeat calls with the same path.
+// DB is a refcounted shared database handle, keyed by SQLite path or PostgreSQL URL.
 type DB struct {
-	path string
-	sdb  *sql.DB
+	path    string
+	dialect Dialect
+	sdb     *sql.DB
 	// standalone marks a DB returned by OpenReadOnly: not in registry, no
 	// refcount, no flock — Close just closes sdb directly. See Close.
 	standalone bool
@@ -68,8 +46,9 @@ var (
 	registry   = map[string]*sharedDB{}
 )
 
-// Open opens (or attaches to an already-open, refcounted) SQLite database at
-// path, creating its parent directory and the file itself if needed.
+// Open detects postgres:// and postgresql:// URLs; other targets are SQLite
+// file paths. Repeated opens share a refcounted pool. PostgreSQL uses a bounded
+// multi-connection pool; SQLite creates the parent directory and file.
 //
 // Every connection this process opens for a given path shares one *sql.DB
 // with MaxOpenConns(1), WAL journaling, busy_timeout(5000), synchronous
@@ -82,6 +61,12 @@ var (
 // Close; the underlying connection and lock are only released when the
 // last reference is closed.
 func Open(ctx context.Context, path string) (*DB, error) {
+	if strings.HasPrefix(path, "postgres://") || strings.HasPrefix(path, "postgresql://") {
+		return openPostgres(ctx, path)
+	}
+	if strings.Contains(path, "://") {
+		return nil, fmt.Errorf("dbx: unsupported database URL scheme")
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("dbx: resolve path %q: %w", path, err)
@@ -127,7 +112,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 		return nil, fmt.Errorf("dbx: ping %q: %w", abs, err)
 	}
 
-	db := &DB{path: abs, sdb: sdb}
+	db := &DB{path: abs, sdb: sdb, dialect: SQLite}
 	registry[abs] = &sharedDB{db: db, fl: fl, refCount: 1}
 	return db, nil
 }
@@ -209,13 +194,16 @@ func (db *DB) Close() error {
 	delete(registry, db.path)
 
 	err := db.sdb.Close()
-	if unlockErr := s.fl.Unlock(); unlockErr != nil && err == nil {
-		err = fmt.Errorf("dbx: release lock for %q: %w", db.path, unlockErr)
+	if s.fl != nil {
+		if unlockErr := s.fl.Unlock(); unlockErr != nil && err == nil {
+			err = fmt.Errorf("dbx: release lock for %q: %w", db.path, unlockErr)
+		}
 	}
 	return err
 }
 
-// Path returns the absolute path this handle was opened against.
+// Path returns the SQLite path or PostgreSQL connection string for internal
+// pool sharing. It can contain credentials: never expose it in logs or APIs.
 func (db *DB) Path() string { return db.path }
 
 // LockPath returns the flock file path Open uses to enforce single-process
@@ -240,7 +228,7 @@ func (db *DB) Ping(ctx context.Context) error { return db.sdb.PingContext(ctx) }
 
 // Query runs a query expected to return rows.
 func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
-	r, err := db.sdb.QueryContext(ctx, query, bindArgs(args)...)
+	r, err := db.sdb.QueryContext(ctx, query, db.bind(args)...)
 	if err != nil {
 		return nil, err
 	}
@@ -249,29 +237,34 @@ func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 
 // QueryRow runs a query expected to return at most one row.
 func (db *DB) QueryRow(ctx context.Context, query string, args ...any) *Row {
-	return &Row{r: db.sdb.QueryRowContext(ctx, query, bindArgs(args)...)}
+	return &Row{r: db.sdb.QueryRowContext(ctx, query, db.bind(args)...)}
 }
 
 // Exec runs a query that doesn't return rows.
 func (db *DB) Exec(ctx context.Context, query string, args ...any) (CommandTag, error) {
-	res, err := db.sdb.ExecContext(ctx, query, bindArgs(args)...)
+	res, err := db.sdb.ExecContext(ctx, query, db.bind(args)...)
 	if err != nil {
 		return CommandTag{}, err
 	}
 	return newCommandTag(res), nil
 }
 
-// Begin starts an immediate-mode write transaction (see the package doc —
-// every transaction on this pool acquires the write lock upfront via
-// _txlock=immediate, so there is no separate read-only Begin today; see
-// ReadQuery/BeginRead in readonly.go for the documented future extension
-// point).
+// Begin starts a write transaction: SQLite uses BEGIN IMMEDIATE; PostgreSQL
+// uses a transaction-scoped advisory lock to preserve read-modify-write invariants.
 func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 	tx, err := db.sdb.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	return &Tx{tx: tx}, nil
+	// Serialize read-modify-write transactions across processes just as SQLite's
+	// BEGIN IMMEDIATE does. Reads outside transactions still use the pool.
+	if db.Dialect() == Postgres {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext(current_schema()))`); err != nil {
+			_ = tx.Rollback()
+			return nil, err
+		}
+	}
+	return &Tx{tx: tx, dialect: db.Dialect()}, nil
 }
 
 // DBTX is satisfied by both *DB and *Tx — the shape kbstore's old dbtx and
@@ -299,3 +292,29 @@ func IsSingleProcessLockErr(err error) bool {
 }
 
 var errSingleProcessLock = errors.New("dbx: database is already open by another process")
+
+// openPostgres shares one bounded pool per connection string. Error messages
+// deliberately omit the connection string, which can contain credentials.
+func openPostgres(ctx context.Context, dsn string) (*DB, error) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if s, ok := registry[dsn]; ok {
+		s.refCount++
+		return s.db, nil
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("dbx: invalid PostgreSQL connection string")
+	}
+	cfg.RuntimeParams["timezone"] = "UTC"
+	sdb := stdlib.OpenDB(*cfg)
+	sdb.SetMaxOpenConns(8)
+	sdb.SetMaxIdleConns(2)
+	if err := sdb.PingContext(ctx); err != nil {
+		_ = sdb.Close()
+		return nil, fmt.Errorf("dbx: PostgreSQL connection failed: %w", err)
+	}
+	db := &DB{path: dsn, sdb: sdb, dialect: Postgres}
+	registry[dsn] = &sharedDB{db: db, refCount: 1}
+	return db, nil
+}

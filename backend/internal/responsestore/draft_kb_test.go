@@ -40,7 +40,7 @@ func TestBuildKBFromDraftView_MapsEveryEntityKind(t *testing.T) {
 		},
 		Specialists: []kbstore.SpecialistRow{
 			{Ref: "alina-kim", FullName: "Алина Ким", Title: "Стилист", SalesStatus: "active",
-				Schedule: aiprompt.Schedule{{Ref: "tue", Day: "Вторник", Start: "10:00", End: "19:00"}},
+				Schedule:   aiprompt.Schedule{{Ref: "tue", Day: "Вторник", Start: "10:00", End: "19:00"}},
 				BookingURL: "https://example.com/book/alina", PortfolioImages: []uuid.UUID{gallery}},
 		},
 		Services: []kbstore.ServiceRow{

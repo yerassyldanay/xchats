@@ -173,6 +173,10 @@ func checkDriverImports(t *testing.T, pkgPath, imp, where string) {
 		t.Errorf("%s%s imports database/sql directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
 	case "modernc.org/sqlite":
 		t.Errorf("%s%s imports modernc.org/sqlite directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
+	default:
+		if strings.HasPrefix(imp, "github.com/jackc/pgx/") {
+			t.Errorf("%s%s imports PostgreSQL driver %s outside the driver boundary", pkgPath, where, imp)
+		}
 	}
 }
 

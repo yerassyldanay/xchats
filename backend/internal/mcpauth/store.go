@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // Store owns the four mcp_oauth_* tables (migration 0005) — client
@@ -35,7 +35,7 @@ func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s *Store) ResolveClient(ctx context.Context, clientID string) (Client, err
 		(client_id, client_name, redirect_uris, registration_source, token_endpoint_auth_method)
 		VALUES ($1,$2,$3,'cimd','none')
 		ON CONFLICT (client_id) DO UPDATE SET
-			client_name=EXCLUDED.client_name, redirect_uris=EXCLUDED.redirect_uris, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			client_name=EXCLUDED.client_name, redirect_uris=EXCLUDED.redirect_uris, updated_at=xchats_now()`,
 		fetched.ClientID, fetched.ClientName, dbx.StringArray(fetched.RedirectURIs)); err != nil {
 		return Client{}, fmt.Errorf("mcpauth: cache CIMD client: %w", err)
 	}
@@ -187,7 +187,7 @@ func (s *Store) ConsumeAuthorizationCode(ctx context.Context, clientID, redirect
 	var row authorizationCodeRow
 	var expiresAt time.Time
 	err = tx.QueryRow(ctx, `UPDATE mcp_authorization_codes
-		SET consumed_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET consumed_at = xchats_now()
 		WHERE code_hash = $1 AND consumed_at IS NULL
 		RETURNING client_id, redirect_uri, code_challenge, code_challenge_method,
 			user_id, organization_id, scope, resource, expires_at`, sha256Hex(code)).
@@ -262,7 +262,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 	var row refreshTokenRow
 	var expiresAt time.Time
 	err = tx.QueryRow(ctx, `UPDATE mcp_refresh_tokens
-		SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now'), replaced_by = $2
+		SET revoked_at = xchats_now(), replaced_by = $2
 		WHERE token_hash = $1 AND revoked_at IS NULL
 		RETURNING client_id, user_id, organization_id, scope, resource, expires_at`,
 		sha256Hex(token), sha256Hex(newToken)).
@@ -295,7 +295,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, clientID, token string, 
 // already revoked (RFC 7009 §2.2: revocation is idempotent and never signals
 // whether a token existed).
 func (s *Store) RevokeRefreshToken(ctx context.Context, token string) error {
-	_, err := s.db.Exec(ctx, `UPDATE mcp_refresh_tokens SET revoked_at = strftime('%Y-%m-%d %H:%M:%f','now')
+	_, err := s.db.Exec(ctx, `UPDATE mcp_refresh_tokens SET revoked_at = xchats_now()
 		WHERE token_hash = $1 AND revoked_at IS NULL`, sha256Hex(token))
 	return err
 }

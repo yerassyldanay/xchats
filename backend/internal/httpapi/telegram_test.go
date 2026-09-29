@@ -842,16 +842,22 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 	// CONSTRAINT. A BEFORE INSERT trigger that RAISEs is the equivalent that is
 	// actually more surgical — it fails inserts into this one table and nothing
 	// else, and DROP TRIGGER cleanly reverses it.
-	if _, err := h.db.Exec(context.Background(),
-		`CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages
-		 BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`); err != nil {
+	createTrigger := `CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages
+ BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`
+	dropTrigger := `DROP TRIGGER tg_messages_force_fail`
+	if h.db.Dialect() == "postgres" {
+		createTrigger = `CREATE FUNCTION fail_ingest() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced ingest failure'; END $$;
+  CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages FOR EACH ROW EXECUTE FUNCTION fail_ingest();`
+		dropTrigger = `DROP TRIGGER tg_messages_force_fail ON tg_messages; DROP FUNCTION fail_ingest();`
+	}
+	if _, err := h.db.Exec(context.Background(), createTrigger); err != nil {
 		t.Fatalf("install failing trigger: %v", err)
 	}
 	got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret)
 	if got != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500 so Telegram redelivers", got)
 	}
-	if _, err := h.db.Exec(context.Background(), `DROP TRIGGER tg_messages_force_fail`); err != nil {
+	if _, err := h.db.Exec(context.Background(), dropTrigger); err != nil {
 		t.Fatalf("drop trigger: %v", err)
 	}
 

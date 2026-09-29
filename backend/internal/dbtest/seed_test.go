@@ -35,7 +35,7 @@ func TestInitAdminMigration(t *testing.T) {
 		adminID = "00000000-0000-0000-0000-000000000002"
 		email   = "admin@xchat.kz"
 		// The documented default password, restored by
-		// 0011_restore_default_admin_password.up.sql.
+		// 20260929000000_baseline.sql.
 		defaultPassword = "xchat-admin-change-me"
 		defaultHash     = "$argon2id$v=19$m=65536,t=1,p=4$eZE9z7aFgeOEeYVAUCJTxg$3x3PW6uhMxX+nhuXZZZ79JQOKAoImKMB/ACkGsqq9io"
 	)

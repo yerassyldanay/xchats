@@ -570,9 +570,9 @@ func persistDraftBlob(ctx context.Context, tx *dbx.Tx, orgID, userID uuid.UUID, 
 	var newVersion int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
-		VALUES ($1, $2, 1, strftime('%Y-%m-%d %H:%M:%f','now'), $3)
+		VALUES ($1, $2, 1, xchats_now(), $3)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			draft = EXCLUDED.draft, base_version = kbd_draft.base_version + 1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_by = EXCLUDED.updated_by
+			draft = EXCLUDED.draft, base_version = kbd_draft.base_version + 1, updated_at = xchats_now(), updated_by = EXCLUDED.updated_by
 		RETURNING base_version`,
 		orgID, string(out), nullIfNilUUID(userID)).Scan(&newVersion); err != nil {
 		return 0, err

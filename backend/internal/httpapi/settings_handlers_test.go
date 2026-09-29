@@ -530,6 +530,15 @@ func TestDownloadBackup(t *testing.T) {
 		t.Fatalf("GET backup/download: %v", err)
 	}
 	defer resp.Body.Close()
+	if !h.store.SupportsFileBackup() {
+		if resp.StatusCode != http.StatusNotImplemented {
+			t.Fatalf("PostgreSQL backup status=%d, want 501", resp.StatusCode)
+		}
+		if strings.Contains(resp.Header.Get("Content-Type"), "zip") {
+			t.Fatal("unsupported backup must not start a zip stream")
+		}
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}

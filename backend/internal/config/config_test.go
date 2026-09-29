@@ -211,3 +211,32 @@ func TestTelegramResolvedModeFollowsTheTunnelOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestDatabaseEngineConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("storage:\n  db_path: ./local.db\n  wa_device_db_path: ./devices.db\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Database() != "./local.db" || cfg.Storage.DeviceDatabase() != "./devices.db" {
+		t.Fatal("SQLite paths not selected")
+	}
+	const target = "postgres://test@localhost/test"
+	t.Setenv("DATABASE_URL", target)
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != target {
+		t.Fatal("DATABASE_URL must switch both application and device persistence")
+	}
+	cfg.Storage.DatabaseURL = ""
+	cfg.Storage.DBPath = target
+	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != target {
+		t.Fatal("connection-string toggle not honored")
+	}
+}

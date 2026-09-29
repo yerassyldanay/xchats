@@ -217,11 +217,14 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 		},
 	}
 	draftRaw, _ := json.Marshal(draft)
-	_, _ = tx.Exec(ctx, `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO kbd_draft (organization_id, draft, base_version)
 		VALUES ($1, $2, 1)
-		ON CONFLICT (organization_id) DO UPDATE SET draft = $2, base_version = base_version + 1`,
+		ON CONFLICT (organization_id) DO UPDATE SET draft = $2, base_version = kbd_draft.base_version + 1`,
 		orgID, draftRaw)
+	if err != nil {
+		return false, err
+	}
 
 	if err := auditRow(ctx, tx, orgID, uuid.Nil, "seed", "demo KB content seeded (seed-kb-demo)"); err != nil {
 		return false, err

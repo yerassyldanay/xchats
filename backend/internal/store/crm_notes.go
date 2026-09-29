@@ -112,7 +112,7 @@ func (s *Store) AddCustomerNote(ctx context.Context, orgID, customerID uuid.UUID
 // current state.
 func (s *Store) UpdateCustomerNote(ctx context.Context, orgID, noteID uuid.UUID, body string) (CustomerNote, error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE crm_customer_notes SET body = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE crm_customer_notes SET body = $3, updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2`, orgID, noteID, body)
 	if err != nil {
 		return CustomerNote{}, wrap("update note", err)

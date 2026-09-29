@@ -279,7 +279,7 @@ func (s *Store) seedDemoDraft(ctx context.Context, channel string, chatID, messa
 			draft_state = excluded.draft_state,
 			reply_language = excluded.reply_language,
 			channel = excluded.channel,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = xchats_now()`,
 		id, chatID, messageID, reply, channel)
 	if err != nil {
 		return fmt.Errorf("seed demo AI draft: %w", err)

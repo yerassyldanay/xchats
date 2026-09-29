@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
@@ -30,7 +29,7 @@ func New(t testing.TB) *store.Store {
 func Open(t testing.TB) (*store.Store, *dbx.DB) {
 	t.Helper()
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "xchats.db")
+	path := Target(t)
 
 	db, err := dbx.Open(ctx, path)
 	if err != nil {

@@ -70,7 +70,7 @@ type AutomationScheduler interface {
 
 // ManagerConfig is Manager's construction input.
 type ManagerConfig struct {
-	// DeviceDBPath is whatsmeow's own device-session SQLite file — separate
+	// DeviceDBPath is a PostgreSQL URL or a separate device-session SQLite file; separate
 	// from xchats.db (see store.go's doc comment).
 	DeviceDBPath string
 	Store        *store.Store

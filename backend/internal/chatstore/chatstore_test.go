@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
@@ -148,7 +149,14 @@ func TestAppendAndReadMessages(t *testing.T) {
 	if msgs[1].ID != assistantID {
 		t.Errorf("assistant id = %s, want the pre-generated %s", msgs[1].ID, assistantID)
 	}
-	if string(msgs[1].Metadata) != string(meta) {
+	var gotMeta, wantMeta any
+	if err := json.Unmarshal(msgs[1].Metadata, &gotMeta); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(meta, &wantMeta); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotMeta, wantMeta) {
 		t.Errorf("metadata = %s, want %s", msgs[1].Metadata, meta)
 	}
 	// A user turn stores an empty JSON object, never NULL or "".

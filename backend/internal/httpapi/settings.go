@@ -586,6 +586,10 @@ func (s *Server) handleDownloadBackup(c *gin.Context) {
 		fail(c, http.StatusServiceUnavailable, ErrInternal, "the database is unavailable")
 		return
 	}
+	if !s.store.SupportsFileBackup() {
+		fail(c, http.StatusNotImplemented, ErrBackupUnavailable, "PostgreSQL backups require pg_dump; the downloadable file backup is available for SQLite")
+		return
+	}
 	var settingsJSON []byte
 	if s.settings != nil {
 		if st, err := s.settings.Load(); err == nil {

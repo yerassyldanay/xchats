@@ -136,4 +136,3 @@ func TestValidateCIMDRedirectURI(t *testing.T) {
 		})
 	}
 }
-

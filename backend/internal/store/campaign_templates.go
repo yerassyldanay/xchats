@@ -14,7 +14,7 @@ import (
 )
 
 // CampaignTemplate is one reusable, organization-wide message template
-// (CAM-14) — see migrations/sqlite/0015_campaign_templates.up.sql's own
+// (CAM-14) — see migrations/sqlite/20260929000000_baseline.sql's own
 // doc comment for why it is a standalone entity rather than a campaign
 // with no recipients.
 type CampaignTemplate struct {
@@ -44,13 +44,11 @@ const campaignTemplateCols = `id, organization_id, name, message_body, variables
 func scanCampaignTemplate(row dbx.Scanner) (CampaignTemplate, error) {
 	var t CampaignTemplate
 	var variablesRaw string
-	var archived int
-	err := row.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.MessageBody, &variablesRaw, &archived, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.OrganizationID, &t.Name, &t.MessageBody, &variablesRaw, &t.IsArchived, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return t, err
 	}
 	t.Variables = decodeStringSlice(variablesRaw)
-	t.IsArchived = archived != 0
 	return t, nil
 }
 
@@ -143,7 +141,7 @@ func (s *Store) UpdateCampaignTemplate(ctx context.Context, id uuid.UUID, p Camp
 		}
 		set("variables", string(vj))
 	}
-	sets = append(sets, "updated_at = strftime('%Y-%m-%d %H:%M:%f','now')")
+	sets = append(sets, "updated_at = xchats_now()")
 
 	args = append(args, id)
 	q := `UPDATE campaign_templates SET ` + joinComma(sets) + ` WHERE id = $` + itoa(len(args)) + ` RETURNING ` + campaignTemplateCols
@@ -160,7 +158,7 @@ func (s *Store) UpdateCampaignTemplate(ctx context.Context, id uuid.UUID, p Camp
 // one) is a no-op that still returns the current row, not an error.
 func (s *Store) SetCampaignTemplateArchived(ctx context.Context, id uuid.UUID, archived bool) (CampaignTemplate, error) {
 	out, err := scanCampaignTemplate(s.db.QueryRow(ctx, `
-		UPDATE campaign_templates SET is_archived = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE campaign_templates SET is_archived = $2, updated_at = xchats_now()
 		WHERE id = $1
 		RETURNING `+campaignTemplateCols, id, archived))
 	if errors.Is(err, dbx.ErrNoRows) {

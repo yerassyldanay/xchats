@@ -14,7 +14,7 @@
 //
 // Job bookkeeping (run id, provider, attempts, the request-scoped handle,
 // pass-2 synthesis state) lives in kbd_materials.extraction_metadata.import
-// — a plain JSON association merged via SQLite's json_patch (RFC 7396
+// — a plain JSON association merged via dbx.JSONMergePatch (RFC 7396
 // merge-patch), the same "not a new table" choice recordProvenance already
 // makes for provenance (mcp_media.go), just expressed at the SQL layer
 // instead of Go's jsonShallowMerge so the concurrency-critical claim/CAS
@@ -330,8 +330,8 @@ func (s *Store) EnqueueImport(ctx context.Context, orgID uuid.UUID, in ImportInp
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
 		SET processing_status = $4,
-		    extraction_metadata = json_patch(extraction_metadata, $3),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		    extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$3")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1 AND organization_id = $2 AND processing_status = 'parsed'`,
 		in.MaterialID, orgID, patch, ImportStatusQueued)
 	if err != nil {
@@ -357,8 +357,8 @@ func (s *Store) TagImportMaterial(ctx context.Context, id uuid.UUID, params Impo
 		return err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET extraction_metadata = json_patch(extraction_metadata, $2),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$2")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1`, id, patch)
 	if err != nil {
 		return fmt.Errorf("kbstore: tag import material: %w", err)
@@ -370,22 +370,17 @@ func (s *Store) TagImportMaterial(ctx context.Context, id uuid.UUID, params Impo
 }
 
 // ClaimImportJobs atomically claims up to limit 'queued' materials (oldest
-// first), transitioning each straight to 'extracting' — a single
-// UPDATE ... WHERE id IN (subquery) ... RETURNING statement. This is atomic
-// under this package's single-connection pool (internal/dbx's package doc:
-// "every writer serializes through Go's own pool queueing"): the *Rows this
-// returns holds that one connection until fully drained/closed, so a second
-// concurrent caller's own Query() call cannot even begin executing until
-// this one has completed — two concurrent callers therefore always return
-// disjoint sets, never double-claiming the same row.
+// first), transitioning each to extracting. PostgreSQL locks candidate rows
+// with SKIP LOCKED so concurrent workers claim disjoint sets; SQLite serializes
+// the atomic UPDATE on its single connection.
 func (s *Store) ClaimImportJobs(ctx context.Context, limit int) ([]ImportJob, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 	rows, err := s.db.Query(ctx, `UPDATE kbd_materials
-		SET processing_status = 'extracting', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET processing_status = 'extracting', updated_at = xchats_now()
 		WHERE id IN (
-			SELECT id FROM kbd_materials WHERE processing_status = $1 ORDER BY created_at LIMIT $2
+			SELECT id FROM kbd_materials WHERE processing_status = $1 ORDER BY created_at LIMIT $2`+s.db.SkipLocked()+`
 		)
 		RETURNING id, organization_id, source_type, source_ref, filename, mime_type, storage_key, extraction_metadata`,
 		ImportStatusQueued, limit)
@@ -424,7 +419,7 @@ func (s *Store) FinishImportExtraction(ctx context.Context, id uuid.UUID, out Ex
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
 		SET processing_status = $2, extracted_text = $3,
 		    visual_summary = CASE WHEN $4 <> '' THEN $4 ELSE visual_summary END,
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		    updated_at = xchats_now()
 		WHERE id = $1 AND processing_status = 'extracting'`,
 		id, out.Status, out.ExtractedText, out.VisualSummary)
 	if err != nil {
@@ -475,8 +470,8 @@ func (s *Store) RequeueImportJob(ctx context.Context, id uuid.UUID, cause string
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
-		SET processing_status = $2, extraction_metadata = json_patch(extraction_metadata, $3),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET processing_status = $2, extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$3")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1`, id, newStatus, patch); err != nil {
 		return false, err
 	}
@@ -513,7 +508,7 @@ func (s *Store) RecoverImportJobs(ctx context.Context, stuckBefore time.Time, ma
 	}
 	rows, err := tx.Query(ctx, `SELECT id, extraction_metadata FROM kbd_materials
 		WHERE processing_status = 'extracting' AND updated_at < $1 ORDER BY updated_at LIMIT $2`,
-		dbx.FormatTime(stuckBefore), limit)
+		stuckBefore, limit)
 	if err != nil {
 		return 0, 0, fmt.Errorf("kbstore: find stuck import jobs: %w", err)
 	}
@@ -551,8 +546,8 @@ func (s *Store) RecoverImportJobs(ctx context.Context, stuckBefore time.Time, ma
 			return requeued, failed, perr
 		}
 		if _, err := tx.Exec(ctx, `UPDATE kbd_materials
-			SET processing_status = $2, extraction_metadata = json_patch(extraction_metadata, $3),
-			    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			SET processing_status = $2, extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$3")+`,
+			    updated_at = xchats_now()
 			WHERE id = $1`, c.id, newStatus, patch); err != nil {
 			return requeued, failed, err
 		}
@@ -597,8 +592,8 @@ func (s *Store) mergeImportParams(ctx context.Context, id uuid.UUID, mutate func
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
-		SET extraction_metadata = json_patch(extraction_metadata, $2),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$2")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1`, id, patch); err != nil {
 		return err
 	}
@@ -611,7 +606,7 @@ func (s *Store) ImportRunMaterials(ctx context.Context, orgID, runID uuid.UUID) 
 	rows, err := s.db.Query(ctx, `SELECT id, source_type, source_ref, filename, mime_type, storage_key,
 		extracted_text, customer_visibility, processing_status, created_at, updated_at, extraction_metadata
 		FROM kbd_materials
-		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') = $2
+		WHERE organization_id = $1 AND (extraction_metadata -> 'import' ->> 'run_id') = $2
 		ORDER BY created_at`,
 		orgID, runID.String())
 	if err != nil {
@@ -710,9 +705,9 @@ func (s *Store) CancelImportRun(ctx context.Context, orgID, runID uuid.UUID) (fo
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
-		SET processing_status = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET processing_status = $3, updated_at = xchats_now()
 		WHERE organization_id = $1
-		  AND json_extract(extraction_metadata, '$.import.run_id') = $2
+		  AND (extraction_metadata -> 'import' ->> 'run_id') = $2
 		  AND processing_status IN ('queued', 'extracting')`,
 		orgID, runID.String(), ImportStatusCancelled); err != nil {
 		return false, fmt.Errorf("kbstore: cancel import run materials: %w", err)
@@ -723,8 +718,8 @@ func (s *Store) CancelImportRun(ctx context.Context, orgID, runID uuid.UUID) (fo
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
-		SET extraction_metadata = json_patch(extraction_metadata, $3),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$3")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1 AND organization_id = $2`,
 		primary.ID, orgID, patch); err != nil {
 		return false, fmt.Errorf("kbstore: cancel import run synthesis: %w", err)
@@ -750,7 +745,7 @@ func (s *Store) RecentImportRuns(ctx context.Context, orgID uuid.UUID, limit, of
 		offset = 0
 	}
 	rows, err := s.db.Query(ctx, `SELECT extraction_metadata FROM kbd_materials
-		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') IS NOT NULL
+		WHERE organization_id = $1 AND (extraction_metadata -> 'import' ->> 'run_id') IS NOT NULL
 		ORDER BY created_at DESC`, orgID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("kbstore: list recent import runs: %w", err)
@@ -793,7 +788,7 @@ func (s *Store) RecentImportRuns(ctx context.Context, orgID uuid.UUID, limit, of
 // extraction correctly still counts as active.
 func (s *Store) ActiveImportRun(ctx context.Context, orgID uuid.UUID) (uuid.UUID, bool, error) {
 	rows, err := s.db.Query(ctx, `SELECT extraction_metadata FROM kbd_materials
-		WHERE organization_id = $1 AND json_extract(extraction_metadata, '$.import.run_id') IS NOT NULL
+		WHERE organization_id = $1 AND (extraction_metadata -> 'import' ->> 'run_id') IS NOT NULL
 		ORDER BY created_at DESC`, orgID)
 	if err != nil {
 		return uuid.Nil, false, fmt.Errorf("kbstore: find active import run: %w", err)
@@ -837,8 +832,8 @@ func (s *Store) PendingSynthesisPrimaries(ctx context.Context) ([]ImportMaterial
 	rows, err := s.db.Query(ctx, `SELECT id, organization_id, source_type, source_ref, filename, mime_type, storage_key,
 		extracted_text, customer_visibility, processing_status, extraction_metadata
 		FROM kbd_materials
-		WHERE json_extract(extraction_metadata, '$.import.run_id') IS NOT NULL
-		  AND json_extract(extraction_metadata, '$.import.synthesis') IS NULL`)
+		WHERE (extraction_metadata -> 'import' ->> 'run_id') IS NOT NULL
+		  AND (extraction_metadata -> 'import' ->> 'synthesis') IS NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("kbstore: find pending synthesis primaries: %w", err)
 	}
@@ -878,8 +873,8 @@ func (s *Store) MarkImportBuilt(ctx context.Context, ids []uuid.UUID) error {
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET processing_status = 'built', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id IN (SELECT value FROM json_each($1)) AND processing_status = 'parsed'`,
+		SET processing_status = 'built', updated_at = xchats_now()
+		WHERE id IN (SELECT value FROM `+s.db.JSONValues("$1")+`) AND processing_status = 'parsed'`,
 		dbx.UUIDArray(ids))
 	return err
 }
@@ -887,7 +882,7 @@ func (s *Store) MarkImportBuilt(ctx context.Context, ids []uuid.UUID) error {
 // BeginImportSynthesis atomically claims the run for pass-2 synthesis: it
 // succeeds (claimed=true) only if the primary material's synthesis status
 // is currently empty (never started) — a single UPDATE ... WHERE
-// json_extract(...) guard, atomic under this package's single-connection
+// JSON scalar guard, atomic under the database's conditional UPDATE
 // pool exactly like CompleteMaterialUpload's own 'uploaded'-guarded
 // transition (mcp_media.go). A second concurrent call for the SAME
 // primaryID always sees claimed=false: by the time its own WHERE clause
@@ -901,11 +896,11 @@ func (s *Store) BeginImportSynthesis(ctx context.Context, primaryID uuid.UUID) (
 		return uuid.Nil, false, err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET extraction_metadata = json_patch(extraction_metadata, $2),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$2")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1
-		  AND (json_extract(extraction_metadata, '$.import.synthesis.status') IS NULL
-		       OR json_extract(extraction_metadata, '$.import.synthesis.status') = '')`,
+		  AND ((extraction_metadata -> 'import' -> 'synthesis' ->> 'status') IS NULL
+		       OR (extraction_metadata -> 'import' -> 'synthesis' ->> 'status') = '')`,
 		primaryID, patch)
 	if err != nil {
 		return uuid.Nil, false, fmt.Errorf("kbstore: begin import synthesis: %w", err)
@@ -924,8 +919,8 @@ func (s *Store) FinishImportSynthesis(ctx context.Context, primaryID uuid.UUID, 
 		return err
 	}
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET extraction_metadata = json_patch(extraction_metadata, $2),
-		    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$2")+`,
+		    updated_at = xchats_now()
 		WHERE id = $1`, primaryID, patch)
 	if err != nil {
 		return fmt.Errorf("kbstore: finish import synthesis: %w", err)
@@ -949,7 +944,7 @@ func (s *Store) RecoverStuckSynthesis(ctx context.Context, stuckBefore time.Time
 		meta string
 	}
 	rows, err := s.db.Query(ctx, `SELECT id, extraction_metadata FROM kbd_materials
-		WHERE json_extract(extraction_metadata, '$.import.synthesis.status') = $1`, SynthesisRunning)
+		WHERE (extraction_metadata -> 'import' -> 'synthesis' ->> 'status') = $1`, SynthesisRunning)
 	if err != nil {
 		return 0, fmt.Errorf("kbstore: find stuck synthesis: %w", err)
 	}
@@ -986,9 +981,9 @@ func (s *Store) RecoverStuckSynthesis(ctx context.Context, stuckBefore time.Time
 			return n, err
 		}
 		tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
-			SET extraction_metadata = json_patch(extraction_metadata, $2),
-			    updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE id = $1 AND json_extract(extraction_metadata, '$.import.synthesis.status') = $3`,
+			SET extraction_metadata = `+s.db.JSONMergePatch("extraction_metadata", "$2")+`,
+			    updated_at = xchats_now()
+			WHERE id = $1 AND (extraction_metadata -> 'import' -> 'synthesis' ->> 'status') = $3`,
 			c.id, patch, SynthesisRunning)
 		if err != nil {
 			return n, err

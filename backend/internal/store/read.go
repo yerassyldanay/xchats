@@ -173,7 +173,7 @@ func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
 		return Chat{}, err
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET unread_count = 0, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id); err != nil {
+		`UPDATE `+table+` SET unread_count = 0, updated_at = xchats_now() WHERE id = $1`, id); err != nil {
 		return Chat{}, err
 	}
 	chat.UnreadCount = 0
@@ -196,7 +196,7 @@ func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.Null
 		value = assignee.UUID
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id, value); err != nil {
+		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = xchats_now() WHERE id = $1`, id, value); err != nil {
 		return Chat{}, err
 	}
 	return s.ChatByID(ctx, id)
@@ -216,7 +216,7 @@ func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (C
 		return Chat{}, err
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET chat_state = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id, state); err != nil {
+		`UPDATE `+table+` SET chat_state = $2, updated_at = xchats_now() WHERE id = $1`, id, state); err != nil {
 		return Chat{}, err
 	}
 	return s.ChatByID(ctx, id)
@@ -243,7 +243,7 @@ func (s *Store) UpdateChatPreviewIfCurrent(ctx context.Context, chatID uuid.UUID
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
-		UPDATE `+table+` SET last_message_preview = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE `+table+` SET last_message_preview = $2, updated_at = xchats_now()
 		WHERE id = $1 AND last_message_at = $3`, chatID, preview, *messageTS)
 	return err
 }
@@ -260,7 +260,7 @@ func (s *Store) MessagesForChat(ctx context.Context, chatID uuid.UUID, before ti
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+messageCols+`
 		FROM inbox_messages_v
-		WHERE chat_id = $1 AND ($2 IS NULL OR message_ts < $2)
+		WHERE chat_id = $1 AND (message_ts < $2 OR $2 IS NULL)
 		ORDER BY message_ts DESC, id DESC
 		LIMIT $3`, chatID, beforeArg, limit+1)
 	if err != nil {
@@ -338,12 +338,12 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 		ids[i] = m.ID
 		idx[m.ID] = i
 	}
-	// = ANY($1) -> IN (SELECT value FROM json_each($1)), binding the id list
+	// = ANY($1) -> IN (SELECT value FROM `+s.db.JSONValues("$1")+`), binding the id list
 	// as a dbx.UUIDArray (JSON array in TEXT) — see the per-PG-ism table.
 	rows, err := s.db.Query(ctx, `
 		SELECT message_id, id, media_type, mimetype, filename, size, storage_key, download_status, transcript
 		FROM inbox_message_media_v
-		WHERE message_id IN (SELECT value FROM json_each($1))
+		WHERE message_id IN (SELECT value FROM `+s.db.JSONValues("$1")+`)
 		ORDER BY created_at`, dbx.UUIDArray(ids))
 	if err != nil {
 		return err
@@ -486,7 +486,7 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 	defer tx.Rollback(ctx)
 	var d Draft
 	err = tx.QueryRow(ctx, `
-		UPDATE ai_drafts SET draft_state='sent', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE ai_drafts SET draft_state='sent', updated_at=xchats_now()
 		WHERE id = $1 AND draft_state='suggested'
 		RETURNING `+draftCols+``,
 		draftID).Scan(scanDraftDst(&d)...)
@@ -497,7 +497,7 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 		return d, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=xchats_now()
 		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, d.ChatID, draftID); err != nil {
 		return d, err
 	}
@@ -509,13 +509,13 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 
 // SetDraftSent records the message a draft actually produced.
 func (s *Store) SetDraftSent(ctx context.Context, draftID, sentMessageID uuid.UUID) error {
-	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET sent_message_id = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, draftID, sentMessageID)
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET sent_message_id = $2, updated_at = xchats_now() WHERE id = $1`, draftID, sentMessageID)
 	return err
 }
 
 // ReopenDraft puts a claimed draft back to suggested (used when the send fails).
 func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
-	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE id=$1`, draftID)
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=xchats_now() WHERE id=$1`, draftID)
 	return err
 }
 
@@ -525,7 +525,7 @@ func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
 // refetch or reselecting the chat the way clearing local UI state alone did.
 func (s *Store) DismissDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
 	rows, err := s.db.Query(ctx, `
-		UPDATE ai_drafts SET draft_state='dismissed', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE ai_drafts SET draft_state='dismissed', updated_at=xchats_now()
 		WHERE chat_id = $1 AND draft_state='suggested'
 		RETURNING `+draftCols+``, chatID)
 	if err != nil {

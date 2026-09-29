@@ -43,6 +43,9 @@ import (
 // and Backup does not second-guess that by deleting anything on the
 // caller's behalf.
 func Backup(ctx context.Context, db *dbx.DB, destPath string) error {
+	if db.Dialect() != dbx.SQLite {
+		return fmt.Errorf("dbops: PostgreSQL backups require pg_dump")
+	}
 	if dir := filepath.Dir(destPath); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("dbops: create directory for %q: %w", destPath, err)
@@ -61,6 +64,9 @@ func Backup(ctx context.Context, db *dbx.DB, destPath string) error {
 // means the database is fully consistent. Read-only: safe against a live
 // database, no exclusive lock or downtime required.
 func IntegrityCheck(ctx context.Context, db *dbx.DB) ([]string, error) {
+	if db.Dialect() != dbx.SQLite {
+		return nil, fmt.Errorf("dbops: PostgreSQL integrity checks require PostgreSQL administration tools")
+	}
 	rows, err := db.Query(ctx, `PRAGMA integrity_check`)
 	if err != nil {
 		return nil, fmt.Errorf("dbops: integrity_check: %w", err)
