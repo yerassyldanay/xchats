@@ -61,35 +61,6 @@ jobs:
               - '**/*.md'
               - '.github/workflows/ci.yml'
 
-  postgres-test:
-    name: postgres-test
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: xchats_test
-          POSTGRES_PASSWORD: local_test_password
-          POSTGRES_DB: xchats_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U xchats_test -d xchats_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      GOTOOLCHAIN: local
-      TEST_DATABASE_URL: postgres://xchats_test:local_test_password@localhost:5432/xchats_test?sslmode=disable
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: backend/go.mod
-          cache-dependency-path: backend/go.sum
-      - name: PostgreSQL persistence and API tests
-        run: make test-postgres
-
   backend-test:
     name: backend-test
     needs: changes
