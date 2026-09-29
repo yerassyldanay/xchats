@@ -24,7 +24,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrStale is returned when an optimistic-concurrency check (If-Match) fails: the
@@ -48,7 +48,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 		VALUES ($1,$2,$3,$4,$5,$6)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = EXCLUDED.persona, mission = EXCLUDED.mission, guardrails = EXCLUDED.guardrails,
-			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = xchats_now()`,
 		orgID, seed.Config.Persona, seed.Config.Mission, seed.Config.Guardrails,
 		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120)); err != nil {
 		return err
@@ -315,7 +315,7 @@ func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopi
 			title=EXCLUDED.title, body_md=EXCLUDED.body_md,
 			featured_image=EXCLUDED.featured_image, illustration_images=EXCLUDED.illustration_images,
 			explainer_videos=EXCLUDED.explainer_videos, reference_documents=EXCLUDED.reference_documents,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at=xchats_now()`,
 		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.IllustrationImages)),
 		dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.ReferenceDocuments))); err != nil {
 		return fmt.Errorf("insert topic %s: %w", t.Slug, err)
@@ -335,7 +335,7 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTar
 			disadvantages=EXCLUDED.disadvantages, best_for=EXCLUDED.best_for, not_for=EXCLUDED.not_for,
 			additional_facts=EXCLUDED.additional_facts, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, pricing_images=EXCLUDED.pricing_images,
-			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=xchats_now()`,
 		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
 		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, t.BestFor, t.NotFor,
 		aiprompt.FactsColumn(t.AdditionalFacts), orDefault(t.SalesStatus, "active"),
@@ -363,7 +363,7 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPr
 			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
 			demo_videos=EXCLUDED.demo_videos, certificate_documents=EXCLUDED.certificate_documents,
 			guarantee_documents=EXCLUDED.guarantee_documents,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at=xchats_now()`,
 		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.Brand, p.Advantages, p.Disadvantages,
 		p.BestFor, p.NotFor, orDefault(p.AvailabilityStatus, "in_stock"), p.AvailabilityNote, p.InstallationTerms, p.WarrantyTerms,
 		aiprompt.FactsColumn(p.AdditionalFacts), orDefault(p.SalesStatus, "active"),
@@ -381,7 +381,7 @@ func upsertTariffInfoRow(ctx context.Context, tx execer, orgID uuid.UUID, ti Dra
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariff_info (organization_id, additional_facts)
 		VALUES ($1,$2)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			additional_facts=EXCLUDED.additional_facts, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			additional_facts=EXCLUDED.additional_facts, updated_at=xchats_now()`,
 		orgID, aiprompt.FactsColumn(ti.AdditionalFacts)); err != nil {
 		return fmt.Errorf("insert tariff_info: %w", err)
 	}
@@ -401,7 +401,7 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
 			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
 			company_legal_documents=EXCLUDED.company_legal_documents,
-			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at=xchats_now()`,
 		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
 		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments)), c.BookingURL, aiprompt.ScheduleColumn(c.Schedule)); err != nil {
@@ -420,7 +420,7 @@ func upsertSpecialistRow(ctx context.Context, tx execer, orgID uuid.UUID, sp Dra
 			full_name=EXCLUDED.full_name, title=EXCLUDED.title, experience=EXCLUDED.experience,
 			schedule=EXCLUDED.schedule, booking_url=EXCLUDED.booking_url,
 			portfolio_images=EXCLUDED.portfolio_images, sales_status=EXCLUDED.sales_status,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at=xchats_now()`,
 		orgID, sp.Ref, sp.FullName, sp.Title, sp.Experience, aiprompt.ScheduleColumn(sp.Schedule), sp.BookingURL,
 		dbx.UUIDArray(nonNilUUIDs(sp.PortfolioImages)), orDefault(sp.SalesStatus, "active")); err != nil {
 		return fmt.Errorf("insert specialist %s: %w", sp.Ref, err)
@@ -442,7 +442,7 @@ func upsertServiceRow(ctx context.Context, tx execer, orgID uuid.UUID, sv DraftS
 			parent_ref=EXCLUDED.parent_ref, service_type=EXCLUDED.service_type, category=EXCLUDED.category,
 			name=EXCLUDED.name, price=EXCLUDED.price, duration=EXCLUDED.duration, description=EXCLUDED.description,
 			specialist_refs=EXCLUDED.specialist_refs, sales_status=EXCLUDED.sales_status,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at=xchats_now()`,
 		orgID, sv.Ref, sv.ParentRef, orDefault(sv.ServiceType, "base"), sv.Category, sv.Name, sv.Price, sv.Duration,
 		sv.Description, dbx.StringArray(nonNilStrings(sv.SpecialistRefs)), orDefault(sv.SalesStatus, "active")); err != nil {
 		return fmt.Errorf("insert service %s: %w", sv.Ref, err)
@@ -679,7 +679,7 @@ func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPol
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
 			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note,
-			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=xchats_now()`,
 		orgID, p.DeliveryCost, p.DeliveryInDays, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriodInDays, p.Warranty, p.OutsideZonesNote,
 		dbx.UUIDArray(nonNilUUIDs(p.CommercePolicyDocuments))); err != nil {
@@ -724,7 +724,7 @@ func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPa
 			guardrails = COALESCE($4, ai_assistants.guardrails),
 			language_policy = COALESCE($5, ai_assistants.language_policy),
 			reply_max_words = COALESCE($6, ai_assistants.reply_max_words),
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = xchats_now()`,
 		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords)
 	return err
 }

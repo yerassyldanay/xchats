@@ -52,11 +52,11 @@ func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uu
 	// which is why there is nothing chat-shaped in this list.
 	for _, q := range []string{
 		`UPDATE crm_customer_identities SET customer_id = $1,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE customer_id = $2`,
+			updated_at = xchats_now() WHERE customer_id = $2`,
 		`UPDATE crm_customer_notes SET customer_id = $1,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE customer_id = $2`,
+			updated_at = xchats_now() WHERE customer_id = $2`,
 		`UPDATE crm_followups SET customer_id = $1,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE customer_id = $2`,
+			updated_at = xchats_now() WHERE customer_id = $2`,
 		`UPDATE crm_timeline SET customer_id = $1 WHERE customer_id = $2`,
 	} {
 		if _, err := tx.Exec(ctx, q, targetID, sourceID); err != nil {
@@ -88,7 +88,7 @@ func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uu
 			avatar_url = CASE WHEN avatar_url = '' THEN $6 ELSE avatar_url END,
 			status_id = COALESCE(status_id, $7),
 			assignee_user_id = COALESCE(assignee_user_id, $8),
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2`,
 		orgID, targetID, source.DisplayName, source.Phone, source.Email, source.AvatarURL,
 		source.StatusID, source.AssigneeUserID); err != nil {
@@ -97,7 +97,7 @@ func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uu
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE crm_customers SET merged_into_id = $3,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2`, orgID, sourceID, targetID); err != nil {
 		return Customer{}, wrap("mark merged", err)
 	}

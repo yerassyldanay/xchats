@@ -87,7 +87,7 @@ func appendTimeline(ctx context.Context, tx *dbx.Tx, orgID, customerID uuid.UUID
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO crm_timeline (organization_id, customer_id, kind, actor_user_id, summary, detail, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, strftime('%Y-%m-%d %H:%M:%f','now')))`,
+		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, xchats_now()))`,
 		orgID, customerID, ev.Kind, ev.Actor, ev.Summary, string(detail), occurred)
 	return wrap("append timeline", err)
 }

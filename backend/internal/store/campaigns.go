@@ -18,7 +18,7 @@ import (
 // ---------------------------------------------------------------------------
 // account_id columns below carry no foreign key: an account is a wa_accounts,
 // tg_accounts or channel_accounts row and a single FK cannot express an
-// either/or reference — see migrations/sqlite/0012_campaigns.up.sql's file
+// either/or reference — see migrations/sqlite/20260929000000_baseline.sql's file
 // header for the identical, already-established reasoning.
 
 // Campaign is one bulk-send campaign.
@@ -148,7 +148,7 @@ type CampaignWindowInput struct {
 
 // CampaignWindow is one recurring UTC window, stored (either an account's
 // own campaign_account_windows row or a campaign's own campaign_windows
-// row — both share this shape, see 0012_campaigns.up.sql).
+// row — both share this shape, see 20260929000000_baseline.sql).
 type CampaignWindow struct {
 	ID          uuid.UUID
 	Weekday     int
@@ -387,7 +387,7 @@ func (s *Store) UpdateCampaign(ctx context.Context, id uuid.UUID, p CampaignPatc
 			sets = append(sets, "schedule_at = NULL")
 		}
 	}
-	sets = append(sets, "updated_at = strftime('%Y-%m-%d %H:%M:%f','now')")
+	sets = append(sets, "updated_at = xchats_now()")
 
 	args = append(args, id)
 	q := `UPDATE campaigns SET ` + joinComma(sets) + ` WHERE id = $` + itoa(len(args)) + ` RETURNING ` + campaignCols
@@ -429,9 +429,9 @@ func (s *Store) SetCampaignStatus(ctx context.Context, id uuid.UUID, to purecamp
 		return Campaign{}, ErrInvalidTransition
 	}
 
-	setClause := `status = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`
+	setClause := `status = $2, updated_at = xchats_now()`
 	if to == purecampaign.StatusRunning {
-		setClause += `, started_at = COALESCE(started_at, strftime('%Y-%m-%d %H:%M:%f','now'))`
+		setClause += `, started_at = COALESCE(started_at, xchats_now())`
 	}
 	out, err := scanCampaign(tx.QueryRow(ctx, `UPDATE campaigns SET `+setClause+` WHERE id = $1 RETURNING `+campaignCols, id, string(to)))
 	if err != nil {
@@ -609,7 +609,7 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM campaign_recipients
 		WHERE campaign_id = $1 AND status = 'pending'
-		  AND normalized_identity NOT IN (SELECT value FROM json_each($2))`,
+		  AND normalized_identity NOT IN (SELECT value FROM `+s.db.JSONValues("$2")+`)`,
 		campaignID, dbx.StringArray(order)); err != nil {
 		return wrap("prune campaign recipients", err)
 	}
@@ -625,7 +625,7 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (campaign_id, normalized_identity) DO UPDATE SET
 				raw_input = excluded.raw_input, name = excluded.name, attributes = excluded.attributes,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+				updated_at = xchats_now()
 			WHERE campaign_recipients.status = 'pending'`,
 			campaignID, identity, r.RawInput, r.Name, string(attrsJSON)); err != nil {
 			return wrap("upsert campaign recipient", err)
@@ -706,7 +706,7 @@ func (s *Store) CampaignRecipientCounts(ctx context.Context, campaignID uuid.UUI
 // a fresh, deliberate operator action starts the transient-retry ladder over.
 func (s *Store) RetryFailedRecipients(ctx context.Context, campaignID uuid.UUID, recipientIDs []uuid.UUID) (int, error) {
 	const setClause = `status = 'pending', failure_reason = '', attempts = 0, next_attempt_at = NULL,
-		updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`
+		updated_at = xchats_now()`
 	var tag dbx.CommandTag
 	var err error
 	if len(recipientIDs) == 0 {
@@ -714,7 +714,7 @@ func (s *Store) RetryFailedRecipients(ctx context.Context, campaignID uuid.UUID,
 	} else {
 		tag, err = s.db.Exec(ctx, `
 			UPDATE campaign_recipients SET `+setClause+`
-			WHERE campaign_id = $1 AND status = 'failed' AND id IN (SELECT value FROM json_each($2))`,
+			WHERE campaign_id = $1 AND status = 'failed' AND id IN (SELECT value FROM `+s.db.JSONValues("$2")+`)`,
 			campaignID, dbx.UUIDArray(recipientIDs))
 	}
 	if err != nil {
@@ -740,7 +740,7 @@ func (s *Store) SuppressPendingForIdentity(ctx context.Context, accountID uuid.U
 // separate round trips a crash between them could split.
 func suppressPendingForIdentity(ctx context.Context, q dbx.DBTX, accountID uuid.UUID, identity, reason string) (int, error) {
 	tag, err := q.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'skipped', failure_reason = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE campaign_recipients SET status = 'skipped', failure_reason = $3, updated_at = xchats_now()
 		WHERE status = 'pending' AND normalized_identity = $2
 		  AND campaign_id IN (SELECT id FROM campaigns WHERE account_id = $1 AND status = 'running')`,
 		accountID, identity, reason)
@@ -915,7 +915,7 @@ func (s *Store) SetCampaignAccountLimits(ctx context.Context, accountID uuid.UUI
 		ON CONFLICT (account_id) DO UPDATE SET
 			limit_mode = excluded.limit_mode, min_interval_seconds = excluded.min_interval_seconds,
 			jitter_seconds = excluded.jitter_seconds, paused = excluded.paused,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		RETURNING account_id, limit_mode, min_interval_seconds, jitter_seconds, paused, updated_at`,
 		accountID, settings.LimitMode, settings.MinIntervalSeconds, settings.JitterSeconds, settings.Paused).
 		Scan(&out.AccountID, &out.LimitMode, &out.MinIntervalSeconds, &out.JitterSeconds, &out.Paused, &out.UpdatedAt); err != nil {
@@ -1250,7 +1250,7 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 	}
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'sending', attempts = attempts + 1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE campaign_recipients SET status = 'sending', attempts = attempts + 1, updated_at = xchats_now()
 		WHERE id = $1 AND status = 'pending'`, chosen.recipientID)
 	if err != nil {
 		return Claim{}, false, wrap("claim campaign recipient", err)
@@ -1300,7 +1300,7 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 		UPDATE campaign_recipients SET
 			status = $2, failure_reason = $3,
 			chat_id = COALESCE($4, chat_id), message_id = COALESCE($5, message_id),
-			next_attempt_at = $6, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			next_attempt_at = $6, updated_at = xchats_now()
 		WHERE id = $1`,
 		p.RecipientID, string(p.NewStatus), p.FailureReason, chatArg, msgArg, p.NextAttemptAt); err != nil {
 		return wrap("finalize campaign recipient", err)
@@ -1316,7 +1316,7 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 // Called once at the campaign Scheduler's boot.
 func (s *Store) ReconcileStuckSending(ctx context.Context) (int, error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = xchats_now()
 		WHERE status = 'sending'`, "interrupted — delivery unknown")
 	if err != nil {
 		return 0, wrap("reconcile stuck campaign sends", err)
@@ -1436,7 +1436,7 @@ func (s *Store) AutoPauseCampaignsForAccount(ctx context.Context, accountID uuid
 
 	detail := map[string]any{"reason": reason}
 	for _, id := range ids {
-		if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'paused', updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'paused', updated_at = xchats_now() WHERE id = $1`, id); err != nil {
 			return 0, wrap("auto-pause campaign", err)
 		}
 		if err := insertCampaignEvent(ctx, tx, id, "auto_paused", uuid.NullUUID{}, detail); err != nil {
@@ -1486,7 +1486,7 @@ func (s *Store) UnreachableForWarmChannel(ctx context.Context, accountID uuid.UU
 		return map[string]bool{}, nil
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT v.value FROM json_each($2) v
+		SELECT v.value FROM `+s.db.JSONValues("$2")+` v
 		WHERE NOT EXISTS (
 			SELECT 1 FROM inbox_chats_v c
 			WHERE c.account_id = $1
@@ -1520,7 +1520,7 @@ func (s *Store) MarkChatCampaignOnly(ctx context.Context, channel string, chatID
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `UPDATE `+table+` SET chat_state = 'campaign', updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, chatID)
+	_, err = s.db.Exec(ctx, `UPDATE `+table+` SET chat_state = 'campaign', updated_at = xchats_now() WHERE id = $1`, chatID)
 	return wrap("mark chat campaign-only", err)
 }
 
@@ -1548,13 +1548,13 @@ func (s *Store) InsertCampaignOutbound(ctx context.Context, channel string, chat
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO `+msgTable+`
 			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts)
-		VALUES ($1, $2, 'out', 'campaign', NULL, 'conversation', $3, 'queued', 'app', strftime('%Y-%m-%d %H:%M:%f','now'))
+		VALUES ($1, $2, 'out', 'campaign', NULL, 'conversation', $3, 'queued', 'app', xchats_now())
 		RETURNING id`,
 		accountID, chatID, body).Scan(&id); err != nil {
 		return uuid.Nil, wrap("insert campaign outbound", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE `+chatTable+` SET last_message_at = strftime('%Y-%m-%d %H:%M:%f','now'), last_message_preview = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE `+chatTable+` SET last_message_at = xchats_now(), last_message_preview = $2, updated_at = xchats_now()
 		WHERE id = $1`, chatID, preview); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}

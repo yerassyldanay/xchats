@@ -594,19 +594,26 @@ func TestClaimDueDispatchJobsRollsBackIfDispatchCreationFails(t *testing.T) {
 		t.Fatalf("ArmDebounce: %v", err)
 	}
 
-	if _, err := db.Exec(ctx, `
+	createTrigger := `
 		CREATE TRIGGER fail_dispatch_insert
 		BEFORE INSERT ON automation_dispatch_jobs
 		BEGIN
 			SELECT RAISE(ABORT, 'forced dispatch insert failure');
-		END`); err != nil {
+		END`
+	dropTrigger := `DROP TRIGGER fail_dispatch_insert`
+	if db.Dialect() == "postgres" {
+		createTrigger = `CREATE FUNCTION fail_dispatch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced dispatch insert failure'; END $$;
+  CREATE TRIGGER fail_dispatch_insert BEFORE INSERT ON automation_dispatch_jobs FOR EACH ROW EXECUTE FUNCTION fail_dispatch();`
+		dropTrigger = `DROP TRIGGER fail_dispatch_insert ON automation_dispatch_jobs; DROP FUNCTION fail_dispatch();`
+	}
+	if _, err := db.Exec(ctx, createTrigger); err != nil {
 		t.Fatalf("create failure trigger: %v", err)
 	}
 
 	if jobs, err := st.ClaimDueDispatchJobs(ctx, time.Now(), 10); err == nil {
 		t.Fatalf("ClaimDueDispatchJobs = %+v, nil; want forced insert error", jobs)
 	}
-	if _, err := db.Exec(ctx, `DROP TRIGGER fail_dispatch_insert`); err != nil {
+	if _, err := db.Exec(ctx, dropTrigger); err != nil {
 		t.Fatalf("drop failure trigger: %v", err)
 	}
 

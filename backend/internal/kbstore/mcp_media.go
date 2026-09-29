@@ -345,7 +345,7 @@ func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uui
 	}
 	rows, err := s.db.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
 		FROM kbd_materials
-		WHERE organization_id = $1 AND id IN (SELECT value FROM json_each($2))
+		WHERE organization_id = $1 AND id IN (SELECT value FROM `+s.db.JSONValues("$2")+`)
 		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, dbx.UUIDArray(ids))
 	if err != nil {
 		return nil, err
@@ -409,7 +409,7 @@ var ErrUploadAlreadyCompleted = errors.New("kbstore: material upload already com
 func (s *Store) CompleteMaterialUpload(ctx context.Context, id uuid.UUID, storageBackend, storageKey string, sizeBytes int64, sha256Checksum string) error {
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		storage_backend = $2, storage_key = $3, size_bytes = $4, sha256_checksum = $5,
-		processing_status = 'parsed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		processing_status = 'parsed', updated_at = xchats_now()
 		WHERE id = $1 AND processing_status = 'uploaded'`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum))
 	if err != nil {
 		return err
@@ -437,7 +437,7 @@ func nullIfEmpty(s string) *string {
 // An earlier version of this file added a Provenance string straight onto
 // every Draft* struct instead, and every MCP upsert wrote plan/mcp.md's
 // provenance argument into it — but no live ai_* table has ever had a
-// provenance column (migration 0004_kb_living.up.sql: "live tables hold LIVE
+// provenance column (migration 20260929000000_baseline.sql: "live tables hold LIVE
 // ROWS ONLY — no review_state, no provenance, no drafted_at"), so that value
 // was silently discarded the moment a draft entry was approved into live.
 // The legacy manual-editor and confirm_fact write paths had the exact same

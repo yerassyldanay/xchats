@@ -145,7 +145,7 @@ type MaterialExtraction struct {
 func (s *Store) UpdateMaterialExtraction(ctx context.Context, id uuid.UUID, ex MaterialExtraction) error {
 	_, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		status = $2, extracted_text = $3, media_kind = COALESCE(NULLIF($4,''), media_kind),
-		extraction = $5, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
+		extraction = $5, updated_at = xchats_now() WHERE id = $1`,
 		id, ex.Status, ex.ExtractedText, ex.MediaKind, orDefault(ex.Extraction, "{}"))
 	return err
 }
@@ -174,8 +174,8 @@ func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
 		return nil
 	}
 	_, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET status = 'built', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id IN (SELECT value FROM json_each($1)) AND status = 'ready'`, dbx.UUIDArray(ids))
+		SET status = 'built', updated_at = xchats_now()
+		WHERE id IN (SELECT value FROM `+s.db.JSONValues("$1")+`) AND status = 'ready'`, dbx.UUIDArray(ids))
 	return err
 }
 
@@ -325,7 +325,7 @@ func (s *Store) GetRequest(ctx context.Context, id uuid.UUID) (Request, error) {
 // The caller applies the resulting draft mutation separately.
 func (s *Store) ResolveRequest(ctx context.Context, id uuid.UUID, state, resolution string) error {
 	_, err := s.db.Exec(ctx, `UPDATE kbd_requests SET
-		state = $2, resolution = $3, resolved_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
+		state = $2, resolution = $3, resolved_at = xchats_now() WHERE id = $1`,
 		id, orDefault(state, "resolved"), orDefault(resolution, "{}"))
 	return err
 }

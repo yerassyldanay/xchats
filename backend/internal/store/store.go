@@ -1,4 +1,4 @@
-// Package store is xchats' core data layer (SQLite via internal/dbx, plain
+// Package store is xchats' core data layer (SQLite/PostgreSQL via internal/dbx, plain
 // SQL, no ORM): organizations, users, sessions, and the WhatsApp/Telegram
 // transport tables' shared read/write surface. New opens (or attaches to
 // an already-open, shared-by-path) database and migrates it — there is no
@@ -16,7 +16,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrNotFound is returned when a lookup matches no row. It is the exact
@@ -26,7 +26,7 @@ import (
 // directly.
 var ErrNotFound = domain.ErrNotFound
 
-// Store wraps the SQLite pool.
+// Store wraps the shared database pool.
 type Store struct {
 	db *dbx.DB
 	// creds protects provider credentials at rest (see UseCredentialsBox). nil
@@ -35,7 +35,7 @@ type Store struct {
 	creds *secretbox.Box
 }
 
-// New opens dbPath (creating it, and its parent directory, if needed),
+// New opens a database URL or SQLite file (creating local directories if needed),
 // applies every pending migration, and returns a ready Store. Safe to call
 // more than once for the same path from within this process: every caller
 // shares the one underlying connection (see internal/dbx.Open) — this is
@@ -47,7 +47,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -268,7 +268,7 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO users (email, password_hash, display_name)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = xchats_now()
 		RETURNING id, email, password_hash, display_name, created_at`,
 		email, passwordHash, displayName).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
 			display_name = EXCLUDED.display_name,
 			connection_state = EXCLUDED.connection_state,
 			deleted_at = NULL,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		RETURNING `+waAccountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.ConnectionState).
 		Scan(scanWaAccountDst(&a)...)
@@ -419,15 +419,15 @@ func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account,
 		INSERT INTO wa_accounts
 			(id, organization_id, display_name, owner_jid, phone_number,
 			 connection_state, last_live_event_at)
-		VALUES ($1, $2, $3, $4, $5, $6, strftime('%Y-%m-%d %H:%M:%f','now'))
+		VALUES ($1, $2, $3, $4, $5, $6, xchats_now())
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE wa_accounts.display_name END,
 			phone_number = EXCLUDED.phone_number,
 			connection_state = EXCLUDED.connection_state,
-			last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'),
+			last_live_event_at = xchats_now(),
 			deleted_at = NULL,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		RETURNING `+waAccountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle,
 		a.ConnectionState).
@@ -438,7 +438,7 @@ func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account,
 // SetAccountState updates a live account's connection_state (and stamps activity).
 func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = xchats_now(), updated_at = xchats_now()
 		WHERE id = $1 AND deleted_at IS NULL`, id, state)
 	return err
 }
@@ -447,7 +447,7 @@ func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string)
 // but the rows stay, so re-adding the number revives everything.
 func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE wa_accounts SET deleted_at = strftime('%Y-%m-%d %H:%M:%f','now'), connection_state = 'disconnected', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE wa_accounts SET deleted_at = xchats_now(), connection_state = 'disconnected', updated_at = xchats_now()
 		WHERE id = $1 AND deleted_at IS NULL`, id)
 	return err
 }
@@ -473,7 +473,7 @@ func (s *Store) SaveWaCredentials(ctx context.Context, accountID uuid.UUID, devi
 		VALUES ($1, $2)
 		ON CONFLICT (account_id) DO UPDATE SET
 			device_jid = EXCLUDED.device_jid,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`, accountID, deviceJID)
+			updated_at = xchats_now()`, accountID, deviceJID)
 	return err
 }
 
@@ -526,8 +526,8 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 // first-boot path that deliberately leaves must_change_password set.
 func (s *Store) SetUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE users SET password_hash = $2, must_change_password = 0,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE users SET password_hash = $2, must_change_password = FALSE,
+			updated_at = xchats_now()
 		WHERE id = $1`, id, passwordHash)
 	return err
 }
@@ -540,7 +540,7 @@ func (s *Store) DeleteOtherSessions(ctx context.Context, userID uuid.UUID, keepS
 	return err
 }
 
-// sentinelAdminID is migration 0006_init_admin.up.sql's fixed seeded-admin
+// sentinelAdminID is migration 20260929000000_baseline.sql's fixed seeded-admin
 // user id — the one row BootstrapSentinelAdminPassword and
 // ResetSentinelAdminPassword ever touch.
 var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
@@ -551,9 +551,9 @@ var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 // coupling every ordinary user password change to bootstrap storage.
 func IsSentinelAdmin(id uuid.UUID) bool { return id == sentinelAdminID }
 
-// defaultAdminPasswordHash is 0006_init_admin.up.sql's precomputed argon2id
+// defaultAdminPasswordHash is 20260929000000_baseline.sql's precomputed argon2id
 // hash for admin@xchat.kz / xchat-admin-change-me — the exact literal
-// 0011_restore_default_admin_password.up.sql restores, reused here (not
+// 20260929000000_baseline.sql restores, reused here (not
 // regenerated) so DefaultAdminCredentialPending can recognize the row is
 // still sitting on the documented default rather than something an
 // operator has since replaced.
@@ -607,8 +607,8 @@ func (s *Store) DefaultAdminCredentialPending(ctx context.Context) (bool, error)
 // print/persist the bootstrap credential file at all.
 func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash string) (minted bool, err error) {
 	tag, err := s.db.Exec(ctx, `
-		UPDATE users SET password_hash = $2, must_change_password = 0,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE users SET password_hash = $2, must_change_password = FALSE,
+			updated_at = xchats_now()
 		WHERE id = $1 AND password_hash = ''`, sentinelAdminID, passwordHash)
 	if err != nil {
 		return false, err
@@ -622,8 +622,8 @@ func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash
 // BootstrapSentinelAdminPassword call re-mints a fresh one.
 func (s *Store) ResetSentinelAdminPassword(ctx context.Context) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE users SET password_hash = '', must_change_password = 1,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE users SET password_hash = '', must_change_password = TRUE,
+			updated_at = xchats_now()
 		WHERE id = $1`, sentinelAdminID)
 	return err
 }
@@ -749,7 +749,7 @@ func (s *Store) SetMembershipRole(ctx context.Context, orgID, userID uuid.UUID, 
 // yet). See SetOrganizationTimezone for the one other user-editable field.
 func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE organizations SET name = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE organizations SET name = $2, updated_at = xchats_now()
 		WHERE id = $1`, orgID, name)
 	return err
 }
@@ -761,7 +761,7 @@ func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name st
 // since the API accepts it as an independently optional field.
 func (s *Store) SetOrganizationTimezone(ctx context.Context, orgID uuid.UUID, timezone string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE organizations SET timezone = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE organizations SET timezone = $2, updated_at = xchats_now()
 		WHERE id = $1`, orgID, timezone)
 	return err
 }
@@ -863,7 +863,7 @@ func (s *Store) UserForSession(ctx context.Context, sessionID string) (User, err
 	err := s.db.QueryRow(ctx, `
 		SELECT u.id, u.email, u.display_name, u.created_at, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, sessionID).
+		WHERE s.id = $1 AND s.expires_at > xchats_now()`, sessionID).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
@@ -886,7 +886,7 @@ func (s *Store) ActiveOrganizationForSession(ctx context.Context, sessionID stri
 	var id *uuid.UUID
 	err = s.db.QueryRow(ctx, `
 		SELECT active_organization_id FROM sessions
-		WHERE id = $1 AND expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, sessionID).Scan(&id)
+		WHERE id = $1 AND expires_at > xchats_now()`, sessionID).Scan(&id)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return uuid.UUID{}, false, ErrNotFound
 	}

@@ -14,7 +14,7 @@ import (
 // ---------------------------------------------------------------------------
 // Follow-ups — "what needs to happen next"
 // ---------------------------------------------------------------------------
-// Time is stored twice on purpose (see 0013_crm.up.sql). DueAt is a UTC
+// Time is stored twice on purpose (see 20260929000000_baseline.sql). DueAt is a UTC
 // instant and is the only thing ordering, overdue and bucketing read; DueDate
 // and DueMinute preserve the wall clock the manager typed so the edit form
 // round-trips exactly instead of drifting by a timezone offset.
@@ -337,7 +337,7 @@ func (s *Store) RescheduleFollowup(ctx context.Context, orgID, id uuid.UUID, in 
 	if _, err := tx.Exec(ctx, `
 		UPDATE crm_followups SET due_at = $3, due_date = $4, due_minute = $5, action = $6,
 			note = $7, assignee_user_id = $8, state = 'open', completed_at = NULL,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2`,
 		orgID, id, in.DueAt, in.DueDate, in.DueMinute, in.Action, in.Note, in.AssigneeUserID); err != nil {
 		return Followup{}, wrap("reschedule followup", err)
@@ -378,11 +378,11 @@ func (s *Store) SetFollowupState(ctx context.Context, orgID, id uuid.UUID, state
 	}
 	completedAt := "NULL"
 	if state == FollowupCompleted {
-		completedAt = "strftime('%Y-%m-%d %H:%M:%f','now')"
+		completedAt = "xchats_now()"
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE crm_followups SET state = $3, completed_at = `+completedAt+`,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2`, orgID, id, state); err != nil {
 		return Followup{}, wrap("set followup state", err)
 	}

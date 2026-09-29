@@ -105,7 +105,7 @@ func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) 
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, zone_level=EXCLUDED.zone_level, parent_ref=EXCLUDED.parent_ref,
 			delivery_available=EXCLUDED.delivery_available, delivery_cost=EXCLUDED.delivery_cost,
-			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=xchats_now()`,
 		orgID, in.Ref, in.Name, in.ZoneLevel, in.ParentRef, in.DeliveryAvailable, in.DeliveryCost, in.DeliveryInDays,
 		in.Notes, orDefault(in.SalesStatus, "active")); err != nil {
 		return fmt.Errorf("insert zone %s: %w", in.Ref, err)

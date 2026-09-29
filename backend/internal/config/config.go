@@ -51,7 +51,8 @@ type ServerConfig struct {
 // db_path has a committed default now (./data/xchats.db) — a fresh clone
 // boots without DB_PATH set at all.
 type StorageConfig struct {
-	DBPath string `yaml:"db_path" env:"DB_PATH"`
+	DBPath      string `yaml:"db_path" env:"DB_PATH"`
+	DatabaseURL string `yaml:"database_url" env:"DATABASE_URL"`
 	// WADeviceDBPath is whatsmeow's own device-session SQLite file — kept
 	// separate from DBPath since whatsmeow's sqlstore manages that schema
 	// entirely on its own (see internal/whatsmeow/store.go).
@@ -632,4 +633,24 @@ func PhoneFromJID(jid string) string {
 		return jid
 	}
 	return jid[:at]
+}
+
+// Database returns the configured PostgreSQL URL or local SQLite path.
+func (s StorageConfig) Database() string {
+	if s.DatabaseURL != "" {
+		return s.DatabaseURL
+	}
+	return s.DBPath
+}
+
+// DeviceDatabase follows the engine toggle while keeping SQLite sessions in
+// their own file. The provider library owns its whatsmeow_* tables and runner.
+func (s StorageConfig) DeviceDatabase() string {
+	if s.DatabaseURL != "" {
+		return s.DatabaseURL
+	}
+	if strings.HasPrefix(s.DBPath, "postgres://") || strings.HasPrefix(s.DBPath, "postgresql://") {
+		return s.DBPath
+	}
+	return s.WADeviceDBPath
 }

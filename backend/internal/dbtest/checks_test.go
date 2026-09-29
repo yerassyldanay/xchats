@@ -31,7 +31,7 @@ func TestEnumChecksEnforced(t *testing.T) {
 		for _, level := range []string{"city", "region", "country"} {
 			mustExec(t, db, ctx, `INSERT INTO ai_delivery_zones
 				(organization_id, ref, zone_level, delivery_available)
-				VALUES ('11111111-1111-1111-1111-111111111111', $1, $1, 1)`, level)
+				VALUES ('11111111-1111-1111-1111-111111111111', $1, $1, TRUE)`, level)
 		}
 		mustReject(t, db, ctx, `INSERT INTO ai_delivery_zones
 			(organization_id, ref, zone_level, delivery_available)
