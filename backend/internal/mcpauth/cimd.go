@@ -134,7 +134,6 @@ func effectivePort(u *url.URL) string {
 	return ""
 }
 
-
 // validateRedirectURI enforces https, except for loopback http (127.0.0.1,
 // ::1, localhost) — the native-app/CLI/MCP-Inspector pattern OAuth 2.1
 // explicitly still allows over plain http, since "localhost" never leaves

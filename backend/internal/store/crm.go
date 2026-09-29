@@ -25,7 +25,7 @@ import (
 // crm_customer_identities.account_id/contact_id carry no foreign key: each can
 // reference a wa_* or a tg_* row and a single FK cannot express an either/or
 // reference — the same constraint ai_drafts.chat_id lives with (see
-// 0003_ai_engine.up.sql's file header). Ownership is enforced here instead:
+// 20260929000000_baseline.sql's file header). Ownership is enforced here instead:
 // every read and write below takes an organization id and puts it in the WHERE
 // clause, so a cross-org id resolves to no row rather than to someone else's
 // customer.
@@ -117,7 +117,7 @@ type CustomFieldDef struct {
 }
 
 // defaultStatuses is the lifecycle every organization starts with. It is the
-// exact set 0013_crm.up.sql seeds for organizations that predate the
+// exact set 20260929000000_baseline.sql seeds for organizations that predate the
 // migration; EnsureDefaultStatuses applies it to every organization created
 // after. Both are idempotent via UNIQUE (organization_id, slug), so running
 // one after the other is a no-op rather than a duplicate.
@@ -199,7 +199,7 @@ func (s *Store) UpdateStatus(ctx context.Context, orgID, id uuid.UUID, in Custom
 	var st CustomerStatus
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_statuses SET name = $3, color = $4, position = $5,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2
 		RETURNING `+statusCols,
 		orgID, id, in.Name, in.Color, in.Position).Scan(scanStatusDst(&st)...)
@@ -267,7 +267,7 @@ func (s *Store) UpdateTag(ctx context.Context, orgID, id uuid.UUID, in CustomerT
 	var t CustomerTag
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_tags SET name = $3, color = $4,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2
 		RETURNING `+tagCols, orgID, id, in.Name, in.Color).Scan(scanTagDst(&t)...)
 	if errors.Is(err, dbx.ErrNoRows) {
@@ -403,7 +403,7 @@ func (s *Store) UpdateCustomFieldDef(ctx context.Context, orgID, id uuid.UUID, i
 	var f CustomFieldDef
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_custom_field_defs SET label = $3, field_type = $4, options = $5, position = $6,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		WHERE organization_id = $1 AND id = $2
 		RETURNING `+customFieldCols,
 		orgID, id, in.Label, in.FieldType, jsonOrDefault(in.Options, "[]"), in.Position).
@@ -740,7 +740,7 @@ func (s *Store) UpdateCustomer(ctx context.Context, orgID, id uuid.UUID, p Custo
 		return Customer{}, wrap("load customer", err)
 	}
 
-	sets := []string{"updated_at = strftime('%Y-%m-%d %H:%M:%f','now')"}
+	sets := []string{"updated_at = xchats_now()"}
 	args := []any{orgID, id}
 	add := func(col string, v any) {
 		args = append(args, v)
@@ -861,7 +861,7 @@ func ResolveCustomerForContact(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID,
 				phone = CASE WHEN $2 <> '' THEN $2 ELSE phone END,
 				display_name = CASE WHEN $3 <> '' THEN $3 ELSE display_name END,
 				contact_id = $4,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+				updated_at = xchats_now()
 			WHERE organization_id = $5 AND channel = $6 AND account_id = $7 AND external_id = $8`,
 			in.Username, in.Phone, in.DisplayName, in.ContactID,
 			orgID, in.Channel, in.AccountID, in.ExternalID); err != nil {

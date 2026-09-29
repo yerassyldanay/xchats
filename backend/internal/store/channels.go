@@ -98,7 +98,7 @@ func (s *Store) ClaimChannelAccount(ctx context.Context, in ChannelAccountClaim)
 		       provider_meta = EXCLUDED.provider_meta,
 		       connection_state = 'connecting',
 		       deleted_at = NULL,
-		       updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		       updated_at = xchats_now()
 		 WHERE channel_accounts.organization_id = EXCLUDED.organization_id
 		RETURNING `+channelAccountCols,
 		in.ID, in.OrganizationID, in.Channel, in.ExternalAccountID, in.DisplayName, in.Handle, string(meta)))
@@ -210,9 +210,9 @@ func (s *Store) SetChannelWebhookState(ctx context.Context, id uuid.UUID, st Cha
 			connection_state = $2,
 			webhook_url = CASE WHEN $3 <> '' THEN $3 ELSE webhook_url END,
 			webhook_last_error = $4,
-			webhook_registered_at = CASE WHEN $5 THEN strftime('%Y-%m-%d %H:%M:%f','now') ELSE webhook_registered_at END,
-			webhook_last_checked_at = CASE WHEN $6 THEN strftime('%Y-%m-%d %H:%M:%f','now') ELSE webhook_last_checked_at END,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			webhook_registered_at = CASE WHEN $5 THEN xchats_now() ELSE webhook_registered_at END,
+			webhook_last_checked_at = CASE WHEN $6 THEN xchats_now() ELSE webhook_last_checked_at END,
+			updated_at = xchats_now()
 		WHERE id = $1`, id, st.State, st.URL, st.LastError, st.Registered, st.Checked)
 	return err
 }
@@ -222,7 +222,7 @@ func (s *Store) SetChannelWebhookState(ctx context.Context, id uuid.UUID, st Cha
 // worker sets without touching webhook bookkeeping.
 func (s *Store) SetChannelAccountState(ctx context.Context, id uuid.UUID, state string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE channel_accounts SET connection_state = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE channel_accounts SET connection_state = $2, updated_at = xchats_now()
 		WHERE id = $1 AND deleted_at IS NULL`, id, state)
 	return err
 }
@@ -230,7 +230,7 @@ func (s *Store) SetChannelAccountState(ctx context.Context, id uuid.UUID, state 
 // TouchChannelAccount stamps live activity (an inbound event arrived).
 func (s *Store) TouchChannelAccount(ctx context.Context, id uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE channel_accounts SET last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE channel_accounts SET last_live_event_at = xchats_now(), updated_at = xchats_now()
 		WHERE id = $1 AND deleted_at IS NULL`, id)
 	return err
 }
@@ -251,8 +251,8 @@ func (s *Store) ConfirmChannelDisconnect(ctx context.Context, id uuid.UUID) erro
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE channel_accounts
-		SET deleted_at = strftime('%Y-%m-%d %H:%M:%f','now'), connection_state = 'disconnected',
-		    webhook_url = '', webhook_registered_at = NULL, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET deleted_at = xchats_now(), connection_state = 'disconnected',
+		    webhook_url = '', webhook_registered_at = NULL, updated_at = xchats_now()
 		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
 		return wrap("soft delete channel account", err)
 	}
@@ -284,15 +284,15 @@ func (s *Store) SetChannelCredentials(ctx context.Context, in ChannelCredentials
 	_, err = s.db.Exec(ctx, `
 		INSERT INTO channel_credentials
 			(account_id, secret_enc, encryption_key_version, token_kind, expires_at, refreshed_at, refresh_last_error)
-		VALUES ($1, $2, $3, $4, $5, strftime('%Y-%m-%d %H:%M:%f','now'), '')
+		VALUES ($1, $2, $3, $4, $5, xchats_now(), '')
 		ON CONFLICT (account_id) DO UPDATE SET
 			secret_enc = EXCLUDED.secret_enc,
 			encryption_key_version = EXCLUDED.encryption_key_version,
 			token_kind = EXCLUDED.token_kind,
 			expires_at = EXCLUDED.expires_at,
-			refreshed_at = strftime('%Y-%m-%d %H:%M:%f','now'),
+			refreshed_at = xchats_now(),
 			refresh_last_error = '',
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = xchats_now()`,
 		in.AccountID, sealed, secretbox.KeyVersion, in.TokenKind, in.ExpiresAt)
 	return err
 }
@@ -334,7 +334,7 @@ type ChannelCredentialsMeta struct {
 // expires, but the error is visible for the setup checklist / health UI.
 func (s *Store) SetChannelCredentialsRefreshError(ctx context.Context, accountID uuid.UUID, errMsg string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE channel_credentials SET refresh_last_error = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE channel_credentials SET refresh_last_error = $2, updated_at = xchats_now()
 		WHERE account_id = $1`, accountID, errMsg)
 	return err
 }
@@ -429,7 +429,7 @@ func (s *Store) IngestChannelInbound(ctx context.Context, in ChannelInbound) (Ch
 			handle = CASE WHEN EXCLUDED.handle <> '' THEN EXCLUDED.handle ELSE channel_contacts.handle END,
 			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
 			                    ELSE channel_contacts.display_name END,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = xchats_now()
 		RETURNING id`,
 		in.AccountID, in.ExternalContactID, in.ContactHandle, in.ContactDisplayName).
 		Scan(&res.ContactID); err != nil {
@@ -449,7 +449,7 @@ func (s *Store) IngestChannelInbound(ctx context.Context, in ChannelInbound) (Ch
 		res.ChatCreated = true
 	case errors.Is(err, dbx.ErrNoRows):
 		if err := tx.QueryRow(ctx, `
-			UPDATE channel_chats SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			UPDATE channel_chats SET updated_at = xchats_now()
 			WHERE account_id = $1 AND external_thread_id = $2
 			RETURNING id`, in.AccountID, in.ExternalThreadID).Scan(&res.ChatID); err != nil {
 			return res, wrap("update channel chat", err)
@@ -516,11 +516,11 @@ func (s *Store) IngestChannelInbound(ctx context.Context, in ChannelInbound) (Ch
 		isInbound := in.Direction == "in"
 		if _, err := tx.Exec(ctx, `
 			UPDATE channel_chats SET
-				last_message_at = COALESCE($2, strftime('%Y-%m-%d %H:%M:%f','now')),
-				last_inbound_at = CASE WHEN $3 THEN COALESCE($2, strftime('%Y-%m-%d %H:%M:%f','now')) ELSE last_inbound_at END,
+				last_message_at = COALESCE($2, xchats_now()),
+				last_inbound_at = CASE WHEN $3 THEN COALESCE($2, xchats_now()) ELSE last_inbound_at END,
 				last_message_preview = $4,
 				unread_count = CASE WHEN $3 THEN unread_count + 1 ELSE 0 END,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+				updated_at = xchats_now()
 			WHERE id = $1`, res.ChatID, ts, isInbound, in.Preview); err != nil {
 			return res, wrap("update channel aggregates", err)
 		}
@@ -649,7 +649,7 @@ func (s *Store) InsertChannelMediaPending(ctx context.Context, messageID uuid.UU
 func (s *Store) SetChannelMediaReady(ctx context.Context, messageID uuid.UUID, storageKey string, size int) error {
 	_, err := s.db.Exec(ctx, `
 		UPDATE channel_message_media
-		SET storage_key = $2, size = $3, download_status = 'ready', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET storage_key = $2, size = $3, download_status = 'ready', updated_at = xchats_now()
 		WHERE message_id = $1`, messageID, storageKey, size)
 	return err
 }
@@ -660,7 +660,7 @@ func (s *Store) SetChannelMediaReady(ctx context.Context, messageID uuid.UUID, s
 func (s *Store) SetChannelMediaFailed(ctx context.Context, messageID uuid.UUID) error {
 	_, err := s.db.Exec(ctx, `
 		UPDATE channel_message_media
-		SET download_status = 'failed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET download_status = 'failed', updated_at = xchats_now()
 		WHERE message_id = $1 AND download_status <> 'ready'`, messageID)
 	return err
 }

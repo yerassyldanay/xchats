@@ -72,7 +72,7 @@ func (s *Store) MetaOAuthStateByID(ctx context.Context, state string) (MetaOAuth
 	err := s.db.QueryRow(ctx, `
 		SELECT state, channel, organization_id, user_id, redirect_uri, status, account_id, last_error, expires_at, settled_at
 		FROM meta_oauth_states
-		WHERE state = $1 AND status = 'pending' AND expires_at > strftime('%Y-%m-%d %H:%M:%f','now')`, state).
+		WHERE state = $1 AND status = 'pending' AND expires_at > xchats_now()`, state).
 		Scan(&st.State, &st.Channel, &st.OrganizationID, &st.UserID, &st.RedirectURI, &st.Status,
 			&st.AccountID, &st.LastError, &st.ExpiresAt, &st.SettledAt)
 	if errors.Is(err, dbx.ErrNoRows) {
@@ -89,7 +89,7 @@ func (s *Store) MetaOAuthStateByID(ctx context.Context, state string) (MetaOAuth
 func (s *Store) SettleMetaOAuthState(ctx context.Context, state, status string, accountID uuid.NullUUID, lastError string) error {
 	_, err := s.db.Exec(ctx, `
 		UPDATE meta_oauth_states
-		SET status = $2, account_id = $3, last_error = $4, settled_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET status = $2, account_id = $3, last_error = $4, settled_at = xchats_now()
 		WHERE state = $1`, state, status, accountID, lastError)
 	return err
 }

@@ -149,7 +149,7 @@ at the upstream source — both satisfied by this file and the full texts in
 |---|---|
 | `github.com/godbus/dbus/v5` | <https://github.com/godbus/dbus/blob/v5.2.2/LICENSE> |
 
-### MIT (30)
+### MIT (34)
 
 | Package | Source |
 |---|---|
@@ -167,6 +167,10 @@ at the upstream source — both satisfied by this file and the full texts in
 | `github.com/go-playground/validator/v10` | <https://github.com/go-playground/validator/blob/v10.30.1/LICENSE> |
 | `github.com/go-stack/stack` | <https://github.com/go-stack/stack/blob/v1.8.1/LICENSE.md> |
 | `github.com/goccy/go-yaml` | <https://github.com/goccy/go-yaml/blob/v1.19.2/LICENSE> |
+| `github.com/jackc/pgpassfile` | <https://github.com/jackc/pgpassfile/blob/v1.0.0/LICENSE> |
+| `github.com/jackc/pgservicefile` | <https://github.com/jackc/pgservicefile/blob/5a60cdf6a761/LICENSE> |
+| `github.com/jackc/pgx/v5` | <https://github.com/jackc/pgx/blob/v5.7.6/LICENSE> |
+| `github.com/jackc/puddle/v2` | <https://github.com/jackc/puddle/blob/v2.2.2/LICENSE> |
 | `github.com/jpillora/backoff` | <https://github.com/jpillora/backoff/blob/v1.0.0/LICENSE> |
 | `github.com/leodido/go-urn` | <https://github.com/leodido/go-urn/blob/v1.4.0/LICENSE> |
 | `github.com/mattn/go-colorable` | <https://github.com/mattn/go-colorable/blob/v0.1.14/LICENSE> |

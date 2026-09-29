@@ -21,7 +21,7 @@ import (
 //
 // AdditionalFact is stored as one element of the additional_facts JSON
 // array column (ai_products/ai_tariffs/ai_tariff_info) — see
-// backend/migrations/sqlite/0017_kb_virtual_facts.up.sql.
+// backend/migrations/sqlite/20260929000000_baseline.sql.
 
 // factRefPattern is the closed syntax for a virtual fact's ref: lowercase
 // snake_case, starting with a letter, so it can never collide with a

@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	// The pure-Go SQLite driver — registered under "sqlite", matching
 	// internal/dbx's own choice (no CGO). This is the one place outside
@@ -25,6 +28,22 @@ import (
 // whatsmeow's sqlstore owns this schema entirely, so it must never share a
 // connection pool or migration runner with internal/dbx.
 func openDeviceStore(ctx context.Context, path string, log waLog.Logger) (*sqlstore.Container, error) {
+	if strings.HasPrefix(path, "postgres://") || strings.HasPrefix(path, "postgresql://") {
+		cfg, err := pgx.ParseConfig(path)
+		if err != nil {
+			return nil, fmt.Errorf("whatsmeow: invalid PostgreSQL connection string")
+		}
+		cfg.RuntimeParams["timezone"] = "UTC"
+		db := stdlib.OpenDB(*cfg)
+		db.SetMaxOpenConns(4)
+		container := sqlstore.NewWithDB(db, "postgres", log)
+		if err := container.Upgrade(ctx); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("whatsmeow: upgrade PostgreSQL device store: %w", err)
+		}
+		return container, nil
+	}
+
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("whatsmeow: resolve device db path %q: %w", path, err)

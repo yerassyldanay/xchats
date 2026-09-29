@@ -18,7 +18,10 @@ func FormatTime(t time.Time) string {
 // ParseTime parses the canonical on-disk representation back into a Time in
 // UTC.
 func ParseTime(s string) (time.Time, error) {
-	return time.Parse(TimeLayout, s)
+	if t, err := time.Parse(TimeLayout, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339Nano, s)
 }
 
 // bindArgs rewrites time.Time / *time.Time query arguments to their

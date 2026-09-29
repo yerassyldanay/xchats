@@ -14,7 +14,7 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrKBNotConfigured means the organization has no ai_assistants row yet — a
@@ -39,7 +39,7 @@ func NewKnowledgeBaseRepo(ctx context.Context, dbPath string) (*KnowledgeBaseRep
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

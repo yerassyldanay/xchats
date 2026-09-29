@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"errors"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	sqlite "modernc.org/sqlite"
 )
@@ -22,6 +23,10 @@ const (
 // "23505" check. Repositories translate this into domain.ErrDuplicate at
 // their exported boundary; consumers never see a driver-specific error.
 func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
+	}
 	var sqliteErr *sqlite.Error
 	if !errors.As(err, &sqliteErr) {
 		return false

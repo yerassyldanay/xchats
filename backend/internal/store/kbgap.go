@@ -82,7 +82,7 @@ func attachMissingFields(ctx context.Context, db *dbx.DB, events []KBGapEvent) e
 	}
 	rows, err := db.Query(ctx, `
 		SELECT event_id, field_name FROM ai_kb_gap_missing_fields
-		WHERE event_id IN (SELECT value FROM json_each($1))
+		WHERE event_id IN (SELECT value FROM `+db.JSONValues("$1")+`)
 		ORDER BY created_at`, dbx.StringArray(ids))
 	if err != nil {
 		return err
@@ -307,7 +307,7 @@ func topTargetEntitiesFor(ctx context.Context, db *dbx.DB, clause string, args [
 // KBGapReportFor — field names live in ai_kb_gap_missing_fields, so this is
 // the one query here that joins back to ai_kb_gap_events for the filter and
 // for target_entity_type (a field's own row has no entity-type column of
-// its own; see 0018_kb_gap_telemetry.up.sql). kbGapFilterClause(f, "e.")
+// its own; see 20260929000000_baseline.sql). kbGapFilterClause(f, "e.")
 // yields the same filter values as the caller's own args, qualified for the
 // "e" alias — a fresh call rather than string-editing the caller's clause.
 func topMissingFieldsFor(ctx context.Context, db *dbx.DB, f KBGapFilter, args []any) ([]KBGapMissingFieldCount, error) {
@@ -362,11 +362,11 @@ func kbGapFilterClause(f KBGapFilter, prefix string) ([]string, []any) {
 	// shows its own gap history when opened directly.
 	where := []string{prefix + "organization_id = $1", prefix + "channel != 'simulator'"}
 	if f.From != nil {
-		args = append(args, f.From.UTC().Format("2006-01-02 15:04:05.000"))
+		args = append(args, f.From.UTC())
 		where = append(where, prefix+"created_at >= $"+itoa(len(args)))
 	}
 	if f.To != nil {
-		args = append(args, f.To.UTC().Format("2006-01-02 15:04:05.000"))
+		args = append(args, f.To.UTC())
 		where = append(where, prefix+"created_at <= $"+itoa(len(args)))
 	}
 	if f.ReasonCode != "" {
@@ -400,7 +400,7 @@ func writeDraftOptionsTx(ctx context.Context, tx *dbx.Tx, channel string, chatID
 		channel = "whatsapp"
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=xchats_now()
 		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {
 		return nil, err
 	}
@@ -461,7 +461,7 @@ func chatOrganizationIDTx(ctx context.Context, tx *dbx.Tx, chatID uuid.UUID) (st
 // aiprompt's closed vocabularies (built once, not per insert), checked
 // again in insertKBGapEventTx — the final gate before a row exists in the
 // DB at all (migration 0018 deliberately carries no CHECK constraint of its
-// own; see 0018_kb_gap_telemetry.up.sql). DraftOption is exported, so
+// own; see 20260929000000_baseline.sql). DraftOption is exported, so
 // aiprompt.sanitizeKBGap having already validated a MODEL-authored
 // diagnostic is not a guarantee every caller went through it — a value
 // outside the closed set here is normalized to the same default an absent

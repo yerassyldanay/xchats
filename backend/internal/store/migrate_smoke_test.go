@@ -9,7 +9,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 )
 
-// defaultAdminID is migrations/sqlite/0006_init_admin.up.sql's fixed sentinel
+// defaultAdminID is migrations/sqlite/20260929000000_baseline.sql's fixed sentinel
 // user id.
 var defaultAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 

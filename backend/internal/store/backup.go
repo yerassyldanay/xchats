@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbops"
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
 // Backup writes a consistent, compacted snapshot of the database to destPath.
@@ -31,3 +32,7 @@ func (s *Store) IntegrityCheck(ctx context.Context) ([]string, error) {
 func (s *Store) BackupZip(ctx context.Context, blobDir string, settingsJSON []byte, w io.Writer) (dbops.BackupManifest, error) {
 	return dbops.BackupZip(ctx, s.db, blobDir, settingsJSON, w)
 }
+
+// SupportsFileBackup reports whether the built-in SQLite archive is available.
+// PostgreSQL deployments use their database's backup tooling.
+func (s *Store) SupportsFileBackup() bool { return s.db.Dialect() == dbx.SQLite }

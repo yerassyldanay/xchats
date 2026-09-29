@@ -10,12 +10,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
-// The types below mirror backend/migrations/sqlite/schema_contract.json's
-// shape exactly (produced by the Phase 0 pg_catalog introspection tool —
-// see that file's own header). This is the Phase 0 checkpoint's contract:
-// every relation captured from a fully-migrated Postgres database, which a
-// freshly-migrated SQLite database must still satisfy column-for-column.
-
+// The shared contract checks both dialects against the same application schema.
 type contractColumn struct {
 	Name       string `json:"name"`
 	Nullable   bool   `json:"nullable"`
@@ -60,7 +55,7 @@ type schemaContract struct {
 
 func loadContract(t *testing.T) schemaContract {
 	t.Helper()
-	path := filepath.Join(moduleRoot(t), "migrations", "sqlite", "schema_contract.json")
+	path := filepath.Join(moduleRoot(t), "migrations", "schema_contract.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read schema contract %s: %v", path, err)
@@ -75,18 +70,9 @@ func loadContract(t *testing.T) schemaContract {
 	return c
 }
 
-// TestSchemaContract asserts a freshly migrated SQLite database has every
-// table, view, column (with matching nullability), primary key, index
-// (including partial-index predicates), and foreign key (including its ON
-// DELETE action) that migrations/sqlite/schema_contract.json captured from
-// the equivalent, fully-migrated Postgres database — the Phase 0 checkpoint
-// this whole cutover is not allowed to silently regress. It intentionally
-// does NOT compare default-value or CHECK-constraint SQL text verbatim:
-// those are expected to read differently across engines (now() vs
-// strftime(), = ANY(ARRAY[...]) vs IN (...), and SQLite's json_valid CHECKs
-// have no Postgres equivalent at all since jsonb is natively validated
-// there) — see TestEnumChecksEnforced for a behavioral check of the four
-// enum-shaped CHECK constraints instead.
+// TestSchemaContract checks every application table, view, column, primary key,
+// foreign key/delete action, and index shape on the selected database engine.
+// Engine-specific defaults and checks are covered by behavioral tests.
 func TestSchemaContract(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
@@ -99,12 +85,12 @@ func TestSchemaContract(t *testing.T) {
 	}
 	for name := range wantTables {
 		if !gotTables[name] {
-			t.Errorf("table %q from the contract is missing from the migrated SQLite schema", name)
+			t.Errorf("table %q from the contract is missing from the migrated schema", name)
 		}
 	}
 	for name := range gotTables {
 		if !wantTables[name] {
-			t.Errorf("SQLite schema has table %q that is not in the contract — renamed or added without updating schema_contract.json?", name)
+			t.Errorf("schema has table %q that is not in the contract — renamed or added without updating schema_contract.json?", name)
 		}
 	}
 
@@ -121,7 +107,7 @@ func TestSchemaContract(t *testing.T) {
 	for name, want := range contract.Views {
 		t.Run("view_"+name, func(t *testing.T) {
 			if !gotViews[name] {
-				t.Fatalf("view %q from the contract is missing from the migrated SQLite schema", name)
+				t.Fatalf("view %q from the contract is missing from the migrated schema", name)
 			}
 			gotCols := sqliteColumnNameSet(t, db, ctx, name)
 			for _, c := range want.Columns {
@@ -131,7 +117,7 @@ func TestSchemaContract(t *testing.T) {
 			}
 			for c := range gotCols {
 				if !containsStr(want.Columns, c) {
-					t.Errorf("view %s: SQLite has column %q that is not in the contract", name, c)
+					t.Errorf("view %s: schema has column %q that is not in the contract", name, c)
 				}
 			}
 		})
@@ -157,7 +143,7 @@ func checkTable(t *testing.T, db *dbx.DB, ctx context.Context, table string, wan
 	}
 	for name := range cols {
 		if _, ok := wantCols[name]; !ok {
-			t.Errorf("SQLite has column %q that is not in the contract", name)
+			t.Errorf("schema has column %q that is not in the contract", name)
 		}
 	}
 
@@ -185,7 +171,7 @@ func checkTable(t *testing.T, db *dbx.DB, ctx context.Context, table string, wan
 			}
 		}
 		if !found {
-			t.Errorf("SQLite has a foreign key %v -> %s(%v) ON DELETE %s that is not in the contract",
+			t.Errorf("schema has a foreign key %v -> %s(%v) ON DELETE %s that is not in the contract",
 				gfk.columns, gfk.refTable, gfk.refColumns, gfk.onDelete)
 		}
 	}
@@ -203,9 +189,11 @@ func checkTable(t *testing.T, db *dbx.DB, ctx context.Context, table string, wan
 
 func sqliteTableNames(t *testing.T, db *dbx.DB, ctx context.Context) map[string]bool {
 	t.Helper()
-	rows, err := db.Query(ctx, `
-		SELECT name FROM sqlite_master
-		WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'xchats_schema_migrations'`)
+	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'schema_migrations'`
+	if db.Dialect() == dbx.Postgres {
+		query = `SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema() AND table_type='BASE TABLE' AND table_name != 'schema_migrations'`
+	}
+	rows, err := db.Query(ctx, query)
 	if err != nil {
 		t.Fatalf("list tables: %v", err)
 	}
@@ -223,7 +211,11 @@ func sqliteTableNames(t *testing.T, db *dbx.DB, ctx context.Context) map[string]
 
 func sqliteViewNames(t *testing.T, db *dbx.DB, ctx context.Context) map[string]bool {
 	t.Helper()
-	rows, err := db.Query(ctx, `SELECT name FROM sqlite_master WHERE type = 'view'`)
+	query := `SELECT name FROM sqlite_master WHERE type='view'`
+	if db.Dialect() == dbx.Postgres {
+		query = `SELECT table_name FROM information_schema.views WHERE table_schema=current_schema()`
+	}
+	rows, err := db.Query(ctx, query)
 	if err != nil {
 		t.Fatalf("list views: %v", err)
 	}
@@ -257,7 +249,11 @@ type sqliteColumn struct {
 // (SQLite reports a view's output columns the same way).
 func sqliteColumns(t *testing.T, db *dbx.DB, ctx context.Context, table string) map[string]sqliteColumn {
 	t.Helper()
-	rows, err := db.Query(ctx, `SELECT name, "notnull" FROM pragma_table_info($1)`, table)
+	query := `SELECT name, "notnull" FROM pragma_table_info($1)`
+	if db.Dialect() == dbx.Postgres {
+		query = `SELECT column_name, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1`
+	}
+	rows, err := db.Query(ctx, query, table)
 	if err != nil {
 		t.Fatalf("table_info(%s): %v", table, err)
 	}
@@ -285,10 +281,15 @@ func sqliteColumns(t *testing.T, db *dbx.DB, ctx context.Context, table string) 
 // WITHIN the primary key, 0 if it is not part of one).
 func sqlitePrimaryKey(t *testing.T, db *dbx.DB, ctx context.Context, table string) []string {
 	t.Helper()
-	rows, err := db.Query(ctx, `
-		SELECT name FROM pragma_table_info($1)
-		WHERE pk > 0
-		ORDER BY pk`, table)
+	query := `SELECT name FROM pragma_table_info($1) WHERE pk > 0 ORDER BY pk`
+	if db.Dialect() == dbx.Postgres {
+		query = `SELECT a.attname FROM pg_index i
+ JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
+ CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, pos)
+ JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.attnum
+ WHERE n.nspname=current_schema() AND t.relname=$1 AND i.indisprimary ORDER BY k.pos`
+	}
+	rows, err := db.Query(ctx, query, table)
 	if err != nil {
 		t.Fatalf("table_info(%s) pk: %v", table, err)
 	}
@@ -314,6 +315,9 @@ type sqliteFK struct {
 // sqliteForeignKeys groups pragma_foreign_key_list(table) rows by id — a
 // single multi-column FK spans several rows sharing one id, ordered by seq.
 func sqliteForeignKeys(t *testing.T, db *dbx.DB, ctx context.Context, table string) []sqliteFK {
+	if db.Dialect() == dbx.Postgres {
+		return postgresForeignKeys(t, db, ctx, table)
+	}
 	t.Helper()
 	rows, err := db.Query(ctx, `
 		SELECT id, seq, "table", "from", "to", on_delete
@@ -363,6 +367,9 @@ type sqliteIdx struct {
 // own implicit index (origin='pk' — the contract tracks that separately as
 // primary_key), then pragma_index_info for each index's column list.
 func sqliteIndexes(t *testing.T, db *dbx.DB, ctx context.Context, table string) []sqliteIdx {
+	if db.Dialect() == dbx.Postgres {
+		return postgresIndexes(t, db, ctx, table)
+	}
 	t.Helper()
 	rows, err := db.Query(ctx, `
 		SELECT name, "unique", partial FROM pragma_index_list($1)
@@ -451,4 +458,57 @@ func containsStr(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func postgresForeignKeys(t *testing.T, db *dbx.DB, ctx context.Context, table string) []sqliteFK {
+	t.Helper()
+	rows, err := db.Query(ctx, `SELECT
+ to_json(ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(num,pos) JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.num ORDER BY pos)),
+ r.relname,
+ to_json(ARRAY(SELECT a.attname FROM unnest(c.confkey) WITH ORDINALITY k(num,pos) JOIN pg_attribute a ON a.attrelid=c.confrelid AND a.attnum=k.num ORDER BY pos)),
+ CASE c.confdeltype WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'r' THEN 'RESTRICT' WHEN 'd' THEN 'SET DEFAULT' ELSE 'NO ACTION' END
+ FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
+ JOIN pg_namespace n ON n.oid=t.relnamespace JOIN pg_class r ON r.oid=c.confrelid
+ WHERE c.contype='f' AND n.nspname=current_schema() AND t.relname=$1`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []sqliteFK
+	for rows.Next() {
+		var fk sqliteFK
+		if err := rows.Scan((*dbx.StringArray)(&fk.columns), &fk.refTable, (*dbx.StringArray)(&fk.refColumns), &fk.onDelete); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, fk)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func postgresIndexes(t *testing.T, db *dbx.DB, ctx context.Context, table string) []sqliteIdx {
+	t.Helper()
+	rows, err := db.Query(ctx, `SELECT
+ to_json(ARRAY(SELECT a.attname FROM unnest(i.indkey) WITH ORDINALITY k(num,pos) JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.num ORDER BY pos)),
+ i.indisunique, i.indpred IS NOT NULL
+ FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace
+ WHERE n.nspname=current_schema() AND t.relname=$1 AND NOT i.indisprimary`, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []sqliteIdx
+	for rows.Next() {
+		var idx sqliteIdx
+		if err := rows.Scan((*dbx.StringArray)(&idx.columns), &idx.unique, &idx.partial); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, idx)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

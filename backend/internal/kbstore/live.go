@@ -346,7 +346,7 @@ func (s *Store) PutLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.
 		return err
 	}
 	if cur.ServiceType == "base" && wasActive && cur.SalesStatus == "inactive" {
-		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=xchats_now()
 			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, cur.Ref); err != nil {
 			return err
 		}
@@ -431,7 +431,7 @@ func (s *Store) SetLiveSpecialistSalesStatus(ctx context.Context, orgID uuid.UUI
 	}
 	defer tx.Rollback(ctx)
 	var row SpecialistRow
-	err = tx.QueryRow(ctx, `UPDATE ai_specialists SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+	err = tx.QueryRow(ctx, `UPDATE ai_specialists SET sales_status=$1, updated_at=xchats_now()
 		WHERE organization_id=$2 AND ref=$3
 		RETURNING ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, updated_at`,
 		status, orgID, ref).
@@ -494,7 +494,7 @@ func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, 
 	}
 
 	var row ServiceRow
-	err = tx.QueryRow(ctx, `UPDATE ai_services SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+	err = tx.QueryRow(ctx, `UPDATE ai_services SET sales_status=$1, updated_at=xchats_now()
 		WHERE organization_id=$2 AND ref=$3
 		RETURNING ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, updated_at`,
 		status, orgID, ref).
@@ -509,7 +509,7 @@ func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, 
 	row.ID = row.Ref
 
 	if row.ServiceType == "base" && cur.SalesStatus == "active" && status == "inactive" {
-		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=xchats_now()
 			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, ref); err != nil {
 			return ServiceRow{}, err
 		}
