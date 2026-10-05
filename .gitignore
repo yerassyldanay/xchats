@@ -109,3 +109,8 @@ id_rsa*
 # scripts/load's own build output (`go build ./...` with no -o writes a
 # binary named after the module into the current directory).
 scripts/load/xchats-load
+
+# Screenshots and customer demo assets
+real-usecases/
+beauty-industry/
+release-v1.1.0-executables/
