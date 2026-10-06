@@ -81,14 +81,15 @@ func appendTimeline(ctx context.Context, tx *dbx.Tx, orgID, customerID uuid.UUID
 	if len(detail) == 0 {
 		detail = []byte("{}")
 	}
-	var occurred any
-	if !ev.OccurredAt.IsZero() {
-		occurred = ev.OccurredAt
+	now := time.Now()
+	occurred := ev.OccurredAt
+	if occurred.IsZero() {
+		occurred = now
 	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO crm_timeline (organization_id, customer_id, kind, actor_user_id, summary, detail, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, xchats_now()))`,
-		orgID, customerID, ev.Kind, ev.Actor, ev.Summary, string(detail), occurred)
+		INSERT INTO crm_timeline (id, organization_id, customer_id, kind, actor_user_id, summary, detail, occurred_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		uuid.New(), orgID, customerID, ev.Kind, ev.Actor, ev.Summary, string(detail), occurred, now)
 	return wrap("append timeline", err)
 }
 

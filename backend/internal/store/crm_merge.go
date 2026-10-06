@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -30,6 +31,8 @@ import (
 // request — still resolves to the survivor through CustomerByID, and the merge
 // itself stays auditable. Every list query already filters tombstones out.
 func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uuid.UUID, actor uuid.NullUUID) (Customer, error) {
+	now := time.Now()
+
 	if targetID == sourceID {
 		return Customer{}, ErrMergeSameCustomer
 	}
@@ -52,24 +55,26 @@ func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uu
 	// which is why there is nothing chat-shaped in this list.
 	for _, q := range []string{
 		`UPDATE crm_customer_identities SET customer_id = $1,
-			updated_at = xchats_now() WHERE customer_id = $2`,
+			updated_at = $3 WHERE customer_id = $2`,
 		`UPDATE crm_customer_notes SET customer_id = $1,
-			updated_at = xchats_now() WHERE customer_id = $2`,
+			updated_at = $3 WHERE customer_id = $2`,
 		`UPDATE crm_followups SET customer_id = $1,
-			updated_at = xchats_now() WHERE customer_id = $2`,
-		`UPDATE crm_timeline SET customer_id = $1 WHERE customer_id = $2`,
+			updated_at = $3 WHERE customer_id = $2`,
 	} {
-		if _, err := tx.Exec(ctx, q, targetID, sourceID); err != nil {
+		if _, err := tx.Exec(ctx, q, targetID, sourceID, now); err != nil {
 			return Customer{}, wrap("merge repoint", err)
 		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE crm_timeline SET customer_id = $1 WHERE customer_id = $2`, targetID, sourceID); err != nil {
+		return Customer{}, wrap("merge repoint", err)
 	}
 
 	// Tags are a union, not a replace: a merge must never drop a label. The
 	// composite primary key makes the overlap a no-op instead of a conflict.
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO crm_customer_tags (customer_id, tag_id)
-		SELECT $1, tag_id FROM crm_customer_tags WHERE customer_id = $2
-		ON CONFLICT (customer_id, tag_id) DO NOTHING`, targetID, sourceID); err != nil {
+		INSERT INTO crm_customer_tags (customer_id, tag_id, created_at)
+		SELECT $1, tag_id, $3 FROM crm_customer_tags WHERE customer_id = $2
+		ON CONFLICT (customer_id, tag_id) DO NOTHING`, targetID, sourceID, now); err != nil {
 		return Customer{}, wrap("merge tags", err)
 	}
 	if _, err := tx.Exec(ctx,
@@ -88,17 +93,17 @@ func (s *Store) MergeCustomers(ctx context.Context, orgID, targetID, sourceID uu
 			avatar_url = CASE WHEN avatar_url = '' THEN $6 ELSE avatar_url END,
 			status_id = COALESCE(status_id, $7),
 			assignee_user_id = COALESCE(assignee_user_id, $8),
-			updated_at = xchats_now()
+			updated_at = $9
 		WHERE organization_id = $1 AND id = $2`,
 		orgID, targetID, source.DisplayName, source.Phone, source.Email, source.AvatarURL,
-		source.StatusID, source.AssigneeUserID); err != nil {
+		source.StatusID, source.AssigneeUserID, now); err != nil {
 		return Customer{}, wrap("merge scalars", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE crm_customers SET merged_into_id = $3,
-			updated_at = xchats_now()
-		WHERE organization_id = $1 AND id = $2`, orgID, sourceID, targetID); err != nil {
+			updated_at = $4
+		WHERE organization_id = $1 AND id = $2`, orgID, sourceID, targetID, now); err != nil {
 		return Customer{}, wrap("mark merged", err)
 	}
 

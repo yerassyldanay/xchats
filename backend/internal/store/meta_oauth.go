@@ -51,14 +51,16 @@ type CreateMetaOAuthStateInput struct {
 // later public callback never has to trust a session cookie to know who is
 // connecting.
 func (s *Store) CreateMetaOAuthState(ctx context.Context, in CreateMetaOAuthStateInput) error {
+	now := time.Now()
+
 	ttl := in.TTL
 	if ttl <= 0 {
 		ttl = 10 * time.Minute
 	}
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO meta_oauth_states (state, channel, organization_id, user_id, redirect_uri, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		in.State, in.Channel, in.OrganizationID, in.UserID, in.RedirectURI, time.Now().Add(ttl).UTC())
+		INSERT INTO meta_oauth_states (state, channel, organization_id, user_id, redirect_uri, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		in.State, in.Channel, in.OrganizationID, in.UserID, in.RedirectURI, time.Now().Add(ttl).UTC(), now)
 	return err
 }
 
@@ -68,11 +70,13 @@ func (s *Store) CreateMetaOAuthState(ctx context.Context, in CreateMetaOAuthStat
 // or stale callback must not be able to distinguish "never existed" from
 // "already used" from "expired".
 func (s *Store) MetaOAuthStateByID(ctx context.Context, state string) (MetaOAuthState, error) {
+	now := time.Now()
+
 	var st MetaOAuthState
 	err := s.db.QueryRow(ctx, `
 		SELECT state, channel, organization_id, user_id, redirect_uri, status, account_id, last_error, expires_at, settled_at
 		FROM meta_oauth_states
-		WHERE state = $1 AND status = 'pending' AND expires_at > xchats_now()`, state).
+		WHERE state = $1 AND status = 'pending' AND expires_at > $2`, state, now).
 		Scan(&st.State, &st.Channel, &st.OrganizationID, &st.UserID, &st.RedirectURI, &st.Status,
 			&st.AccountID, &st.LastError, &st.ExpiresAt, &st.SettledAt)
 	if errors.Is(err, dbx.ErrNoRows) {
@@ -87,9 +91,11 @@ func (s *Store) MetaOAuthStateByID(ctx context.Context, state string) (MetaOAuth
 // every exit path once a state row was found (success or failure alike), or
 // a failed attempt would stay repeatable until its TTL expires.
 func (s *Store) SettleMetaOAuthState(ctx context.Context, state, status string, accountID uuid.NullUUID, lastError string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE meta_oauth_states
-		SET status = $2, account_id = $3, last_error = $4, settled_at = xchats_now()
-		WHERE state = $1`, state, status, accountID, lastError)
+		SET status = $2, account_id = $3, last_error = $4, settled_at = $5
+		WHERE state = $1`, state, status, accountID, lastError, now)
 	return err
 }

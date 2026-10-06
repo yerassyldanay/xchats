@@ -100,11 +100,11 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	if f.Query != "" {
 		args = append(args, "%"+strings.ToLower(f.Query)+"%")
 		i := itoa(len(args))
-		// unicode_lower rather than SQLite's lower(), which folds ASCII only —
-		// so searching "али" never matched a contact stored as «Алия». See
-		// internal/dbx's unicodelower.go.
-		where = append(where, "(unicode_lower(c.contact_display_name) LIKE $"+i+
-			" OR unicode_lower(c.contact_phone_number) LIKE $"+i+
+		// Plain lower(): SQLite's built-in folds ASCII only (so searching "али"
+		// never matched a contact stored as «Алия»), which internal/dbx's lower.go
+		// replaces with a Unicode-aware one; PostgreSQL's own lower() already is.
+		where = append(where, "(lower(c.contact_display_name) LIKE $"+i+
+			" OR lower(c.contact_phone_number) LIKE $"+i+
 			" OR c.external_contact_ref LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
@@ -164,6 +164,8 @@ func (s *Store) ChatByIDForOrg(ctx context.Context, id, orgID uuid.UUID) (Chat, 
 // returns the refreshed chat. The read resolves the channel; the write is
 // dispatched to wa_chats or tg_chats — views are read-only.
 func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
+	now := time.Now()
+
 	chat, err := s.ChatByID(ctx, id)
 	if err != nil {
 		return Chat{}, err
@@ -173,7 +175,7 @@ func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
 		return Chat{}, err
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET unread_count = 0, updated_at = xchats_now() WHERE id = $1`, id); err != nil {
+		`UPDATE `+table+` SET unread_count = 0, updated_at = $2 WHERE id = $1`, id, now); err != nil {
 		return Chat{}, err
 	}
 	chat.UnreadCount = 0
@@ -183,6 +185,8 @@ func (s *Store) MarkChatRead(ctx context.Context, id uuid.UUID) (Chat, error) {
 // AssignChat sets (or clears) a chat's assignee on the transport-specific chat
 // table and returns the refreshed channel-neutral view row.
 func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.NullUUID) (Chat, error) {
+	now := time.Now()
+
 	chat, err := s.ChatByID(ctx, id)
 	if err != nil {
 		return Chat{}, err
@@ -196,7 +200,7 @@ func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.Null
 		value = assignee.UUID
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = xchats_now() WHERE id = $1`, id, value); err != nil {
+		`UPDATE `+table+` SET assignee_user_id = $2, updated_at = $3 WHERE id = $1`, id, value, now); err != nil {
 		return Chat{}, err
 	}
 	return s.ChatByID(ctx, id)
@@ -207,6 +211,8 @@ func (s *Store) AssignChat(ctx context.Context, id uuid.UUID, assignee uuid.Null
 // row. state is caller-validated (handleResolveChat); the column itself
 // carries no CHECK constraint.
 func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (Chat, error) {
+	now := time.Now()
+
 	chat, err := s.ChatByID(ctx, id)
 	if err != nil {
 		return Chat{}, err
@@ -216,7 +222,7 @@ func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (C
 		return Chat{}, err
 	}
 	if _, err := s.db.Exec(ctx,
-		`UPDATE `+table+` SET chat_state = $2, updated_at = xchats_now() WHERE id = $1`, id, state); err != nil {
+		`UPDATE `+table+` SET chat_state = $2, updated_at = $3 WHERE id = $1`, id, state, now); err != nil {
 		return Chat{}, err
 	}
 	return s.ChatByID(ctx, id)
@@ -231,6 +237,8 @@ func (s *Store) SetChatState(ctx context.Context, id uuid.UUID, state string) (C
 // messageTS (a message with no timestamp at all) is a no-op rather than an
 // error — every real inbound message carries one.
 func (s *Store) UpdateChatPreviewIfCurrent(ctx context.Context, chatID uuid.UUID, messageTS *time.Time, preview string) error {
+	now := time.Now()
+
 	if messageTS == nil {
 		return nil
 	}
@@ -243,8 +251,8 @@ func (s *Store) UpdateChatPreviewIfCurrent(ctx context.Context, chatID uuid.UUID
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
-		UPDATE `+table+` SET last_message_preview = $2, updated_at = xchats_now()
-		WHERE id = $1 AND last_message_at = $3`, chatID, preview, *messageTS)
+		UPDATE `+table+` SET last_message_preview = $2, updated_at = $4
+		WHERE id = $1 AND last_message_at = $3`, chatID, preview, *messageTS, now)
 	return err
 }
 
@@ -338,18 +346,12 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 		ids[i] = m.ID
 		idx[m.ID] = i
 	}
-	// = ANY($1) -> IN (SELECT value FROM `+s.db.JSONValues("$1")+`), binding the id list
-	// as a dbx.UUIDArray (JSON array in TEXT) — see the per-PG-ism table.
-	rows, err := s.db.Query(ctx, `
-		SELECT message_id, id, media_type, mimetype, filename, size, storage_key, download_status, transcript
-		FROM inbox_message_media_v
-		WHERE message_id IN (SELECT value FROM `+s.db.JSONValues("$1")+`)
-		ORDER BY created_at`, dbx.UUIDArray(ids))
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
+	return dbx.QueryInChunks(ctx, s.db, nil, ids, func(list string) string {
+		return `SELECT message_id, id, media_type, mimetype, filename, size, storage_key, download_status, transcript
+			FROM inbox_message_media_v
+			WHERE message_id IN ` + list + `
+			ORDER BY created_at`
+	}, func(rows *dbx.Rows) error {
 		var mid uuid.UUID
 		var r MediaRef
 		if err := rows.Scan(&mid, &r.ID, &r.MediaType, &r.Mimetype, &r.FileName, &r.FileSize,
@@ -359,8 +361,8 @@ func (s *Store) attachMedia(ctx context.Context, msgs []Message) error {
 		if i, ok := idx[mid]; ok {
 			msgs[i].Media = append(msgs[i].Media, r)
 		}
-	}
-	return rows.Err()
+		return nil
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -479,6 +481,8 @@ func (s *Store) DraftByID(ctx context.Context, id uuid.UUID) (Draft, error) {
 // 'sent' and supersedes its siblings, atomically. ErrNotFound means the guard lost
 // (already approved or superseded) — the caller classifies via DraftByID.
 func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Draft{}, err
@@ -486,10 +490,10 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 	defer tx.Rollback(ctx)
 	var d Draft
 	err = tx.QueryRow(ctx, `
-		UPDATE ai_drafts SET draft_state='sent', updated_at=xchats_now()
+		UPDATE ai_drafts SET draft_state='sent', updated_at=$2
 		WHERE id = $1 AND draft_state='suggested'
 		RETURNING `+draftCols+``,
-		draftID).Scan(scanDraftDst(&d)...)
+		draftID, now).Scan(scanDraftDst(&d)...)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -497,8 +501,8 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 		return d, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=xchats_now()
-		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, d.ChatID, draftID); err != nil {
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=$3
+		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, d.ChatID, draftID, now); err != nil {
 		return d, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -509,13 +513,17 @@ func (s *Store) ClaimDraft(ctx context.Context, draftID uuid.UUID) (Draft, error
 
 // SetDraftSent records the message a draft actually produced.
 func (s *Store) SetDraftSent(ctx context.Context, draftID, sentMessageID uuid.UUID) error {
-	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET sent_message_id = $2, updated_at = xchats_now() WHERE id = $1`, draftID, sentMessageID)
+	now := time.Now()
+
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET sent_message_id = $2, updated_at = $3 WHERE id = $1`, draftID, sentMessageID, now)
 	return err
 }
 
 // ReopenDraft puts a claimed draft back to suggested (used when the send fails).
 func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
-	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=xchats_now() WHERE id=$1`, draftID)
+	now := time.Now()
+
+	_, err := s.db.Exec(ctx, `UPDATE ai_drafts SET draft_state='suggested', updated_at=$2 WHERE id=$1`, draftID, now)
 	return err
 }
 
@@ -524,10 +532,12 @@ func (s *Store) ReopenDraft(ctx context.Context, draftID uuid.UUID) error {
 // operator's Dismiss action, so the set does not silently reappear on
 // refetch or reselecting the chat the way clearing local UI state alone did.
 func (s *Store) DismissDrafts(ctx context.Context, chatID uuid.UUID) ([]Draft, error) {
+	now := time.Now()
+
 	rows, err := s.db.Query(ctx, `
-		UPDATE ai_drafts SET draft_state='dismissed', updated_at=xchats_now()
+		UPDATE ai_drafts SET draft_state='dismissed', updated_at=$2
 		WHERE chat_id = $1 AND draft_state='suggested'
-		RETURNING `+draftCols+``, chatID)
+		RETURNING `+draftCols+``, chatID, now)
 	if err != nil {
 		return nil, err
 	}

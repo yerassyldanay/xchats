@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,13 +15,15 @@ import (
 // One per organization: the stable owner_jid ("simulator:<org id>") makes
 // this idempotent under concurrency. IDs are generated in Go for both engines.
 func (s *Store) GetOrCreateSimulatorAccount(ctx context.Context, orgID uuid.UUID) (Account, error) {
+	now := time.Now()
+
 	var a Account
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, channel, connection_state)
+		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, channel, connection_state, created_at, updated_at)
 		VALUES ($2,
-		        $1, 'Simulator', 'simulator:' || $1, 'simulator', 'connected')
-		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = xchats_now()
-		RETURNING `+waAccountCols, orgID, uuid.New()).Scan(scanWaAccountDst(&a)...)
+		        $1, 'Simulator', 'simulator:' || $1, 'simulator', 'connected', $3, $3)
+		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = EXCLUDED.updated_at
+		RETURNING `+waAccountCols, orgID, uuid.New(), now).Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 

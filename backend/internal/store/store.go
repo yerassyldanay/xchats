@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -234,6 +235,8 @@ const orgOwnsAccountExpr = `(EXISTS (SELECT 1 FROM wa_accounts a WHERE a.organiz
 
 // SeedOrganization upserts the single default organization by name and returns it.
 func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization, error) {
+	now := time.Now()
+
 	var o Organization
 	// Idempotent without a UNIQUE(name) constraint: reuse the existing org for this
 	// name (preferring the one that owns a messaging account on ANY channel, else
@@ -249,8 +252,8 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 		LIMIT 1`, name).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	if errors.Is(err, dbx.ErrNoRows) {
 		err = s.db.QueryRow(ctx, `
-			INSERT INTO organizations (name) VALUES ($1)
-			RETURNING id, name, respond_mode, timezone`, name).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
+			INSERT INTO organizations (name, id, created_at, updated_at) VALUES ($1, $2, $3, $3)
+			RETURNING id, name, respond_mode, timezone`, name, uuid.New(), now).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	}
 	return o, err
 }
@@ -264,20 +267,22 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 // every call site. Tests that specifically need a "member" for an RBAC
 // boundary check create one with CreateUser or SetMembershipRole instead.
 func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName string) (User, error) {
+	now := time.Now()
+
 	var u User
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, display_name)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = xchats_now()
+		INSERT INTO users (email, password_hash, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
+		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = EXCLUDED.updated_at
 		RETURNING id, email, password_hash, display_name, created_at`,
-		email, passwordHash, displayName).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
+		normalizeEmail(email), passwordHash, displayName, uuid.New(), now).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
 	if err != nil {
 		return u, err
 	}
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id, role)
-		VALUES ($1, $2, 'admin')
-		ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin'`, orgID, u.ID)
+		INSERT INTO organization_users (organization_id, user_id, role, joined_at)
+		VALUES ($1, $2, 'admin', $3)
+		ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'admin'`, orgID, u.ID, now)
 	u.Role = "admin"
 	return u, err
 }
@@ -285,18 +290,20 @@ func (s *Store) SeedUser(ctx context.Context, orgID uuid.UUID, email, passwordHa
 // SeedAccount upserts the pre-connected xpayment account by its derived id. Kept
 // for the Build 0 seed; the manager (B1) connects further accounts via QR.
 func (s *Store) SeedAccount(ctx context.Context, a Account) (Account, error) {
+	now := time.Now()
+
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO wa_accounts
-			(id, organization_id, display_name, owner_jid, phone_number, connection_state)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			(id, organization_id, display_name, owner_jid, phone_number, connection_state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = EXCLUDED.display_name,
 			connection_state = EXCLUDED.connection_state,
 			deleted_at = NULL,
-			updated_at = xchats_now()
+			updated_at = EXCLUDED.updated_at
 		RETURNING `+waAccountCols,
-		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.ConnectionState).
+		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle, a.ConnectionState, now).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
@@ -415,40 +422,46 @@ func (s *Store) ListWaAccountsForOrg(ctx context.Context, orgID uuid.UUID) ([]Ac
 // row — its chats/messages stay attached and deleted_at is cleared. A blank
 // display_name keeps the existing one (so reconnect doesn't clobber the label).
 func (s *Store) UpsertConnectedAccount(ctx context.Context, a Account) (Account, error) {
+	now := time.Now()
+
 	err := s.db.QueryRow(ctx, `
 		INSERT INTO wa_accounts
 			(id, organization_id, display_name, owner_jid, phone_number,
-			 connection_state, last_live_event_at)
-		VALUES ($1, $2, $3, $4, $5, $6, xchats_now())
+			 connection_state, last_live_event_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $7)
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = EXCLUDED.organization_id,
 			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name ELSE wa_accounts.display_name END,
 			phone_number = EXCLUDED.phone_number,
 			connection_state = EXCLUDED.connection_state,
-			last_live_event_at = xchats_now(),
+			last_live_event_at = EXCLUDED.last_live_event_at,
 			deleted_at = NULL,
-			updated_at = xchats_now()
+			updated_at = EXCLUDED.updated_at
 		RETURNING `+waAccountCols,
 		a.ID, a.OrganizationID, a.DisplayName, a.ExternalAccountRef, a.ExternalHandle,
-		a.ConnectionState).
+		a.ConnectionState, now).
 		Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 
 // SetAccountState updates a live account's connection_state (and stamps activity).
 func (s *Store) SetAccountState(ctx context.Context, id uuid.UUID, state string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = xchats_now(), updated_at = xchats_now()
-		WHERE id = $1 AND deleted_at IS NULL`, id, state)
+		UPDATE wa_accounts SET connection_state = $2, last_live_event_at = $3, updated_at = $3
+		WHERE id = $1 AND deleted_at IS NULL`, id, state, now)
 	return err
 }
 
 // SoftDeleteAccount hides an account (a "clean"): its chats drop out of the inbox
 // but the rows stay, so re-adding the number revives everything.
 func (s *Store) SoftDeleteAccount(ctx context.Context, id uuid.UUID) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE wa_accounts SET deleted_at = xchats_now(), connection_state = 'disconnected', updated_at = xchats_now()
-		WHERE id = $1 AND deleted_at IS NULL`, id)
+		UPDATE wa_accounts SET deleted_at = $2, connection_state = 'disconnected', updated_at = $2
+		WHERE id = $1 AND deleted_at IS NULL`, id, now)
 	return err
 }
 
@@ -468,12 +481,14 @@ type WaCredential struct {
 // SaveWaCredentials records (or replaces) the whatsmeow device JID for an
 // account — called once pairing succeeds.
 func (s *Store) SaveWaCredentials(ctx context.Context, accountID uuid.UUID, deviceJID string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO wa_credentials (account_id, device_jid)
-		VALUES ($1, $2)
+		INSERT INTO wa_credentials (account_id, device_jid, created_at, updated_at)
+		VALUES ($1, $2, $3, $3)
 		ON CONFLICT (account_id) DO UPDATE SET
 			device_jid = EXCLUDED.device_jid,
-			updated_at = xchats_now()`, accountID, deviceJID)
+			updated_at = EXCLUDED.updated_at`, accountID, deviceJID, now)
 	return err
 }
 
@@ -507,11 +522,17 @@ func (s *Store) ListWaCredentials(ctx context.Context) ([]WaCredential, error) {
 // Auth & users
 // ---------------------------------------------------------------------------
 
+// normalizeEmail is the one spelling of an e-mail address the database ever sees:
+// users.email is plain TEXT UNIQUE (no CITEXT, no COLLATE NOCASE — identical on
+// SQLite and PostgreSQL), so case-insensitive identity is enforced here, on every
+// write and every lookup.
+func normalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
+
 func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT id, email, password_hash, display_name, created_at, must_change_password
-		FROM users WHERE email = $1`, email).
+		FROM users WHERE email = $1`, normalizeEmail(email)).
 		Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
@@ -525,10 +546,12 @@ func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
 // the general path; BootstrapSentinelAdminPassword below is the distinct
 // first-boot path that deliberately leaves must_change_password set.
 func (s *Store) SetUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE users SET password_hash = $2, must_change_password = FALSE,
-			updated_at = xchats_now()
-		WHERE id = $1`, id, passwordHash)
+			updated_at = $3
+		WHERE id = $1`, id, passwordHash, now)
 	return err
 }
 
@@ -605,10 +628,12 @@ func (s *Store) DefaultAdminCredentialPending(ctx context.Context) (bool, error)
 // it some other way) — cmd/xchats uses that to decide whether to
 // print/persist the bootstrap credential file at all.
 func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash string) (minted bool, err error) {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `
 		UPDATE users SET password_hash = $2, must_change_password = FALSE,
-			updated_at = xchats_now()
-		WHERE id = $1 AND password_hash = ''`, sentinelAdminID, passwordHash)
+			updated_at = $3
+		WHERE id = $1 AND password_hash = ''`, sentinelAdminID, passwordHash, now)
 	if err != nil {
 		return false, err
 	}
@@ -620,31 +645,36 @@ func (s *Store) BootstrapSentinelAdminPassword(ctx context.Context, passwordHash
 // recovery path for a lost/never-read one-time credential. The next boot's
 // BootstrapSentinelAdminPassword call re-mints a fresh one.
 func (s *Store) ResetSentinelAdminPassword(ctx context.Context) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE users SET password_hash = '', must_change_password = TRUE,
-			updated_at = xchats_now()
-		WHERE id = $1`, sentinelAdminID)
+			updated_at = $2
+		WHERE id = $1`, sentinelAdminID, now)
 	return err
 }
 
 // CreateUser inserts a new user and joins them to orgID with the given role
 // ("admin" or "member"; "" defaults to "member" — the safe default for a
 // freshly created team member, promoted later via SetMembershipRole). A
-// duplicate email (users.email is UNIQUE COLLATE NOCASE, citext's SQLite
-// equivalent) comes back as domain.ErrDuplicate — the exported-boundary
+// duplicate email (users.email is plain UNIQUE TEXT; the address is
+// normalised to lower case here, so a case variant collides) comes back as
+// domain.ErrDuplicate — the exported-boundary
 // translation that replaces the old pgx "23505" string match, which
 // internal/httpapi/auth.go's isUniqueViolation now compares against with
 // errors.Is.
 func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, passwordHash, displayName, role string) (User, error) {
+	now := time.Now()
+
 	if role == "" {
 		role = "member"
 	}
 	var u User
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO users (email, password_hash, display_name)
-		VALUES ($1, $2, $3)
+		INSERT INTO users (email, password_hash, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
 		RETURNING id, email, password_hash, display_name, created_at`,
-		email, passwordHash, displayName).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
+		normalizeEmail(email), passwordHash, displayName, uuid.New(), now).Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.CreatedAt)
 	if err != nil {
 		if dbx.IsUniqueViolation(err) {
 			return u, domain.ErrDuplicate
@@ -652,8 +682,8 @@ func (s *Store) CreateUser(ctx context.Context, orgID uuid.UUID, email, password
 		return u, err
 	}
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id, role)
-		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, orgID, u.ID, role)
+		INSERT INTO organization_users (organization_id, user_id, role, joined_at)
+		VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`, orgID, u.ID, role, now)
 	u.Role = role
 	return u, err
 }
@@ -747,9 +777,11 @@ func (s *Store) SetMembershipRole(ctx context.Context, orgID, userID uuid.UUID, 
 // management UI's "org rename" action; auto_response_mode has no editor
 // yet). See SetOrganizationTimezone for the one other user-editable field.
 func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE organizations SET name = $2, updated_at = xchats_now()
-		WHERE id = $1`, orgID, name)
+		UPDATE organizations SET name = $2, updated_at = $3
+		WHERE id = $1`, orgID, name, now)
 	return err
 }
 
@@ -759,9 +791,11 @@ func (s *Store) RenameOrganization(ctx context.Context, orgID uuid.UUID, name st
 // separate call from RenameOrganization (rather than one combined update)
 // since the API accepts it as an independently optional field.
 func (s *Store) SetOrganizationTimezone(ctx context.Context, orgID uuid.UUID, timezone string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE organizations SET timezone = $2, updated_at = xchats_now()
-		WHERE id = $1`, orgID, timezone)
+		UPDATE organizations SET timezone = $2, updated_at = $3
+		WHERE id = $1`, orgID, timezone, now)
 	return err
 }
 
@@ -850,19 +884,23 @@ func (s *Store) UserInOrg(ctx context.Context, userID, orgID uuid.UUID) (bool, e
 // ---------------------------------------------------------------------------
 
 func (s *Store) CreateSession(ctx context.Context, id string, userID uuid.UUID, ttl time.Duration) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
-		id, userID, time.Now().Add(ttl).UTC())
+		INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES ($1, $2, $3, $4)`,
+		id, userID, time.Now().Add(ttl).UTC(), now)
 	return err
 }
 
 // UserForSession returns the user for a non-expired session id.
 func (s *Store) UserForSession(ctx context.Context, sessionID string) (User, error) {
+	now := time.Now()
+
 	var u User
 	err := s.db.QueryRow(ctx, `
 		SELECT u.id, u.email, u.display_name, u.created_at, u.must_change_password
 		FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > xchats_now()`, sessionID).
+		WHERE s.id = $1 AND s.expires_at > $2`, sessionID, now).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt, &u.MustChangePassword)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return u, ErrNotFound
@@ -882,10 +920,12 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID string) error {
 // who has never switched/landed via a handoff) — the caller falls back to
 // OrgForUser's deterministic default.
 func (s *Store) ActiveOrganizationForSession(ctx context.Context, sessionID string) (orgID uuid.UUID, ok bool, err error) {
+	now := time.Now()
+
 	var id *uuid.UUID
 	err = s.db.QueryRow(ctx, `
 		SELECT active_organization_id FROM sessions
-		WHERE id = $1 AND expires_at > xchats_now()`, sessionID).Scan(&id)
+		WHERE id = $1 AND expires_at > $2`, sessionID, now).Scan(&id)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return uuid.UUID{}, false, ErrNotFound
 	}

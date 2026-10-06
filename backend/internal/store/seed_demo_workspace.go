@@ -118,9 +118,9 @@ func (s *Store) seedDemoChannelAccounts(ctx context.Context, orgID uuid.UUID) er
 	if _, err := s.db.Exec(ctx, `
 		INSERT INTO tg_accounts
 			(id, organization_id, display_name, bot_id, bot_username, connection_state,
-			 webhook_url, webhook_registered_at, webhook_last_checked_at, last_live_event_at)
+			 webhook_url, webhook_registered_at, webhook_last_checked_at, last_live_event_at, created_at, updated_at)
 		VALUES ($1, $2, 'Qazan Home · Telegram', 7007007070, 'qazan_home_demo_bot', 'connected',
-			'https://demo.invalid/webhooks/telegram', $3, $3, $3)
+			'https://demo.invalid/webhooks/telegram', $3, $3, $3, $4, $4)
 		ON CONFLICT (id) DO UPDATE SET
 			organization_id = excluded.organization_id,
 			display_name = excluded.display_name,
@@ -130,7 +130,7 @@ func (s *Store) seedDemoChannelAccounts(ctx context.Context, orgID uuid.UUID) er
 			webhook_registered_at = excluded.webhook_registered_at,
 			webhook_last_checked_at = excluded.webhook_last_checked_at,
 			webhook_last_error = '', last_live_event_at = excluded.last_live_event_at,
-			deleted_at = NULL`, demoTelegramAccountID, orgID, now.Add(-40*time.Second)); err != nil {
+			deleted_at = NULL`, demoTelegramAccountID, orgID, now.Add(-40*time.Second), now); err != nil {
 		return fmt.Errorf("seed demo Telegram account: %w", err)
 	}
 
@@ -147,8 +147,8 @@ func (s *Store) seedDemoChannelAccounts(ctx context.Context, orgID uuid.UUID) er
 			INSERT INTO channel_accounts
 				(id, organization_id, channel, external_account_id, display_name, handle,
 				 connection_state, webhook_url, webhook_registered_at, webhook_last_checked_at,
-				 last_live_event_at, provider_meta)
-			VALUES ($1, $2, $3, $4, $5, $6, 'connected', $7, $8, $8, $8, $9)
+				 last_live_event_at, provider_meta, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'connected', $7, $8, $8, $8, $9, $10, $10)
 			ON CONFLICT (id) DO UPDATE SET
 				organization_id = excluded.organization_id,
 				channel = excluded.channel,
@@ -162,7 +162,7 @@ func (s *Store) seedDemoChannelAccounts(ctx context.Context, orgID uuid.UUID) er
 				webhook_last_error = '', last_live_event_at = excluded.last_live_event_at,
 				provider_meta = excluded.provider_meta, deleted_at = NULL`,
 			account.id, orgID, account.channel, account.externalID, account.name, account.handle,
-			account.webhook, now.Add(-time.Duration(i+1)*time.Minute), account.meta); err != nil {
+			account.webhook, now.Add(-time.Duration(i+1)*time.Minute), account.meta, now); err != nil {
 			return fmt.Errorf("seed demo %s account: %w", account.channel, err)
 		}
 	}
@@ -264,12 +264,14 @@ func (s *Store) seedDemoInbox(ctx context.Context, adminUserID uuid.UUID) error 
 }
 
 func (s *Store) seedDemoDraft(ctx context.Context, channel string, chatID, messageID uuid.UUID, reply string) error {
+	now := time.Now()
+
 	id := uuid.NewSHA1(uuid.NameSpaceURL, []byte("xchats-demo-draft:"+channel+":"+chatID.String()))
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO ai_drafts
 			(id, chat_id, trigger_message_id, option_ordinal, draft_text, context_state,
-			 confidence, escalate, draft_state, reply_language, channel)
-		VALUES ($1, $2, $3, 1, $4, 'full', 0.96, FALSE, 'suggested', 'ru', $5)
+			 confidence, escalate, draft_state, reply_language, channel, created_at, updated_at)
+		VALUES ($1, $2, $3, 1, $4, 'full', 0.96, FALSE, 'suggested', 'ru', $5, $6, $6)
 		ON CONFLICT (id) DO UPDATE SET
 			trigger_message_id = excluded.trigger_message_id,
 			draft_text = excluded.draft_text,
@@ -279,8 +281,8 @@ func (s *Store) seedDemoDraft(ctx context.Context, channel string, chatID, messa
 			draft_state = excluded.draft_state,
 			reply_language = excluded.reply_language,
 			channel = excluded.channel,
-			updated_at = xchats_now()`,
-		id, chatID, messageID, reply, channel)
+			updated_at = EXCLUDED.updated_at`,
+		id, chatID, messageID, reply, channel, now)
 	if err != nil {
 		return fmt.Errorf("seed demo AI draft: %w", err)
 	}

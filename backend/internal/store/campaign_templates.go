@@ -56,15 +56,17 @@ func scanCampaignTemplate(row dbx.Scanner) (CampaignTemplate, error) {
 // derived from t.MessageBody (backend/campaign.ExtractVariables), never
 // taken from the input struct — same rule CreateCampaign follows.
 func (s *Store) CreateCampaignTemplate(ctx context.Context, t CampaignTemplate) (CampaignTemplate, error) {
+	now := time.Now()
+
 	variablesJSON, err := json.Marshal(purecampaign.ExtractVariables(t.MessageBody))
 	if err != nil {
 		return CampaignTemplate{}, wrap("marshal template variables", err)
 	}
 	out, err := scanCampaignTemplate(s.db.QueryRow(ctx, `
-		INSERT INTO campaign_templates (organization_id, name, message_body, variables, created_by)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO campaign_templates (organization_id, name, message_body, variables, created_by, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		RETURNING `+campaignTemplateCols,
-		t.OrganizationID, t.Name, t.MessageBody, string(variablesJSON), t.CreatedBy))
+		t.OrganizationID, t.Name, t.MessageBody, string(variablesJSON), t.CreatedBy, uuid.New(), now))
 	return out, wrap("create campaign template", err)
 }
 
@@ -85,9 +87,9 @@ func (s *Store) CampaignTemplateByIDForOrg(ctx context.Context, id, orgID uuid.U
 // total — the Templates tab's Active/Archived toggle is a hard filter, not
 // an "all" view, so archived is a required bool rather than optional.
 // query, once trimmed, substring-matches the name case- and script-
-// insensitively (unicode_lower — see ListCustomers' own doc comment on why
-// SQLite's built-in ASCII-only lower() would silently miss every Cyrillic
-// template name); empty query matches everything.
+// insensitively (plain lower(), which internal/dbx makes Unicode-aware on
+// SQLite — see ListCustomers' own comment on why that matters for Cyrillic
+// template names); empty query matches everything.
 func (s *Store) ListCampaignTemplatesForOrg(ctx context.Context, orgID uuid.UUID, archived bool, query string, limit, offset int) ([]CampaignTemplate, int, error) {
 	search := ""
 	if q := strings.TrimSpace(query); q != "" {
@@ -95,7 +97,7 @@ func (s *Store) ListCampaignTemplatesForOrg(ctx context.Context, orgID uuid.UUID
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+campaignTemplateCols+`
 		FROM campaign_templates
-		WHERE organization_id = $1 AND is_archived = $2 AND ($3 = '' OR unicode_lower(name) LIKE $3)
+		WHERE organization_id = $1 AND is_archived = $2 AND ($3 = '' OR lower(name) LIKE $3)
 		ORDER BY updated_at DESC LIMIT $4 OFFSET $5`,
 		orgID, archived, search, limit, offset)
 	if err != nil {
@@ -115,7 +117,7 @@ func (s *Store) ListCampaignTemplatesForOrg(ctx context.Context, orgID uuid.UUID
 	}
 	var total int
 	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM campaign_templates
-		WHERE organization_id = $1 AND is_archived = $2 AND ($3 = '' OR unicode_lower(name) LIKE $3)`,
+		WHERE organization_id = $1 AND is_archived = $2 AND ($3 = '' OR lower(name) LIKE $3)`,
 		orgID, archived, search).Scan(&total)
 	return out, total, nil
 }
@@ -141,7 +143,7 @@ func (s *Store) UpdateCampaignTemplate(ctx context.Context, id uuid.UUID, p Camp
 		}
 		set("variables", string(vj))
 	}
-	sets = append(sets, "updated_at = xchats_now()")
+	set("updated_at", time.Now())
 
 	args = append(args, id)
 	q := `UPDATE campaign_templates SET ` + joinComma(sets) + ` WHERE id = $` + itoa(len(args)) + ` RETURNING ` + campaignTemplateCols
@@ -157,10 +159,12 @@ func (s *Store) UpdateCampaignTemplate(ctx context.Context, id uuid.UUID, p Camp
 // archiving an already-archived template (or restoring an already-active
 // one) is a no-op that still returns the current row, not an error.
 func (s *Store) SetCampaignTemplateArchived(ctx context.Context, id uuid.UUID, archived bool) (CampaignTemplate, error) {
+	now := time.Now()
+
 	out, err := scanCampaignTemplate(s.db.QueryRow(ctx, `
-		UPDATE campaign_templates SET is_archived = $2, updated_at = xchats_now()
+		UPDATE campaign_templates SET is_archived = $2, updated_at = $3
 		WHERE id = $1
-		RETURNING `+campaignTemplateCols, id, archived))
+		RETURNING `+campaignTemplateCols, id, archived, now))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return CampaignTemplate{}, ErrNotFound
 	}

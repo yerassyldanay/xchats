@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,22 +82,22 @@ func (s *Store) AutomationSettingsForAccounts(ctx context.Context, accountIDs []
 	if len(accountIDs) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT account_id, mode, wait_seconds_override, updated_at
-		FROM automation_settings
-		WHERE account_id IN (SELECT value FROM `+s.db.JSONValues("$1")+`)`, dbx.UUIDArray(accountIDs))
+	err := dbx.QueryInChunks(ctx, s.db, nil, accountIDs, func(list string) string {
+		return `SELECT account_id, mode, wait_seconds_override, updated_at
+			FROM automation_settings
+			WHERE account_id IN ` + list
+	}, func(rows *dbx.Rows) error {
+		var a AutomationSettings
+		if err := rows.Scan(&a.AccountID, &a.Mode, &a.WaitSecondsOverride, &a.UpdatedAt); err != nil {
+			return err
+		}
+		out[a.AccountID] = a
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var a AutomationSettings
-		if err := rows.Scan(&a.AccountID, &a.Mode, &a.WaitSecondsOverride, &a.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out[a.AccountID] = a
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // AutomationWindowsForAccounts bulk-loads schedule windows for the given
@@ -106,23 +107,23 @@ func (s *Store) AutomationWindowsForAccounts(ctx context.Context, accountIDs []u
 	if len(accountIDs) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT id, account_id, weekday, start_minute, end_minute
-		FROM automation_schedule_windows
-		WHERE account_id IN (SELECT value FROM `+s.db.JSONValues("$1")+`)
-		ORDER BY weekday, start_minute`, dbx.UUIDArray(accountIDs))
+	err := dbx.QueryInChunks(ctx, s.db, nil, accountIDs, func(list string) string {
+		return `SELECT id, account_id, weekday, start_minute, end_minute
+			FROM automation_schedule_windows
+			WHERE account_id IN ` + list + `
+			ORDER BY weekday, start_minute`
+	}, func(rows *dbx.Rows) error {
+		var w AutomationWindow
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.Weekday, &w.StartMinute, &w.EndMinute); err != nil {
+			return err
+		}
+		out[w.AccountID] = append(out[w.AccountID], w)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var w AutomationWindow
-		if err := rows.Scan(&w.ID, &w.AccountID, &w.Weekday, &w.StartMinute, &w.EndMinute); err != nil {
-			return nil, err
-		}
-		out[w.AccountID] = append(out[w.AccountID], w)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // AutomationWindowsForAccount returns one account's schedule windows.
@@ -145,6 +146,8 @@ func (s *Store) AutomationWindowsForAccount(ctx context.Context, accountID uuid.
 // mid-generation) is deliberately left alone here; its own mode and atomic
 // send rechecks are the defense-in-depth layer that catches it instead.
 func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, mode string, waitOverride *int, windows []AutomationWindowInput) (AutomationSettings, []AutomationWindow, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return AutomationSettings{}, nil, err
@@ -153,14 +156,14 @@ func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, 
 
 	var out AutomationSettings
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO automation_settings (account_id, mode, wait_seconds_override)
-		VALUES ($1, $2, $3)
+		INSERT INTO automation_settings (account_id, mode, wait_seconds_override, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
 		ON CONFLICT (account_id) DO UPDATE SET
 			mode = excluded.mode,
 			wait_seconds_override = excluded.wait_seconds_override,
-			updated_at = xchats_now()
+			updated_at = EXCLUDED.updated_at
 		RETURNING account_id, mode, wait_seconds_override, updated_at`,
-		accountID, mode, waitOverride).
+		accountID, mode, waitOverride, now).
 		Scan(&out.AccountID, &out.Mode, &out.WaitSecondsOverride, &out.UpdatedAt); err != nil {
 		return AutomationSettings{}, nil, wrap("upsert automation settings", err)
 	}
@@ -172,10 +175,10 @@ func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, 
 	for _, w := range windows {
 		var row AutomationWindow
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO automation_schedule_windows (account_id, weekday, start_minute, end_minute)
-			VALUES ($1, $2, $3, $4)
+			INSERT INTO automation_schedule_windows (account_id, weekday, start_minute, end_minute, id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id, account_id, weekday, start_minute, end_minute`,
-			accountID, w.Weekday, w.StartMinute, w.EndMinute).
+			accountID, w.Weekday, w.StartMinute, w.EndMinute, uuid.New(), now).
 			Scan(&row.ID, &row.AccountID, &row.Weekday, &row.StartMinute, &row.EndMinute); err != nil {
 			return AutomationSettings{}, nil, wrap("insert automation window", err)
 		}
@@ -205,17 +208,19 @@ func (s *Store) SetAutomationSettings(ctx context.Context, accountID uuid.UUID, 
 // once the caller has already confirmed the owning account's mode is not
 // "off" (internal/automation.Scheduler.OnInboundMessage does that check).
 func (s *Store) ArmDebounce(ctx context.Context, chatID, accountID uuid.UUID, channel string, deadline time.Time) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO automation_debounce_jobs (chat_id, account_id, channel, deadline_at, burst_version, status)
-		VALUES ($1, $2, $3, $4, 1, 'pending')
+		INSERT INTO automation_debounce_jobs (chat_id, account_id, channel, deadline_at, burst_version, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 1, 'pending', $5, $5)
 		ON CONFLICT (chat_id) DO UPDATE SET
 			account_id = excluded.account_id,
 			channel = excluded.channel,
 			deadline_at = excluded.deadline_at,
 			burst_version = automation_debounce_jobs.burst_version + 1,
 			status = 'pending',
-			updated_at = xchats_now()`,
-		chatID, accountID, channel, deadline)
+			updated_at = EXCLUDED.updated_at`,
+		chatID, accountID, channel, deadline, now)
 	return err
 }
 
@@ -260,14 +265,6 @@ func (s *Store) ClaimDueDispatchJobs(ctx context.Context, now time.Time, limit i
 		return nil, tx.Commit(ctx)
 	}
 
-	claimed, err := tx.Query(ctx, `
-		UPDATE automation_debounce_jobs SET status = 'claimed', updated_at = xchats_now()
-		WHERE status = 'pending' AND chat_id IN (SELECT value FROM `+s.db.JSONValues("$1")+`)
-		RETURNING chat_id, account_id, channel, burst_version`,
-		dbx.UUIDArray(ids))
-	if err != nil {
-		return nil, err
-	}
 	type dueDebounce struct {
 		chatID       uuid.UUID
 		accountID    uuid.UUID
@@ -275,30 +272,40 @@ func (s *Store) ClaimDueDispatchJobs(ctx context.Context, now time.Time, limit i
 		burstVersion int64
 	}
 	var due []dueDebounce
-	for claimed.Next() {
-		var d dueDebounce
-		if err := claimed.Scan(&d.chatID, &d.accountID, &d.channel, &d.burstVersion); err != nil {
+	for chunk := range slices.Chunk(ids, dbx.MaxInList) {
+		list, args := dbx.InList([]any{now}, chunk)
+		claimed, err := tx.Query(ctx, `
+			UPDATE automation_debounce_jobs SET status = 'claimed', updated_at = $1
+			WHERE status = 'pending' AND chat_id IN `+list+`
+			RETURNING chat_id, account_id, channel, burst_version`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for claimed.Next() {
+			var d dueDebounce
+			if err := claimed.Scan(&d.chatID, &d.accountID, &d.channel, &d.burstVersion); err != nil {
+				_ = claimed.Close()
+				return nil, err
+			}
+			due = append(due, d)
+		}
+		if err := claimed.Err(); err != nil {
 			_ = claimed.Close()
 			return nil, err
 		}
-		due = append(due, d)
-	}
-	if err := claimed.Err(); err != nil {
-		_ = claimed.Close()
-		return nil, err
-	}
-	if err := claimed.Close(); err != nil {
-		return nil, err
+		if err := claimed.Close(); err != nil {
+			return nil, err
+		}
 	}
 
 	out := make([]DispatchJob, 0, len(due))
 	for _, d := range due {
 		var j DispatchJob
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status)
-			VALUES ($1, $2, $3, $4, 'pending')
+			INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, 'pending', $5, $6, $6)
 			RETURNING id, chat_id, account_id, channel, burst_version, status, attempts, last_error`,
-			d.chatID, d.accountID, d.channel, d.burstVersion).
+			d.chatID, d.accountID, d.channel, d.burstVersion, uuid.New(), now).
 			Scan(&j.ID, &j.ChatID, &j.AccountID, &j.Channel, &j.BurstVersion, &j.Status, &j.Attempts, &j.LastError); err != nil {
 			return nil, wrap("promote debounce to dispatch job", err)
 		}
@@ -344,14 +351,16 @@ type DispatchJob struct {
 // rows. Scheduler promotion uses ClaimDueDispatchJobs so its claim and
 // insert are atomic.
 func (s *Store) CreateDispatchJob(ctx context.Context, chatID, accountID uuid.UUID, channel string, version int64) (uuid.UUID, error) {
+	now := time.Now()
+
 	var id uuid.UUID
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status)
-		VALUES ($1, $2, $3, $4, 'pending')
+		INSERT INTO automation_dispatch_jobs (chat_id, account_id, channel, burst_version, status, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'pending', $5, $6, $6)
 		ON CONFLICT (chat_id, burst_version) DO UPDATE SET
 			account_id = excluded.account_id,
 			channel = excluded.channel
-		RETURNING id`, chatID, accountID, channel, version).Scan(&id)
+		RETURNING id`, chatID, accountID, channel, version, uuid.New(), now).Scan(&id)
 	return id, err
 }
 
@@ -376,9 +385,11 @@ func (s *Store) DispatchJobByID(ctx context.Context, id uuid.UUID) (DispatchJob,
 // against, so a crash mid-generation is detectable and recoverable on the
 // next boot.
 func (s *Store) MarkDispatchProcessing(ctx context.Context, id uuid.UUID) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE automation_dispatch_jobs SET status = 'processing', updated_at = xchats_now()
-		WHERE id = $1`, id)
+		UPDATE automation_dispatch_jobs SET status = 'processing', updated_at = $2
+		WHERE id = $1`, id, now)
 	return err
 }
 
@@ -386,9 +397,11 @@ func (s *Store) MarkDispatchProcessing(ctx context.Context, id uuid.UUID) error 
 // from pending to processing. A duplicate queue delivery sees false and
 // exits without generating or sending a second response.
 func (s *Store) ClaimDispatchJob(ctx context.Context, id uuid.UUID) (bool, error) {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `
-		UPDATE automation_dispatch_jobs SET status = 'processing', updated_at = xchats_now()
-		WHERE id = $1 AND status = 'pending'`, id)
+		UPDATE automation_dispatch_jobs SET status = 'processing', updated_at = $2
+		WHERE id = $1 AND status = 'pending'`, id, now)
 	if err != nil {
 		return false, err
 	}
@@ -407,15 +420,17 @@ func (s *Store) DeleteDispatchJob(ctx context.Context, id uuid.UUID) error {
 // records the error, returning the new attempt count so the caller can
 // decide whether to give up (delete) or leave it for the next recovery pass.
 func (s *Store) RecordDispatchFailure(ctx context.Context, id uuid.UUID, cause string) (int, error) {
+	now := time.Now()
+
 	var attempts int
 	err := s.db.QueryRow(ctx, `
 		UPDATE automation_dispatch_jobs SET
 			attempts = attempts + 1,
 			last_error = $2,
 			status = 'pending',
-			updated_at = xchats_now()
+			updated_at = $3
 		WHERE id = $1
-		RETURNING attempts`, id, cause).Scan(&attempts)
+		RETURNING attempts`, id, cause, now).Scan(&attempts)
 	return attempts, err
 }
 
@@ -427,6 +442,8 @@ func (s *Store) RecordDispatchFailure(ctx context.Context, id uuid.UUID, cause s
 // before a worker starts. The worker still acquires final ownership through
 // ClaimDispatchJob.
 func (s *Store) RecoverableDispatchJobs(ctx context.Context, stuckSince time.Time, limit int) ([]DispatchJob, error) {
+	now := time.Now()
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -445,14 +462,14 @@ func (s *Store) RecoverableDispatchJobs(ctx context.Context, stuckSince time.Tim
 	}
 	rows, err := tx.Query(ctx, `
 		UPDATE automation_dispatch_jobs
-		SET updated_at = xchats_now()
+		SET updated_at = $3
 		WHERE id IN (
 			SELECT id FROM automation_dispatch_jobs
 			WHERE status = 'pending' AND updated_at <= $1
 			ORDER BY updated_at
 			LIMIT $2
 		)
-		RETURNING id, chat_id, account_id, channel, burst_version, status, attempts, last_error`, cutoff, limit)
+		RETURNING id, chat_id, account_id, channel, burst_version, status, attempts, last_error`, cutoff, limit, now)
 	if err != nil {
 		return nil, err
 	}
@@ -529,6 +546,8 @@ func (s *Store) WriteDraftSetIfVersionCurrent(ctx context.Context, channel strin
 // as though scheduled_auto had decided not to auto-send, never to retry or
 // surface a failure.
 func (s *Store) ClaimDraftForAutoSend(ctx context.Context, draftID, chatID, accountID uuid.UUID, expectedTrigger uuid.NullUUID) (Draft, bool, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Draft{}, false, err
@@ -583,9 +602,9 @@ func (s *Store) ClaimDraftForAutoSend(ctx context.Context, draftID, chatID, acco
 
 	var d Draft
 	cerr := tx.QueryRow(ctx, `
-		UPDATE ai_drafts SET draft_state='sent', updated_at=xchats_now()
+		UPDATE ai_drafts SET draft_state='sent', updated_at=$2
 		WHERE id = $1 AND draft_state='suggested'
-		RETURNING `+draftCols, draftID).Scan(scanDraftDst(&d)...)
+		RETURNING `+draftCols, draftID, now).Scan(scanDraftDst(&d)...)
 	if errors.Is(cerr, dbx.ErrNoRows) {
 		return Draft{}, false, tx.Commit(ctx) // lost the race to a manual approve
 	}
@@ -593,8 +612,8 @@ func (s *Store) ClaimDraftForAutoSend(ctx context.Context, draftID, chatID, acco
 		return Draft{}, false, cerr
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=xchats_now()
-		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, chatID, draftID); err != nil {
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=$3
+		WHERE chat_id = $1 AND id <> $2 AND draft_state='suggested'`, chatID, draftID, now); err != nil {
 		return Draft{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -610,6 +629,8 @@ func (s *Store) ClaimDraftForAutoSend(ctx context.Context, draftID, chatID, acco
 // the chat right after. sender_user_id is always NULL (an automated send
 // has no human sender).
 func (s *Store) InsertAutomationOutbound(ctx context.Context, channel string, chatID, accountID uuid.UUID, body, preview string) (uuid.UUID, error) {
+	now := time.Now()
+
 	msgTable, err := messagesTableFor(channel)
 	if err != nil {
 		return uuid.Nil, err
@@ -626,15 +647,15 @@ func (s *Store) InsertAutomationOutbound(ctx context.Context, channel string, ch
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO `+msgTable+`
-			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts)
-		VALUES ($1, $2, 'out', 'ai', NULL, 'conversation', $3, 'queued', 'app', xchats_now())
+			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts, id, created_at, updated_at)
+		VALUES ($1, $2, 'out', 'ai', NULL, 'conversation', $3, 'queued', 'app', $4, $5, $4, $4)
 		RETURNING id`,
-		accountID, chatID, body).Scan(&id); err != nil {
+		accountID, chatID, body, now, uuid.New()).Scan(&id); err != nil {
 		return uuid.Nil, wrap("insert automation outbound", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE `+chatTable+` SET last_message_at = xchats_now(), last_message_preview = $2, updated_at = xchats_now()
-		WHERE id = $1`, chatID, preview); err != nil {
+		UPDATE `+chatTable+` SET last_message_at = $3, last_message_preview = $2, updated_at = $3
+		WHERE id = $1`, chatID, preview, now); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}
 	return id, tx.Commit(ctx)

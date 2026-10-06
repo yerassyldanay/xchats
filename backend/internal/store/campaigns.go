@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -235,15 +236,17 @@ func scanCampaign(row dbx.Scanner) (Campaign, error) {
 // c.MessageBody (see backend/campaign.ExtractVariables), never taken from
 // the input struct.
 func (s *Store) CreateCampaign(ctx context.Context, c Campaign) (Campaign, error) {
+	now := time.Now()
+
 	variablesJSON, err := json.Marshal(purecampaign.ExtractVariables(c.MessageBody))
 	if err != nil {
 		return Campaign{}, wrap("marshal campaign variables", err)
 	}
 	out, err := scanCampaign(s.db.QueryRow(ctx, `
-		INSERT INTO campaigns (organization_id, name, account_id, channel, message_body, variables, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO campaigns (organization_id, name, account_id, channel, message_body, variables, created_by, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 		RETURNING `+campaignCols,
-		c.OrganizationID, c.Name, c.AccountID, c.Channel, c.MessageBody, string(variablesJSON), c.CreatedBy))
+		c.OrganizationID, c.Name, c.AccountID, c.Channel, c.MessageBody, string(variablesJSON), c.CreatedBy, uuid.New(), now))
 	return out, wrap("create campaign", err)
 }
 
@@ -387,7 +390,7 @@ func (s *Store) UpdateCampaign(ctx context.Context, id uuid.UUID, p CampaignPatc
 			sets = append(sets, "schedule_at = NULL")
 		}
 	}
-	sets = append(sets, "updated_at = xchats_now()")
+	set("updated_at", time.Now())
 
 	args = append(args, id)
 	q := `UPDATE campaigns SET ` + joinComma(sets) + ` WHERE id = $` + itoa(len(args)) + ` RETURNING ` + campaignCols
@@ -412,6 +415,8 @@ func (s *Store) UpdateCampaign(ctx context.Context, id uuid.UUID, p CampaignPatc
 // COALESCE leaves an existing value alone on a later paused->running resume),
 // and appends the campaign_events row, all in one transaction.
 func (s *Store) SetCampaignStatus(ctx context.Context, id uuid.UUID, to purecampaign.Status, actorUserID uuid.NullUUID, event string, detail map[string]any) (Campaign, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Campaign{}, err
@@ -429,11 +434,11 @@ func (s *Store) SetCampaignStatus(ctx context.Context, id uuid.UUID, to purecamp
 		return Campaign{}, ErrInvalidTransition
 	}
 
-	setClause := `status = $2, updated_at = xchats_now()`
+	setClause := `status = $2, updated_at = $3`
 	if to == purecampaign.StatusRunning {
-		setClause += `, started_at = COALESCE(started_at, xchats_now())`
+		setClause += `, started_at = COALESCE(started_at, $3)`
 	}
-	out, err := scanCampaign(tx.QueryRow(ctx, `UPDATE campaigns SET `+setClause+` WHERE id = $1 RETURNING `+campaignCols, id, string(to)))
+	out, err := scanCampaign(tx.QueryRow(ctx, `UPDATE campaigns SET `+setClause+` WHERE id = $1 RETURNING `+campaignCols, id, string(to), now))
 	if err != nil {
 		return Campaign{}, wrap("set campaign status", err)
 	}
@@ -448,6 +453,8 @@ func (s *Store) SetCampaignStatus(ctx context.Context, id uuid.UUID, to purecamp
 // recipients (status pending or failed — never sent or skipped) as fresh
 // pending rows with attempts reset to zero.
 func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.UUID) (Campaign, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Campaign{}, err
@@ -466,11 +473,11 @@ func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.U
 		return Campaign{}, wrap("marshal campaign variables", err)
 	}
 	out, err := scanCampaign(tx.QueryRow(ctx, `
-		INSERT INTO campaigns (organization_id, name, account_id, channel, message_body, variables, min_interval_seconds, jitter_seconds, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO campaigns (organization_id, name, account_id, channel, message_body, variables, min_interval_seconds, jitter_seconds, created_by, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
 		RETURNING `+campaignCols,
 		src.OrganizationID, src.Name+" (copy)", src.AccountID, src.Channel, src.MessageBody, string(variablesJSON),
-		src.MinIntervalSeconds, src.JitterSeconds, actorUserID))
+		src.MinIntervalSeconds, src.JitterSeconds, actorUserID, uuid.New(), now))
 	if err != nil {
 		return Campaign{}, wrap("duplicate campaign", err)
 	}
@@ -480,18 +487,43 @@ func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.U
 		return Campaign{}, err
 	}
 	for _, w := range srcWindows {
-		if _, err := tx.Exec(ctx, `INSERT INTO campaign_windows (campaign_id, weekday, start_minute, end_minute) VALUES ($1,$2,$3,$4)`,
-			out.ID, int(w.Weekday), w.StartMinute, w.EndMinute); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO campaign_windows (campaign_id, weekday, start_minute, end_minute, id, created_at) VALUES ($1,$2,$3,$4, $5, $6)`,
+			out.ID, int(w.Weekday), w.StartMinute, w.EndMinute, uuid.New(), now); err != nil {
 			return Campaign{}, wrap("copy campaign window", err)
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO campaign_recipients (campaign_id, normalized_identity, raw_input, name, attributes)
-		SELECT $1, normalized_identity, raw_input, name, attributes
-		FROM campaign_recipients WHERE campaign_id = $2 AND status IN ('pending','failed')`,
-		out.ID, srcID); err != nil {
-		return Campaign{}, wrap("copy never-contacted recipients", err)
+	// Each copy needs its own id, which Go supplies, so the rows are read and re-inserted
+	// rather than copied with one INSERT ... SELECT.
+	type recipientCopy struct{ identity, raw, name, attributes string }
+	var copies []recipientCopy
+	srcRecipients, err := tx.Query(ctx, `
+		SELECT normalized_identity, raw_input, name, attributes
+		FROM campaign_recipients WHERE campaign_id = $1 AND status IN ('pending','failed')
+		ORDER BY created_at, id`, srcID)
+	if err != nil {
+		return Campaign{}, wrap("read never-contacted recipients", err)
+	}
+	for srcRecipients.Next() {
+		var c recipientCopy
+		if err := srcRecipients.Scan(&c.identity, &c.raw, &c.name, &c.attributes); err != nil {
+			_ = srcRecipients.Close()
+			return Campaign{}, wrap("read never-contacted recipients", err)
+		}
+		copies = append(copies, c)
+	}
+	if err := srcRecipients.Err(); err != nil {
+		_ = srcRecipients.Close()
+		return Campaign{}, wrap("read never-contacted recipients", err)
+	}
+	_ = srcRecipients.Close()
+	for _, c := range copies {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO campaign_recipients (id, campaign_id, normalized_identity, raw_input, name, attributes, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+			uuid.New(), out.ID, c.identity, c.raw, c.name, c.attributes, now); err != nil {
+			return Campaign{}, wrap("copy never-contacted recipients", err)
+		}
 	}
 
 	if err := insertCampaignEvent(ctx, tx, out.ID, "duplicated",
@@ -507,6 +539,8 @@ func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.U
 // ---------------------------------------------------------------------------
 
 func insertCampaignEvent(ctx context.Context, q dbx.DBTX, campaignID uuid.UUID, event string, actorUserID uuid.NullUUID, detail map[string]any) error {
+	now := time.Now()
+
 	var actor any
 	if actorUserID.Valid {
 		actor = actorUserID.UUID
@@ -518,8 +552,8 @@ func insertCampaignEvent(ctx context.Context, q dbx.DBTX, campaignID uuid.UUID, 
 	if err != nil {
 		return wrap("marshal campaign event detail", err)
 	}
-	_, err = q.Exec(ctx, `INSERT INTO campaign_events (campaign_id, event, actor_user_id, detail) VALUES ($1,$2,$3,$4)`,
-		campaignID, event, actor, string(detailJSON))
+	_, err = q.Exec(ctx, `INSERT INTO campaign_events (campaign_id, event, actor_user_id, detail, id, created_at) VALUES ($1,$2,$3,$4, $5, $6)`,
+		campaignID, event, actor, string(detailJSON), uuid.New(), now)
 	return wrap("insert campaign event", err)
 }
 
@@ -591,6 +625,8 @@ func scanCampaignRecipient(row dbx.Scanner) (CampaignRecipient, error) {
 // on an already-contacted recipient is frozen). A duplicate identity within
 // rows itself keeps only the LAST occurrence.
 func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.UUID, rows []CampaignRecipientInput) error {
+	now := time.Now()
+
 	deduped := make(map[string]CampaignRecipientInput, len(rows))
 	order := make([]string, 0, len(rows))
 	for _, r := range rows {
@@ -606,12 +642,40 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM campaign_recipients
-		WHERE campaign_id = $1 AND status = 'pending'
-		  AND normalized_identity NOT IN (SELECT value FROM `+s.db.JSONValues("$2")+`)`,
-		campaignID, dbx.StringArray(order)); err != nil {
-		return wrap("prune campaign recipients", err)
+	// Prune the pending recipients that are no longer in the incoming set. The stale ids are
+	// worked out in Go from the campaign's current pending rows, so no statement carries a
+	// NOT IN list of every kept identity (which an empty incoming set would make invalid or
+	// never true).
+	pending, err := tx.Query(ctx, `
+		SELECT id, normalized_identity FROM campaign_recipients
+		WHERE campaign_id = $1 AND status = 'pending'`, campaignID)
+	if err != nil {
+		return wrap("list pending campaign recipients", err)
+	}
+	var stale []uuid.UUID
+	for pending.Next() {
+		var id uuid.UUID
+		var identity string
+		if err := pending.Scan(&id, &identity); err != nil {
+			_ = pending.Close()
+			return wrap("scan pending campaign recipient", err)
+		}
+		if _, keep := deduped[identity]; !keep {
+			stale = append(stale, id)
+		}
+	}
+	if err := pending.Err(); err != nil {
+		_ = pending.Close()
+		return wrap("list pending campaign recipients", err)
+	}
+	_ = pending.Close()
+	for chunk := range slices.Chunk(stale, dbx.MaxInList) {
+		list, args := dbx.InList([]any{campaignID}, chunk)
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM campaign_recipients
+			WHERE campaign_id = $1 AND status = 'pending' AND id IN `+list, args...); err != nil {
+			return wrap("prune campaign recipients", err)
+		}
 	}
 
 	for _, identity := range order {
@@ -621,13 +685,13 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 			return wrap("marshal recipient attributes", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO campaign_recipients (campaign_id, normalized_identity, raw_input, name, attributes)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO campaign_recipients (campaign_id, normalized_identity, raw_input, name, attributes, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 			ON CONFLICT (campaign_id, normalized_identity) DO UPDATE SET
 				raw_input = excluded.raw_input, name = excluded.name, attributes = excluded.attributes,
-				updated_at = xchats_now()
+				updated_at = EXCLUDED.updated_at
 			WHERE campaign_recipients.status = 'pending'`,
-			campaignID, identity, r.RawInput, r.Name, string(attrsJSON)); err != nil {
+			campaignID, identity, r.RawInput, r.Name, string(attrsJSON), uuid.New(), now); err != nil {
 			return wrap("upsert campaign recipient", err)
 		}
 	}
@@ -705,22 +769,38 @@ func (s *Store) CampaignRecipientCounts(ctx context.Context, campaignID uuid.UUI
 // 'failed' recipient back to 'pending' with attempts and backoff cleared —
 // a fresh, deliberate operator action starts the transient-retry ladder over.
 func (s *Store) RetryFailedRecipients(ctx context.Context, campaignID uuid.UUID, recipientIDs []uuid.UUID) (int, error) {
+	now := time.Now()
+
 	const setClause = `status = 'pending', failure_reason = '', attempts = 0, next_attempt_at = NULL,
-		updated_at = xchats_now()`
-	var tag dbx.CommandTag
-	var err error
+		updated_at = $2`
 	if len(recipientIDs) == 0 {
-		tag, err = s.db.Exec(ctx, `UPDATE campaign_recipients SET `+setClause+` WHERE campaign_id = $1 AND status = 'failed'`, campaignID)
-	} else {
-		tag, err = s.db.Exec(ctx, `
-			UPDATE campaign_recipients SET `+setClause+`
-			WHERE campaign_id = $1 AND status = 'failed' AND id IN (SELECT value FROM `+s.db.JSONValues("$2")+`)`,
-			campaignID, dbx.UUIDArray(recipientIDs))
+		tag, err := s.db.Exec(ctx, `UPDATE campaign_recipients SET `+setClause+` WHERE campaign_id = $1 AND status = 'failed'`, campaignID, now)
+		if err != nil {
+			return 0, wrap("retry failed campaign recipients", err)
+		}
+		return int(tag.RowsAffected()), nil
 	}
+	// One transaction, so a long id list split into several statements still resets all or none.
+	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, wrap("retry failed campaign recipients", err)
 	}
-	return int(tag.RowsAffected()), nil
+	defer func() { _ = tx.Rollback(ctx) }()
+	total := 0
+	for chunk := range slices.Chunk(recipientIDs, dbx.MaxInList) {
+		list, args := dbx.InList([]any{campaignID, now}, chunk)
+		tag, err := tx.Exec(ctx, `
+			UPDATE campaign_recipients SET `+setClause+`
+			WHERE campaign_id = $1 AND status = 'failed' AND id IN `+list, args...)
+		if err != nil {
+			return 0, wrap("retry failed campaign recipients", err)
+		}
+		total += int(tag.RowsAffected())
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, wrap("retry failed campaign recipients", err)
+	}
+	return total, nil
 }
 
 // SuppressPendingForIdentity marks every still-pending campaign_recipients
@@ -739,11 +819,13 @@ func (s *Store) SuppressPendingForIdentity(ctx context.Context, accountID uuid.U
 // suppression it triggers commit atomically together, rather than as two
 // separate round trips a crash between them could split.
 func suppressPendingForIdentity(ctx context.Context, q dbx.DBTX, accountID uuid.UUID, identity, reason string) (int, error) {
+	now := time.Now()
+
 	tag, err := q.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'skipped', failure_reason = $3, updated_at = xchats_now()
+		UPDATE campaign_recipients SET status = 'skipped', failure_reason = $3, updated_at = $4
 		WHERE status = 'pending' AND normalized_identity = $2
 		  AND campaign_id IN (SELECT id FROM campaigns WHERE account_id = $1 AND status = 'running')`,
-		accountID, identity, reason)
+		accountID, identity, reason, now)
 	if err != nil {
 		return 0, wrap("suppress pending campaign recipients", err)
 	}
@@ -787,12 +869,14 @@ func scanCampaignWindowRows(rows *dbx.Rows) ([]CampaignWindow, error) {
 }
 
 func replaceCampaignWindowsTx(ctx context.Context, tx dbx.DBTX, campaignID uuid.UUID, windows []CampaignWindowInput) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `DELETE FROM campaign_windows WHERE campaign_id = $1`, campaignID); err != nil {
 		return wrap("clear campaign windows", err)
 	}
 	for _, w := range windows {
-		if _, err := tx.Exec(ctx, `INSERT INTO campaign_windows (campaign_id, weekday, start_minute, end_minute) VALUES ($1,$2,$3,$4)`,
-			campaignID, w.Weekday, w.StartMinute, w.EndMinute); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO campaign_windows (campaign_id, weekday, start_minute, end_minute, id, created_at) VALUES ($1,$2,$3,$4, $5, $6)`,
+			campaignID, w.Weekday, w.StartMinute, w.EndMinute, uuid.New(), now); err != nil {
 			return wrap("insert campaign window", err)
 		}
 	}
@@ -902,6 +986,8 @@ func (s *Store) CampaignAccountLimitsFor(ctx context.Context, accountID uuid.UUI
 // always a complete replace (delete-and-reinsert), matching
 // SetAutomationSettings' own "one save = the whole schedule" shape.
 func (s *Store) SetCampaignAccountLimits(ctx context.Context, accountID uuid.UUID, settings CampaignAccountSettingsInput, tiers []purecampaign.Tier, windows []CampaignWindowInput) (CampaignAccountSettings, []purecampaign.Tier, []CampaignWindow, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return CampaignAccountSettings{}, nil, nil, err
@@ -910,14 +996,14 @@ func (s *Store) SetCampaignAccountLimits(ctx context.Context, accountID uuid.UUI
 
 	var out CampaignAccountSettings
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaign_account_settings (account_id, limit_mode, min_interval_seconds, jitter_seconds, paused)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO campaign_account_settings (account_id, limit_mode, min_interval_seconds, jitter_seconds, paused, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
 		ON CONFLICT (account_id) DO UPDATE SET
 			limit_mode = excluded.limit_mode, min_interval_seconds = excluded.min_interval_seconds,
 			jitter_seconds = excluded.jitter_seconds, paused = excluded.paused,
-			updated_at = xchats_now()
+			updated_at = EXCLUDED.updated_at
 		RETURNING account_id, limit_mode, min_interval_seconds, jitter_seconds, paused, updated_at`,
-		accountID, settings.LimitMode, settings.MinIntervalSeconds, settings.JitterSeconds, settings.Paused).
+		accountID, settings.LimitMode, settings.MinIntervalSeconds, settings.JitterSeconds, settings.Paused, now).
 		Scan(&out.AccountID, &out.LimitMode, &out.MinIntervalSeconds, &out.JitterSeconds, &out.Paused, &out.UpdatedAt); err != nil {
 		return CampaignAccountSettings{}, nil, nil, wrap("upsert campaign account settings", err)
 	}
@@ -927,8 +1013,8 @@ func (s *Store) SetCampaignAccountLimits(ctx context.Context, accountID uuid.UUI
 	}
 	tiersOut := make([]purecampaign.Tier, 0, len(tiers))
 	for _, t := range tiers {
-		if _, err := tx.Exec(ctx, `INSERT INTO campaign_account_limits (account_id, window_seconds, max_sends) VALUES ($1,$2,$3)`,
-			accountID, t.WindowSeconds, t.MaxSends); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO campaign_account_limits (account_id, window_seconds, max_sends, created_at, updated_at) VALUES ($1,$2,$3, $4, $4)`,
+			accountID, t.WindowSeconds, t.MaxSends, now); err != nil {
 			return CampaignAccountSettings{}, nil, nil, wrap("insert campaign account limit", err)
 		}
 		tiersOut = append(tiersOut, t)
@@ -941,9 +1027,9 @@ func (s *Store) SetCampaignAccountLimits(ctx context.Context, accountID uuid.UUI
 	for _, w := range windows {
 		var row CampaignWindow
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO campaign_account_windows (account_id, weekday, start_minute, end_minute)
-			VALUES ($1,$2,$3,$4) RETURNING id, weekday, start_minute, end_minute`,
-			accountID, w.Weekday, w.StartMinute, w.EndMinute).
+			INSERT INTO campaign_account_windows (account_id, weekday, start_minute, end_minute, id, created_at)
+			VALUES ($1,$2,$3,$4, $5, $6) RETURNING id, weekday, start_minute, end_minute`,
+			accountID, w.Weekday, w.StartMinute, w.EndMinute, uuid.New(), now).
 			Scan(&row.ID, &row.Weekday, &row.StartMinute, &row.EndMinute); err != nil {
 			return CampaignAccountSettings{}, nil, nil, wrap("insert campaign account window", err)
 		}
@@ -1243,15 +1329,15 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 	// enforce.
 	var logID uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO campaign_send_log (account_id, campaign_id, recipient_id, outcome, attempted_at)
-		VALUES ($1, $2, $3, 'failed', $4) RETURNING id`,
-		accountID, chosen.campaignID, chosen.recipientID, now).Scan(&logID); err != nil {
+		INSERT INTO campaign_send_log (account_id, campaign_id, recipient_id, outcome, attempted_at, id)
+		VALUES ($1, $2, $3, 'failed', $4, $5) RETURNING id`,
+		accountID, chosen.campaignID, chosen.recipientID, now, uuid.New()).Scan(&logID); err != nil {
 		return Claim{}, false, wrap("insert campaign send log", err)
 	}
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'sending', attempts = attempts + 1, updated_at = xchats_now()
-		WHERE id = $1 AND status = 'pending'`, chosen.recipientID)
+		UPDATE campaign_recipients SET status = 'sending', attempts = attempts + 1, updated_at = $2
+		WHERE id = $1 AND status = 'pending'`, chosen.recipientID, now)
 	if err != nil {
 		return Claim{}, false, wrap("claim campaign recipient", err)
 	}
@@ -1277,6 +1363,8 @@ func (s *Store) ClaimNextRecipient(ctx context.Context, accountID uuid.UUID, now
 // non-sent disposition genuinely IS a failed attempt regardless of whether
 // the recipient itself will be retried.
 func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) error {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -1300,9 +1388,9 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 		UPDATE campaign_recipients SET
 			status = $2, failure_reason = $3,
 			chat_id = COALESCE($4, chat_id), message_id = COALESCE($5, message_id),
-			next_attempt_at = $6, updated_at = xchats_now()
+			next_attempt_at = $6, updated_at = $7
 		WHERE id = $1`,
-		p.RecipientID, string(p.NewStatus), p.FailureReason, chatArg, msgArg, p.NextAttemptAt); err != nil {
+		p.RecipientID, string(p.NewStatus), p.FailureReason, chatArg, msgArg, p.NextAttemptAt, now); err != nil {
 		return wrap("finalize campaign recipient", err)
 	}
 	return tx.Commit(ctx)
@@ -1315,9 +1403,11 @@ func (s *Store) FinalizeAttempt(ctx context.Context, p FinalizeAttemptParams) er
 // NEVER retried automatically: a duplicate send is worse than a missed one.
 // Called once at the campaign Scheduler's boot.
 func (s *Store) ReconcileStuckSending(ctx context.Context) (int, error) {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `
-		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = xchats_now()
-		WHERE status = 'sending'`, "interrupted — delivery unknown")
+		UPDATE campaign_recipients SET status = 'failed', failure_reason = $1, updated_at = $2
+		WHERE status = 'sending'`, "interrupted — delivery unknown", now)
 	if err != nil {
 		return 0, wrap("reconcile stuck campaign sends", err)
 	}
@@ -1418,6 +1508,8 @@ func scanUUIDRows(rows *dbx.Rows) ([]uuid.UUID, error) {
 // operator pressing "Pause" on every one of them, so resuming later is the
 // normal per-campaign resume action.
 func (s *Store) AutoPauseCampaignsForAccount(ctx context.Context, accountID uuid.UUID, reason string) (int, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -1436,7 +1528,7 @@ func (s *Store) AutoPauseCampaignsForAccount(ctx context.Context, accountID uuid
 
 	detail := map[string]any{"reason": reason}
 	for _, id := range ids {
-		if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'paused', updated_at = xchats_now() WHERE id = $1`, id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'paused', updated_at = $2 WHERE id = $1`, id, now); err != nil {
 			return 0, wrap("auto-pause campaign", err)
 		}
 		if err := insertCampaignEvent(ctx, tx, id, "auto_paused", uuid.NullUUID{}, detail); err != nil {
@@ -1482,29 +1574,46 @@ func (s *Store) ExistingChatForIdentity(ctx context.Context, accountID uuid.UUID
 // trip per row. Returns the subset of identities with NO existing chat on
 // accountID; identities absent from the result ARE reachable.
 func (s *Store) UnreachableForWarmChannel(ctx context.Context, accountID uuid.UUID, identities []string) (map[string]bool, error) {
+	out := map[string]bool{}
 	if len(identities) == 0 {
-		return map[string]bool{}, nil
+		return out, nil
 	}
-	rows, err := s.db.Query(ctx, `
-		SELECT v.value FROM `+s.db.JSONValues("$2")+` v
-		WHERE NOT EXISTS (
-			SELECT 1 FROM inbox_chats_v c
-			WHERE c.account_id = $1
-			  AND (c.external_conversation_ref = v.value OR c.external_contact_ref = v.value OR c.contact_phone_number = v.value)
-		)`, accountID, dbx.StringArray(identities))
+	want := make(map[string]bool, len(identities))
+	for _, id := range identities {
+		want[id] = true
+	}
+	// Which of the identities already have a chat on the account, by any of the three refs a
+	// chat can be found by. The same placeholder list serves all three IN clauses; the answer
+	// is the input minus what matched, worked out here rather than in SQL.
+	reachable := make(map[string]bool, len(identities))
+	err := dbx.QueryInChunks(ctx, s.db, []any{accountID}, identities, func(list string) string {
+		return `SELECT external_conversation_ref, external_contact_ref, contact_phone_number
+			FROM inbox_chats_v
+			WHERE account_id = $1
+			  AND (external_conversation_ref IN ` + list + `
+			    OR external_contact_ref IN ` + list + `
+			    OR contact_phone_number IN ` + list + `)`
+	}, func(rows *dbx.Rows) error {
+		var conversation, contact, phone *string
+		if err := rows.Scan(&conversation, &contact, &phone); err != nil {
+			return err
+		}
+		for _, ref := range []*string{conversation, contact, phone} {
+			if ref != nil && want[*ref] {
+				reachable[*ref] = true
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	out := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+	for _, id := range identities {
+		if !reachable[id] {
+			out[id] = true
 		}
-		out[id] = true
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // MarkChatCampaignOnly flags a freshly cold-send-created chat as
@@ -1516,11 +1625,13 @@ func (s *Store) UnreachableForWarmChannel(ctx context.Context, accountID uuid.UU
 // an EXISTING chat a warm-only channel campaign reuses already has its own
 // real chat_state and must never be touched.
 func (s *Store) MarkChatCampaignOnly(ctx context.Context, channel string, chatID uuid.UUID) error {
+	now := time.Now()
+
 	table, err := chatsTableFor(channel)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(ctx, `UPDATE `+table+` SET chat_state = 'campaign', updated_at = xchats_now() WHERE id = $1`, chatID)
+	_, err = s.db.Exec(ctx, `UPDATE `+table+` SET chat_state = 'campaign', updated_at = $2 WHERE id = $1`, chatID, now)
 	return wrap("mark chat campaign-only", err)
 }
 
@@ -1531,6 +1642,8 @@ func (s *Store) MarkChatCampaignOnly(ctx context.Context, channel string, chatID
 // the conversation, so the badge must stay exactly as an operator would see
 // it if they opened the chat right after.
 func (s *Store) InsertCampaignOutbound(ctx context.Context, channel string, chatID, accountID uuid.UUID, body, preview string) (uuid.UUID, error) {
+	now := time.Now()
+
 	msgTable, err := messagesTableFor(channel)
 	if err != nil {
 		return uuid.Nil, err
@@ -1547,15 +1660,15 @@ func (s *Store) InsertCampaignOutbound(ctx context.Context, channel string, chat
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO `+msgTable+`
-			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts)
-		VALUES ($1, $2, 'out', 'campaign', NULL, 'conversation', $3, 'queued', 'app', xchats_now())
+			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts, id, created_at, updated_at)
+		VALUES ($1, $2, 'out', 'campaign', NULL, 'conversation', $3, 'queued', 'app', $4, $5, $4, $4)
 		RETURNING id`,
-		accountID, chatID, body).Scan(&id); err != nil {
+		accountID, chatID, body, now, uuid.New()).Scan(&id); err != nil {
 		return uuid.Nil, wrap("insert campaign outbound", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE `+chatTable+` SET last_message_at = xchats_now(), last_message_preview = $2, updated_at = xchats_now()
-		WHERE id = $1`, chatID, preview); err != nil {
+		UPDATE `+chatTable+` SET last_message_at = $3, last_message_preview = $2, updated_at = $3
+		WHERE id = $1`, chatID, preview, now); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}
 	return id, tx.Commit(ctx)

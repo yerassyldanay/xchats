@@ -13,6 +13,7 @@ import (
 // SeedDemoCRM inserts demo CRM customers, notes, tags, follow-ups, campaign templates,
 // and simulator campaigns. Idempotent: safe to run multiple times.
 func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) error {
+	now := time.Now().UTC()
 	var count int
 	if err := s.db.QueryRow(ctx, `SELECT COUNT(*) FROM crm_customers WHERE organization_id = $1`, orgID).Scan(&count); err != nil {
 		return err
@@ -160,9 +161,9 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 			// and replaces the placeholder with the real transport contact id.
 			contactID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("xchats-demo-contact:"+cd.Channel+":"+cd.ExtID))
 			if _, err := s.db.Exec(ctx, `
-				INSERT INTO crm_customer_identities (organization_id, customer_id, channel, account_id, contact_id, external_id, username, phone, display_name)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-				orgID, cust.ID, cd.Channel, accountID, contactID, cd.ExtID, cd.Username, cd.Phone, cd.Name); err != nil {
+				INSERT INTO crm_customer_identities (organization_id, customer_id, channel, account_id, contact_id, external_id, username, phone, display_name, id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+				orgID, cust.ID, cd.Channel, accountID, contactID, cd.ExtID, cd.Username, cd.Phone, cd.Name, uuid.New(), now); err != nil {
 				return fmt.Errorf("seed identity for %s: %w", cd.Name, err)
 			}
 		}
@@ -170,7 +171,6 @@ func (s *Store) SeedDemoCRM(ctx context.Context, orgID, adminUserID uuid.UUID) e
 	}
 
 	// 3. Follow-ups
-	now := time.Now().UTC()
 	type demoFollowup struct {
 		CustIdx   int
 		Action    string
