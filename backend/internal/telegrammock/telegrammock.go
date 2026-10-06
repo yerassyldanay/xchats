@@ -25,8 +25,14 @@ import (
 // steady state this hermetic profiling harness runs in (inbound Telegram
 // traffic is out of scope for the load mix; WhatsApp's debug/wa-event route
 // covers inbound-message profiling instead).
+//
+// Message ids start from the clock rather than the Fake's fixed 9001: mock
+// mode keeps its database across restarts, and tg_messages is unique on
+// (chat_id, telegram_message_id), so a restarted process must not reuse the
+// ids an earlier one already stored for the same chat.
 func New(botID int64, username string) *telegram.Fake {
 	f := telegram.NewFake(botID, username)
+	f.MessageIDBase = time.Now().UnixMilli()
 	f.GetUpdatesFn = func(ctx context.Context, token string, req telegram.GetUpdatesRequest) ([]telegram.RawUpdate, error) {
 		timeout := time.Duration(req.TimeoutSeconds) * time.Second
 		if timeout <= 0 {

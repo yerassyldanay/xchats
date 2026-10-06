@@ -66,3 +66,23 @@ func TestGetUpdates_ZeroTimeoutStillWaits(t *testing.T) {
 func TestNewSatisfiesTelegramClient(t *testing.T) {
 	var _ telegram.Client = New(1, "mockbot")
 }
+
+// Mock mode keeps its database across restarts, and tg_messages is unique on
+// (chat_id, telegram_message_id): a mock that restarted its ids at 9001 on
+// every process start collided with the sends an earlier process had stored.
+func TestNewMessageIDsDoNotRepeatAcrossRestarts(t *testing.T) {
+	first := New(1, "mockbot")
+	a, err := first.SendMessage(context.Background(), "1:token", 42, "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	second := New(1, "mockbot")
+	b, err := second.SendMessage(context.Background(), "1:token", 42, "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.MessageID == b.MessageID {
+		t.Fatalf("both mock instances answered message id %d", a.MessageID)
+	}
+}
