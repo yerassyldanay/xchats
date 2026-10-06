@@ -2,6 +2,7 @@ package dbx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -132,5 +133,74 @@ func TestInListChunksOverMaxInList(t *testing.T) {
 	}
 	if total != len(ids) {
 		t.Errorf("chunks matched %d rows, want %d", total, len(ids))
+	}
+}
+
+// QueryInChunks is the read-side of the chunking idiom: one statement per
+// MaxInList-sized chunk, each chunk's rows closed before the next statement runs
+// (SQLite's single connection would otherwise deadlock on the second query).
+func TestQueryInChunksRunsOncePerChunkAndClosesRows(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `CREATE TABLE t (id TEXT PRIMARY KEY, org TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i := 0; i < 2*MaxInList+3; i++ {
+		id := fmt.Sprintf("id-%04d", i)
+		ids = append(ids, id)
+		org := "o1"
+		if i%10 == 0 {
+			org = "o2"
+		}
+		if _, err := db.Exec(ctx, `INSERT INTO t (id, org) VALUES ($1, $2)`, id, org); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	statements := 0
+	var got []string
+	err := QueryInChunks(ctx, db, []any{"o1"}, ids, func(list string) string {
+		statements++
+		return `SELECT id FROM t WHERE org = $1 AND id IN ` + list
+	}, func(rows *Rows) error {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		got = append(got, id)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statements != 3 {
+		t.Errorf("ran %d statements for %d values, want 3 chunks of at most %d", statements, len(ids), MaxInList)
+	}
+	want := 0
+	for i := range ids {
+		if i%10 != 0 {
+			want++
+		}
+	}
+	if len(got) != want {
+		t.Errorf("scanned %d rows, want %d (the o1 rows across every chunk)", len(got), want)
+	}
+
+	calls := 0
+	if err := QueryInChunks(ctx, db, nil, []string(nil), func(string) string { calls++; return "" }, nil); err != nil || calls != 0 {
+		t.Errorf("empty values ran %d statements (err %v), want none", calls, err)
+	}
+
+	boom := errors.New("scan failed")
+	err = QueryInChunks(ctx, db, nil, ids[:5], func(list string) string { return `SELECT id FROM t WHERE id IN ` + list },
+		func(*Rows) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Errorf("scan error not returned: %v", err)
+	}
+	// The failed chunk's rows were closed: the single connection is free for the next statement.
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM t`).Scan(&n); err != nil || n != len(ids) {
+		t.Errorf("connection unusable after a failed chunk: n=%d err=%v", n, err)
 	}
 }

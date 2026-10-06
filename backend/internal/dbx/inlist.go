@@ -1,6 +1,8 @@
 package dbx
 
 import (
+	"context"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -43,4 +45,33 @@ func InList[T any](args []any, values []T) (string, []any) {
 	}
 	b.WriteByte(')')
 	return b.String(), out
+}
+
+// QueryInChunks runs a read query once per MaxInList-sized chunk of values, so an
+// unbounded id list never overflows one statement's placeholder list. build wraps the
+// chunk's "($n, $n+1, ...)" list (numbered after prior, the arguments the statement
+// binds before it) into the statement text, and scan is called for every returned row.
+// Each chunk's rows are closed before the next chunk runs, which SQLite's single
+// connection requires. No values means no statement.
+func QueryInChunks[T any](ctx context.Context, q DBTX, prior []any, values []T,
+	build func(list string) string, scan func(rows *Rows) error) error {
+	for chunk := range slices.Chunk(values, MaxInList) {
+		list, args := InList(prior, chunk)
+		if err := func() error {
+			rows, err := q.Query(ctx, build(list), args...)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = rows.Close() }()
+			for rows.Next() {
+				if err := scan(rows); err != nil {
+					return err
+				}
+			}
+			return rows.Err()
+		}(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
