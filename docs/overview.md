@@ -121,7 +121,7 @@ xchats/
 ├── backend/            # Go modular monolith (handlers, services, DB migrations)
 │   ├── cmd/xchats/     # CLI commands and server entrypoint
 │   ├── internal/       # Core domain packages (channels, brain, store, httpapi)
-│   └── migrations/     # SQLite database migrations
+│   └── migrations/     # Timestamped SQL migrations shared by SQLite and PostgreSQL
 ├── frontend/           # Vue 3 SPA (Tailwind CSS, Pinia, Vue Router)
 │   ├── src/components/ # Reusable UI components (inbox, channels, CRM, simulator)
 │   └── src/views/      # Top-level route views
