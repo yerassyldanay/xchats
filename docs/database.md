@@ -209,7 +209,20 @@ TEST_DATABASE_URL='postgres://xchats:password@localhost:5432/xchats_test?sslmode
 ```
 
 The PostgreSQL test role needs `CREATE SCHEMA`, `DROP SCHEMA`, and `citext` installed
-in `public` (or permission to install it). PostgreSQL is explicit in CI; SQLite tests
-need no service. Tests cover schema parity, constraints/cascades, baseline replay,
-checksum rejection, late arrivals, transaction rollback, concurrent runners, and
-application persistence behavior.
+in `public` (or permission to install it). `make test-postgres` runs the whole backend
+suite, every package, on PostgreSQL, including the seeded composition-root test in
+`cmd/xchats`; SQLite tests need no service. The default CI job runs the SQLite suite
+only, so run `make test-postgres` before changing persistence code. Tests cover schema
+parity, constraints/cascades, replay, checksum rejection, late arrivals, transaction
+rollback, concurrent runners, template rendering, and application persistence behavior.
+
+For a manual end-to-end check on either engine, seed the demo data and serve it in
+mock-externals mode (no real credentials needed):
+
+```sh
+cd backend
+export MOCK_EXTERNALS=true XCHATS_ALLOW_FILE_CREDENTIALS=1 ENVIRONMENT=development
+go run ./cmd/xchats migrate && go run ./cmd/xchats seed && go run ./cmd/xchats serve
+```
+
+Set `DATABASE_URL` first to run the same flow on PostgreSQL.

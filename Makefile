@@ -187,6 +187,6 @@ ruleset-apply: ## Apply .github/rulesets/*.json to the repo via the GitHub API (
 migration-new: ## Create one UTC-timestamped migration shared by SQLite and PostgreSQL (make migration-new NAME=contacts_index)
 	cd $(BACKEND) && go run ./cmd/migration $(NAME)
 
-test-postgres: ## Run persistence and HTTP tests against an isolated schema per test (set TEST_DATABASE_URL)
+test-postgres: ## Run the whole backend suite on PostgreSQL, an isolated schema per test (set TEST_DATABASE_URL)
 	@test -n "$$TEST_DATABASE_URL" || (echo 'Set TEST_DATABASE_URL to a disposable PostgreSQL database'; exit 1)
-	cd $(BACKEND) && go test -race -count=1 -timeout=30m ./internal/dbtest ./internal/store ./internal/kbstore ./internal/responsestore ./internal/mcpauth ./internal/chatstore ./internal/httpapi ./internal/whatsmeow
+	cd $(BACKEND) && go test -race -count=1 -timeout=45m ./...

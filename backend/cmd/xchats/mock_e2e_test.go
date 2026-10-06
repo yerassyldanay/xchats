@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
@@ -65,7 +66,12 @@ func mockE2EConfig(t *testing.T) *config.Config {
 		t.Fatalf("config.Load: %v", err)
 	}
 	cfg.System.MockExternals = true
-	cfg.Storage.DBPath = filepath.Join(dir, "xchats.db")
+	// dbtest.Target is a local SQLite file, or an isolated PostgreSQL schema
+	// when TEST_DATABASE_URL is set, so this seeded composition-root test runs
+	// against whichever engine is under test. Storage.Database() then returns
+	// it, and DeviceDatabase() follows it onto PostgreSQL.
+	cfg.Storage.DatabaseURL = ""
+	cfg.Storage.DBPath = dbtest.Target(t)
 	cfg.Storage.WADeviceDBPath = filepath.Join(dir, "whatsmeow.db")
 	cfg.Storage.BlobDir = filepath.Join(dir, "blobdata")
 	return cfg
