@@ -21,16 +21,22 @@ var migrationName = regexp.MustCompile(`^([0-9]{14})_[a-z][a-z0-9_]*\.sql$`)
 // deleting history while leaving its schema behind.
 type MigrationOptions struct{ Force string }
 
+// migration is one shared file. body is the file rendered for the open
+// database's dialect (see RenderMigration); checksum is the SHA-256 of the
+// unrendered source, so one recorded checksum means the same on every engine.
 type migration struct{ id, body, checksum string }
 
 // RunMigrations applies every unrecorded identifier, including files older than
 // the newest applied one. The full timestamp AND description are the identity.
+// The files are shared by every dialect: each is rendered for db's engine
+// before anything is applied, so a file that does not render fails the run
+// without applying any earlier file.
 func RunMigrations(ctx context.Context, db *DB, mfs fs.FS) error {
 	return RunMigrationsWithOptions(ctx, db, mfs, MigrationOptions{})
 }
 
 func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts MigrationOptions) error {
-	files, err := loadMigrations(mfs)
+	files, err := loadMigrations(mfs, db.Dialect())
 	if err != nil {
 		return err
 	}
@@ -67,7 +73,7 @@ func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts Migra
 	return nil
 }
 
-func loadMigrations(mfs fs.FS) ([]migration, error) {
+func loadMigrations(mfs fs.FS, d Dialect) ([]migration, error) {
 	entries, err := fs.ReadDir(mfs, ".")
 	if err != nil {
 		return nil, fmt.Errorf("dbx: read migrations: %w", err)
@@ -91,7 +97,14 @@ func loadMigrations(mfs fs.FS) ([]migration, error) {
 		if strings.TrimSpace(string(b)) == "" {
 			return nil, fmt.Errorf("dbx: empty migration %s", e.Name())
 		}
-		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), string(b), fmt.Sprintf("%x", sha256.Sum256(b))})
+		// A blank render is legitimate: every statement sits in an engine block
+		// for the other dialect. It is still recorded so identifiers match
+		// across engines.
+		body, err := RenderMigration(d, e.Name(), string(b))
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), body, fmt.Sprintf("%x", sha256.Sum256(b))})
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("dbx: no SQL migrations found")
@@ -119,8 +132,10 @@ func applyMigration(ctx context.Context, db *DB, m migration, force bool) error 
 	}
 	// No statement splitting: drivers understand complete scripts, including
 	// quoted semicolons and PostgreSQL dollar-quoted function bodies.
-	if _, err := tx.Exec(ctx, m.body); err != nil {
-		return fmt.Errorf("dbx: apply migration %s: %w", m.id, err)
+	if strings.TrimSpace(m.body) != "" {
+		if _, err := tx.Exec(ctx, m.body); err != nil {
+			return fmt.Errorf("dbx: apply migration %s: %w", m.id, err)
+		}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (identifier, checksum, applied_at) VALUES ($1,$2,$3)
  ON CONFLICT (identifier) DO UPDATE SET checksum=excluded.checksum, applied_at=excluded.applied_at`,

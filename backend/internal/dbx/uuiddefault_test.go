@@ -8,14 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// uuidV4DefaultExpr is the SQLite column-default expression the sqlite
-// migrations use everywhere a Postgres uuid_generate_v4() default stood, so
-// "INSERT ... RETURNING id" sites that omit id stay untouched (see the
-// per-PG-ism translation table). It must stay byte-for-byte identical to
-// the one pasted into every migrations/sqlite/*.up.sql file — this test is
-// what pins the expression's correctness (valid UUIDv4: version nibble '4',
-// variant nibble one of 8/9/a/b) before it's trusted in DDL.
-const uuidV4DefaultExpr = `(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1,1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))))`
+// The SQLite UUIDv4 column default is sqliteUUIDv4Expr (render.go), what the
+// {{uuid}} migration macro expands to on SQLite. These tests pin its
+// correctness: a valid UUIDv4 (version nibble '4', variant nibble one of
+// 8/9/a/b) and no duplicates, before it is trusted in DDL.
 
 var uuidV4RE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -23,7 +19,7 @@ func TestUUIDv4DefaultExpression(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	if _, err := db.Exec(ctx, `CREATE TABLE t (id TEXT PRIMARY KEY DEFAULT `+uuidV4DefaultExpr+`)`); err != nil {
+	if _, err := db.Exec(ctx, `CREATE TABLE t (id TEXT PRIMARY KEY DEFAULT `+sqliteUUIDv4Expr+`)`); err != nil {
 		t.Fatalf("create table with UUIDv4 default: %v", err)
 	}
 
@@ -67,16 +63,15 @@ func TestUUIDv4DefaultExpression(t *testing.T) {
 	}
 }
 
-// TestUUIDv4DefaultOmittedOnInsert pins the exact call-site pattern the
-// translation table promises: an INSERT that binds every column except id,
-// then RETURNING id, works unchanged (matching Postgres's
-// "id uuid PRIMARY KEY DEFAULT uuid_generate_v4()" + "RETURNING id" shape).
+// TestUUIDv4DefaultOmittedOnInsert pins the call-site pattern both engines
+// share: an INSERT that binds every column except id, then RETURNING id (on
+// PostgreSQL the same default is gen_random_uuid()::text).
 func TestUUIDv4DefaultOmittedOnInsert(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
 	if _, err := db.Exec(ctx, `CREATE TABLE orgs (
-		id   TEXT PRIMARY KEY DEFAULT `+uuidV4DefaultExpr+`,
+		id   TEXT PRIMARY KEY DEFAULT `+sqliteUUIDv4Expr+`,
 		name TEXT NOT NULL
 	)`); err != nil {
 		t.Fatal(err)
