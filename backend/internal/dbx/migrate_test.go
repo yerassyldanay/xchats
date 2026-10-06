@@ -289,3 +289,25 @@ func TestRunMigrationsTemplateErrorAppliesNothing(t *testing.T) {
 		t.Errorf("%d history rows recorded for a run that must apply nothing", n)
 	}
 }
+
+// A migration that is only comments (what `make migration-new` generates before
+// it is filled in), or whose statements all sit in a block for the other
+// engine behind a header comment, applies as a recorded no-op.
+func TestRunMigrationsCommentOnlyRenderIsRecorded(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	mfs := fstest.MapFS{
+		"20260101000000_header_only.sql":         {Data: []byte("-- header_only\n-- Shared by SQLite and PostgreSQL.\n")},
+		"20260102000000_header_and_pg_block.sql": {Data: []byte("-- pg only\n{{if postgres}}CREATE TABLE pg_block (id INTEGER);{{end}}\n")},
+	}
+	if err := RunMigrations(ctx, db, mfs); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("recorded %d migrations (%v), want 2", n, err)
+	}
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM sqlite_master WHERE name = 'pg_block'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("pg_block exists=%d (%v) on SQLite", n, err)
+	}
+}

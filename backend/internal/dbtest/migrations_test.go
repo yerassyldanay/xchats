@@ -96,3 +96,22 @@ func TestJSONMergePatchParity(t *testing.T) {
 		t.Fatalf("merge patch result: %s", result)
 	}
 }
+
+// A migration file that is only a header comment, or whose statements all sit
+// in a block for the other engine, must apply as a recorded no-op on whichever
+// engine runs it. SQLite used to panic on comment-only SQL.
+func TestCommentOnlyMigrationIsRecordedOnBothEngines(t *testing.T) {
+	db := OpenRaw(t)
+	ctx := context.Background()
+	files := fstest.MapFS{
+		"29990101000000_header_only.sql":  {Data: []byte("-- header only\n-- Shared by SQLite and PostgreSQL.\n")},
+		"29990102000000_other_engine.sql": {Data: []byte("-- engine blocks only\n{{if sqlite}}SELECT 1;{{end}}{{if postgres}}SELECT 2;{{end}}\n")},
+	}
+	if err := dbx.RunMigrations(ctx, db, files); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE identifier LIKE '2999%'`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("recorded %d no-op migrations (%v), want 2", n, err)
+	}
+}

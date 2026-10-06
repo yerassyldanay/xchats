@@ -332,3 +332,39 @@ func TestForeignKeysEnforced(t *testing.T) {
 		t.Fatal("insert with a dangling FK unexpectedly succeeded")
 	}
 }
+
+// SQL with no statement in it (blank, or nothing but comments) is a no-op, not
+// a crash: the driver reports no result at all, and reading RowsAffected from
+// that used to dereference nil. Reachable from a migration file that is only a
+// header comment, or whose only statements sit in a block for the other engine.
+func TestExecWithoutStatementIsANoOp(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	for name, script := range map[string]string{
+		"line comment":  "-- nothing to do\n-- still nothing\n",
+		"block comment": "/* nothing to do */",
+		"blank":         "  \n\t\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tag, err := db.Exec(ctx, script)
+			if err != nil {
+				t.Fatalf("DB.Exec: %v", err)
+			}
+			if n := tag.RowsAffected(); n != 0 {
+				t.Errorf("DB.Exec RowsAffected = %d, want 0", n)
+			}
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+			tag, err = tx.Exec(ctx, script)
+			if err != nil {
+				t.Fatalf("Tx.Exec: %v", err)
+			}
+			if n := tag.RowsAffected(); n != 0 {
+				t.Errorf("Tx.Exec RowsAffected = %d, want 0", n)
+			}
+		})
+	}
+}
