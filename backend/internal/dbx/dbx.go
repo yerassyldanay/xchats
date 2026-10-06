@@ -228,7 +228,7 @@ func (db *DB) Ping(ctx context.Context) error { return db.sdb.PingContext(ctx) }
 
 // Query runs a query expected to return rows.
 func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
-	r, err := db.sdb.QueryContext(ctx, query, db.bind(args)...)
+	r, err := db.sdb.QueryContext(ctx, query, bindArgs(args)...)
 	if err != nil {
 		return nil, err
 	}
@@ -237,12 +237,12 @@ func (db *DB) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 
 // QueryRow runs a query expected to return at most one row.
 func (db *DB) QueryRow(ctx context.Context, query string, args ...any) *Row {
-	return &Row{r: db.sdb.QueryRowContext(ctx, query, db.bind(args)...)}
+	return &Row{r: db.sdb.QueryRowContext(ctx, query, bindArgs(args)...)}
 }
 
 // Exec runs a query that doesn't return rows.
 func (db *DB) Exec(ctx context.Context, query string, args ...any) (CommandTag, error) {
-	res, err := db.sdb.ExecContext(ctx, query, db.bind(args)...)
+	res, err := db.sdb.ExecContext(ctx, query, bindArgs(args)...)
 	if err != nil {
 		return CommandTag{}, err
 	}
@@ -264,7 +264,7 @@ func (db *DB) Begin(ctx context.Context) (*Tx, error) {
 			return nil, err
 		}
 	}
-	return &Tx{tx: tx, dialect: db.Dialect()}, nil
+	return &Tx{tx: tx}, nil
 }
 
 // DBTX is satisfied by both *DB and *Tx — the shape kbstore's old dbtx and

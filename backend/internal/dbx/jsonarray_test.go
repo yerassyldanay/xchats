@@ -13,7 +13,7 @@ func TestUUIDArrayRoundTrip(t *testing.T) {
 
 	if _, err := db.Exec(ctx, `CREATE TABLE t (
 		id INTEGER PRIMARY KEY,
-		images TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images))
+		images TEXT NOT NULL DEFAULT '[]'
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestStringArrayRoundTrip(t *testing.T) {
 
 	if _, err := db.Exec(ctx, `CREATE TABLE t (
 		id INTEGER PRIMARY KEY,
-		uris TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(uris))
+		uris TEXT NOT NULL DEFAULT '[]'
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -81,41 +81,5 @@ func TestStringArrayRoundTrip(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != uris[0] || got[1] != uris[1] {
 		t.Errorf("got %v, want %v", got, uris)
-	}
-}
-
-// TestArrayColumnInAnyTranslation pins the `= ANY($n)` -> `IN (SELECT value
-// FROM json_each(?))` translation from the per-PG-ism table.
-func TestArrayColumnInAnyTranslation(t *testing.T) {
-	db := openTest(t)
-	ctx := context.Background()
-
-	if _, err := db.Exec(ctx, `CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
-		t.Fatal(err)
-	}
-	for i, name := range []string{"alice", "bob", "carol"} {
-		if _, err := db.Exec(ctx, `INSERT INTO t (id, name) VALUES ($1, $2)`, i+1, name); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	names := StringArray{"alice", "carol", "nobody"}
-	rows, err := db.Query(ctx,
-		`SELECT name FROM t WHERE name IN (SELECT value FROM json_each($1)) ORDER BY name`, names)
-	if err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	defer rows.Close()
-	var got []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, n)
-	}
-	want := []string{"alice", "carol"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("got %v, want %v", got, want)
 	}
 }

@@ -9,13 +9,12 @@ import (
 // (unused by database/sql, kept so ported call sites — tx.Commit(ctx),
 // tx.Rollback(ctx) — don't change shape) and Query/QueryRow/Exec mirror DB's.
 type Tx struct {
-	tx      *sql.Tx
-	dialect Dialect
+	tx *sql.Tx
 }
 
 // Query runs a query expected to return rows.
 func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, error) {
-	r, err := tx.tx.QueryContext(ctx, query, bindDialect(tx.dialect, args)...)
+	r, err := tx.tx.QueryContext(ctx, query, bindArgs(args)...)
 	if err != nil {
 		return nil, err
 	}
@@ -24,12 +23,12 @@ func (tx *Tx) Query(ctx context.Context, query string, args ...any) (*Rows, erro
 
 // QueryRow runs a query expected to return at most one row.
 func (tx *Tx) QueryRow(ctx context.Context, query string, args ...any) *Row {
-	return &Row{r: tx.tx.QueryRowContext(ctx, query, bindDialect(tx.dialect, args)...)}
+	return &Row{r: tx.tx.QueryRowContext(ctx, query, bindArgs(args)...)}
 }
 
 // Exec runs a query that doesn't return rows.
 func (tx *Tx) Exec(ctx context.Context, query string, args ...any) (CommandTag, error) {
-	res, err := tx.tx.ExecContext(ctx, query, bindDialect(tx.dialect, args)...)
+	res, err := tx.tx.ExecContext(ctx, query, bindArgs(args)...)
 	if err != nil {
 		return CommandTag{}, err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -173,87 +172,34 @@ func TestMigrationNamesValidatedBeforeChanges(t *testing.T) {
 	}
 }
 
-func TestRunMigrationsRendersMacros(t *testing.T) {
+// A migration file is plain SQL executed exactly as written: nothing is
+// expanded, so text that merely looks like a template action is data.
+func TestRunMigrationsExecutesFilesVerbatim(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
-	mfs := fstest.MapFS{"20260101000000_macros.sql": {Data: []byte(`
-CREATE TABLE macros (
-    id   TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
-    at   {{timestamp}} NOT NULL DEFAULT {{now}},
-    meta {{json "meta"}} NOT NULL DEFAULT '{}',
-    raw  {{json "raw"}},
-    mail {{citext}} NOT NULL DEFAULT 'x@example.com'
+	mfs := fstest.MapFS{"20260101000000_verbatim.sql": {Data: []byte(`
+CREATE TABLE verbatim (
+    note  TEXT NOT NULL DEFAULT '{{x}}',
+    other TEXT NOT NULL DEFAULT '{{if postgres}}{{end}}'
 );
-{{if postgres}}CREATE TABLE only_postgres (id INTEGER);{{end}}
-{{if sqlite}}CREATE TABLE only_sqlite (id INTEGER);{{end}}
+INSERT INTO verbatim DEFAULT VALUES;
 `)}}
 	if err := RunMigrations(ctx, db, mfs); err != nil {
 		t.Fatalf("RunMigrations: %v", err)
 	}
-
-	var id, at string
-	if err := db.QueryRow(ctx, `INSERT INTO macros DEFAULT VALUES RETURNING id, at`).Scan(&id, &at); err != nil {
-		t.Fatalf("insert defaults: %v", err)
+	var note, other string
+	if err := db.QueryRow(ctx, `SELECT note, other FROM verbatim`).Scan(&note, &other); err != nil {
+		t.Fatal(err)
 	}
-	if !uuidV4RE.MatchString(id) {
-		t.Errorf("id default %q is not a UUIDv4", id)
-	}
-	parsed, err := ParseTime(at)
-	if err != nil {
-		t.Fatalf("at default %q does not parse: %v", at, err)
-	}
-	if d := time.Since(parsed); d < -time.Minute || d > time.Minute {
-		t.Errorf("at default %q is %v away from now", at, d)
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO macros (meta) VALUES ('not json')`); err == nil {
-		t.Error("meta accepted invalid JSON")
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO macros (raw) VALUES (NULL)`); err != nil {
-		t.Errorf("nullable json column rejected NULL: %v", err)
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO macros (raw) VALUES ('also not json')`); err == nil {
-		t.Error("raw accepted invalid JSON")
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO macros (mail) VALUES ('X@EXAMPLE.COM')`); err != nil {
-		t.Fatalf("insert mixed-case mail: %v", err)
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO macros (mail) VALUES ('x@example.com')`); err != nil {
-		t.Fatalf("mail is not unique, so this must succeed: %v", err)
-	}
-	var n int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM macros WHERE mail = 'x@example.com'`).Scan(&n); err != nil || n != 4 {
-		t.Errorf("case-insensitive mail match: %d rows, %v; want 4 (default row, NULL-raw row, and both inserts)", n, err)
-	}
-	for table, want := range map[string]int{"only_sqlite": 1, "only_postgres": 0} {
-		if err := db.QueryRow(ctx, `SELECT count(*) FROM sqlite_master WHERE type='table' AND name=$1`, table).Scan(&n); err != nil || n != want {
-			t.Errorf("%s exists=%d (%v), want %d", table, n, err, want)
-		}
+	if note != "{{x}}" || other != "{{if postgres}}{{end}}" {
+		t.Errorf("stored %q and %q, want the literals exactly as written", note, other)
 	}
 }
 
-func TestRunMigrationsRecordsDialectNoOp(t *testing.T) {
+func TestMigrationChecksumIsFileHash(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
-	mfs := fstest.MapFS{"20260101000000_pg_only.sql": {Data: []byte(`{{if postgres}}CREATE TABLE pg_only (id INTEGER);{{end}}`)}}
-	if err := RunMigrations(ctx, db, mfs); err != nil {
-		t.Fatalf("RunMigrations: %v", err)
-	}
-	var n int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE identifier = '20260101000000_pg_only'`).Scan(&n); err != nil || n != 1 {
-		t.Fatalf("no-op migration recorded %d times (%v), want 1", n, err)
-	}
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM sqlite_master WHERE name = 'pg_only'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("pg_only exists=%d (%v) on SQLite", n, err)
-	}
-	if err := RunMigrations(ctx, db, mfs); err != nil {
-		t.Fatalf("second RunMigrations: %v", err)
-	}
-}
-
-func TestMigrationChecksumIsSourceHash(t *testing.T) {
-	db := openTest(t)
-	ctx := context.Background()
-	src := []byte(`CREATE TABLE IF NOT EXISTS hashed (at {{timestamp}} NOT NULL DEFAULT {{now}});`)
+	src := []byte("CREATE TABLE IF NOT EXISTS hashed (at BIGINT NOT NULL);\n")
 	mfs := fstest.MapFS{"20260101000000_hashed.sql": {Data: src}}
 	if err := RunMigrations(ctx, db, mfs); err != nil {
 		t.Fatalf("RunMigrations: %v", err)
@@ -263,51 +209,49 @@ func TestMigrationChecksumIsSourceHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := fmt.Sprintf("%x", sha256.Sum256(src)); got != want {
-		t.Fatalf("checksum = %s, want the SHA-256 of the unrendered source %s", got, want)
+		t.Fatalf("checksum = %s, want the SHA-256 of the file %s", got, want)
 	}
 }
 
-func TestRunMigrationsTemplateErrorAppliesNothing(t *testing.T) {
+// History timestamps use the same representation as every other timestamp:
+// BIGINT UTC Unix milliseconds.
+func TestRunMigrationsRecordsAppliedAtAsUnixMillis(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
-	mfs := fstest.MapFS{
-		"20260101000000_ok.sql":  {Data: []byte(`CREATE TABLE ok (id INTEGER PRIMARY KEY)`)},
-		"20260102000000_bad.sql": {Data: []byte(`{{nope}}`)},
+	mfs := fstest.MapFS{"20260101000000_a.sql": {Data: []byte(`CREATE TABLE a (id INTEGER PRIMARY KEY)`)}}
+
+	before := time.Now().UnixMilli()
+	if err := RunMigrations(ctx, db, mfs); err != nil {
+		t.Fatal(err)
 	}
-	err := RunMigrations(ctx, db, mfs)
-	if err == nil {
-		t.Fatal("RunMigrations accepted a template error")
+	after := time.Now().UnixMilli()
+
+	var at int64
+	var typ string
+	if err := db.QueryRow(ctx, `SELECT applied_at, typeof(applied_at) FROM schema_migrations`).Scan(&at, &typ); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "20260102000000_bad.sql") {
-		t.Errorf("error %q does not name the bad file", err)
+	if typ != "integer" {
+		t.Errorf("applied_at has storage class %q, want integer", typ)
 	}
-	var n int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM sqlite_master WHERE name = 'ok'`).Scan(&n); err != nil || n != 0 {
-		t.Errorf("earlier valid file was applied (%d tables, %v) although a later file does not render", n, err)
-	}
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err == nil && n != 0 {
-		t.Errorf("%d history rows recorded for a run that must apply nothing", n)
+	if at < before || at > after {
+		t.Errorf("applied_at = %d, want within [%d, %d]", at, before, after)
 	}
 }
 
 // A migration that is only comments (what `make migration-new` generates before
-// it is filled in), or whose statements all sit in a block for the other
-// engine behind a header comment, applies as a recorded no-op.
-func TestRunMigrationsCommentOnlyRenderIsRecorded(t *testing.T) {
+// it is filled in) applies as a recorded no-op.
+func TestRunMigrationsCommentOnlyFileIsRecorded(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 	mfs := fstest.MapFS{
-		"20260101000000_header_only.sql":         {Data: []byte("-- header_only\n-- Shared by SQLite and PostgreSQL.\n")},
-		"20260102000000_header_and_pg_block.sql": {Data: []byte("-- pg only\n{{if postgres}}CREATE TABLE pg_block (id INTEGER);{{end}}\n")},
+		"20260101000000_header_only.sql": {Data: []byte("-- header_only\n-- Plain SQL executed verbatim on SQLite and PostgreSQL.\n")},
 	}
 	if err := RunMigrations(ctx, db, mfs); err != nil {
 		t.Fatalf("RunMigrations: %v", err)
 	}
 	var n int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("recorded %d migrations (%v), want 2", n, err)
-	}
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM sqlite_master WHERE name = 'pg_block'`).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("pg_block exists=%d (%v) on SQLite", n, err)
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("recorded %d migrations (%v), want 1", n, err)
 	}
 }

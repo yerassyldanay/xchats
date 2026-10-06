@@ -17,9 +17,15 @@ import (
 // exactly the names it exists to find: searching "али" would never match a
 // stored "Алия", while "abc" would happily match "ABC".
 //
-// unicode_lower closes that gap with Go's own Unicode-aware strings.ToLower.
-// It lives here because internal/dbx is the one package in the module allowed
-// to know which database engine is underneath (enforced by
+// So every SQLite connection carries a Go lower() that shadows the built-in with
+// Go's Unicode-aware strings.ToLower. Repository SQL then says plain lower(x)
+// and is byte-identical on both engines: PostgreSQL's own lower() folds Unicode
+// on a UTF-8 database, and PostgreSQL needs no helper function installed for it.
+// (A database created with the C locale folds ASCII only; docs/database.md says
+// to create one with a UTF-8 locale.)
+//
+// This file is where that override lives because internal/dbx is the one package
+// in the module allowed to know which database engine is underneath (enforced by
 // dbtest.TestArchitectureBoundary) — a repository package registering driver
 // functions would be exactly the leak that boundary exists to prevent.
 //
@@ -27,13 +33,13 @@ import (
 // runs, so it happens in this package's init rather than in Open: a caller
 // that opens a database before some other package's init got around to
 // registering would otherwise get a connection without the function.
-const unicodeLowerFunc = "unicode_lower"
+const lowerFunc = "lower"
 
 func init() {
-	err := sqlite.RegisterDeterministicScalarFunction(unicodeLowerFunc, 1,
+	err := sqlite.RegisterDeterministicScalarFunction(lowerFunc, 1,
 		func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 			if len(args) != 1 {
-				return nil, fmt.Errorf("%s: expected 1 argument, got %d", unicodeLowerFunc, len(args))
+				return nil, fmt.Errorf("%s: expected 1 argument, got %d", lowerFunc, len(args))
 			}
 			switch v := args[0].(type) {
 			case nil:
@@ -51,6 +57,6 @@ func init() {
 			}
 		})
 	if err != nil {
-		panic("dbx: register " + unicodeLowerFunc + ": " + err.Error())
+		panic("dbx: register " + lowerFunc + ": " + err.Error())
 	}
 }

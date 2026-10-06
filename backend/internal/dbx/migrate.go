@@ -21,22 +21,21 @@ var migrationName = regexp.MustCompile(`^([0-9]{14})_[a-z][a-z0-9_]*\.sql$`)
 // deleting history while leaving its schema behind.
 type MigrationOptions struct{ Force string }
 
-// migration is one shared file. body is the file rendered for the open
-// database's dialect (see RenderMigration); checksum is the SHA-256 of the
-// unrendered source, so one recorded checksum means the same on every engine.
+// migration is one plain-SQL file. body is the file exactly as written — there
+// is no template step and no per-engine variant — and checksum is the SHA-256 of
+// those same bytes, so one recorded checksum means the same on every engine.
 type migration struct{ id, body, checksum string }
 
 // RunMigrations applies every unrecorded identifier, including files older than
 // the newest applied one. The full timestamp AND description are the identity.
-// The files are shared by every dialect: each is rendered for db's engine
-// before anything is applied, so a file that does not render fails the run
-// without applying any earlier file.
+// Each file is plain SQL handed to the database verbatim, the same bytes on
+// SQLite and PostgreSQL, inside one transaction per file.
 func RunMigrations(ctx context.Context, db *DB, mfs fs.FS) error {
 	return RunMigrationsWithOptions(ctx, db, mfs, MigrationOptions{})
 }
 
 func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts MigrationOptions) error {
-	files, err := loadMigrations(mfs, db.Dialect())
+	files, err := loadMigrations(mfs)
 	if err != nil {
 		return err
 	}
@@ -56,7 +55,7 @@ func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts Migra
 		return err
 	}
 	_, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-  identifier TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL
+  identifier TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at BIGINT NOT NULL
  )`)
 	if err != nil {
 		_ = tx.Rollback(ctx)
@@ -73,7 +72,7 @@ func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts Migra
 	return nil
 }
 
-func loadMigrations(mfs fs.FS, d Dialect) ([]migration, error) {
+func loadMigrations(mfs fs.FS) ([]migration, error) {
 	entries, err := fs.ReadDir(mfs, ".")
 	if err != nil {
 		return nil, fmt.Errorf("dbx: read migrations: %w", err)
@@ -97,14 +96,7 @@ func loadMigrations(mfs fs.FS, d Dialect) ([]migration, error) {
 		if strings.TrimSpace(string(b)) == "" {
 			return nil, fmt.Errorf("dbx: empty migration %s", e.Name())
 		}
-		// A blank render is legitimate: every statement sits in an engine block
-		// for the other dialect. It is still recorded so identifiers match
-		// across engines.
-		body, err := RenderMigration(d, e.Name(), string(b))
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), body, fmt.Sprintf("%x", sha256.Sum256(b))})
+		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), string(b), fmt.Sprintf("%x", sha256.Sum256(b))})
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("dbx: no SQL migrations found")
@@ -131,15 +123,13 @@ func applyMigration(ctx context.Context, db *DB, m migration, force bool) error 
 		return tx.Commit(ctx)
 	}
 	// No statement splitting: drivers understand complete scripts, including
-	// quoted semicolons and PostgreSQL dollar-quoted function bodies.
-	if strings.TrimSpace(m.body) != "" {
-		if _, err := tx.Exec(ctx, m.body); err != nil {
-			return fmt.Errorf("dbx: apply migration %s: %w", m.id, err)
-		}
+	// quoted semicolons. A file that is only comments is a recorded no-op.
+	if _, err := tx.Exec(ctx, m.body); err != nil {
+		return fmt.Errorf("dbx: apply migration %s: %w", m.id, err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (identifier, checksum, applied_at) VALUES ($1,$2,$3)
  ON CONFLICT (identifier) DO UPDATE SET checksum=excluded.checksum, applied_at=excluded.applied_at`,
-		m.id, m.checksum, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		m.id, m.checksum, time.Now().UnixMilli()); err != nil {
 		return fmt.Errorf("dbx: record migration %s: %w", m.id, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
