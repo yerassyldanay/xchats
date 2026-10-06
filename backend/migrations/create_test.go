@@ -3,7 +3,6 @@ package migrations
 import (
 	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,7 +16,7 @@ func TestCreateUTCAndRefuseCollision(t *testing.T) {
 	if err != nil || id != "20260929090000_contacts_index" {
 		t.Fatalf("%s: %v", id, err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, id+".sql"))
+	body, err := fs.ReadFile(os.DirFS(dir), id+".sql")
 	if err != nil {
 		t.Fatal(err)
 	}
