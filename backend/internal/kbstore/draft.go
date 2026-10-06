@@ -558,6 +558,8 @@ func (s *Store) lockDraftBlob(ctx context.Context, orgID uuid.UUID) (*dbx.Tx, Dr
 // (bumping base_version), and commits tx — the write half of every draft
 // mutation, shared by writeDraftBlobVersioned and CancelChange.
 func persistDraftBlob(ctx context.Context, tx *dbx.Tx, orgID, userID uuid.UUID, blob DraftBlob) (int64, error) {
+	now := time.Now()
+
 	out, err := json.Marshal(blob)
 	if err != nil {
 		return 0, err
@@ -570,11 +572,11 @@ func persistDraftBlob(ctx context.Context, tx *dbx.Tx, orgID, userID uuid.UUID, 
 	var newVersion int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO kbd_draft (organization_id, draft, base_version, updated_at, updated_by)
-		VALUES ($1, $2, 1, xchats_now(), $3)
+		VALUES ($1, $2, 1, $4, $3)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			draft = EXCLUDED.draft, base_version = kbd_draft.base_version + 1, updated_at = xchats_now(), updated_by = EXCLUDED.updated_by
+			draft = EXCLUDED.draft, base_version = kbd_draft.base_version + 1, updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
 		RETURNING base_version`,
-		orgID, string(out), nullIfNilUUID(userID)).Scan(&newVersion); err != nil {
+		orgID, string(out), nullIfNilUUID(userID), now).Scan(&newVersion); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(ctx); err != nil {

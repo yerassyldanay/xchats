@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
@@ -19,6 +20,8 @@ func (s *Store) SeedDemoKB(ctx context.Context, orgID uuid.UUID) (inserted bool,
 
 // SeedDemoKBWithBlob is SeedDemoKB with optional image asset uploads into blob.Store.
 func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobStore blob.Store) (inserted bool, err error) {
+	now := time.Now()
+
 	var exists bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
@@ -53,9 +56,9 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO kbd_materials (id, organization_id, source_type, filename, mime_type, size_bytes,
-				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key)
-			VALUES ($1, $2, 'file', $3, 'image/jpeg', $4, $5, 'parsed', 'visible', 'disk', $6)`,
-			id, orgID, filename, int64(len(data)), hex.EncodeToString(sha[:]), key); err != nil {
+				sha256_checksum, processing_status, customer_visibility, storage_backend, storage_key, created_at, updated_at)
+			VALUES ($1, $2, 'file', $3, 'image/jpeg', $4, $5, 'parsed', 'visible', 'disk', $6, $7, $7)`,
+			id, orgID, filename, int64(len(data)), hex.EncodeToString(sha[:]), key, now); err != nil {
 			return nil, err
 		}
 		return &id, nil
@@ -218,10 +221,10 @@ func (s *Store) SeedDemoKBWithBlob(ctx context.Context, orgID uuid.UUID, blobSto
 	}
 	draftRaw, _ := json.Marshal(draft)
 	_, err = tx.Exec(ctx, `
-		INSERT INTO kbd_draft (organization_id, draft, base_version)
-		VALUES ($1, $2, 1)
+		INSERT INTO kbd_draft (organization_id, draft, base_version, updated_at)
+		VALUES ($1, $2, 1, $3)
 		ON CONFLICT (organization_id) DO UPDATE SET draft = $2, base_version = kbd_draft.base_version + 1`,
-		orgID, draftRaw)
+		orgID, draftRaw, now)
 	if err != nil {
 		return false, err
 	}
