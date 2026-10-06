@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/yerassyldanay/xchats/backend/internal/config"
+	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/telegram"
 )
 
@@ -839,27 +840,15 @@ func TestTelegramWebhookAnswers500WhenIngestFails(t *testing.T) {
 	// Break the write path in a way only the ingest touches, then heal it.
 	// This used to be ALTER TABLE ... ADD CONSTRAINT CHECK (false) NOT VALID,
 	// which SQLite cannot express: it supports neither ADD CONSTRAINT nor DROP
-	// CONSTRAINT. A BEFORE INSERT trigger that RAISEs is the equivalent that is
+	// CONSTRAINT. A BEFORE INSERT trigger that raises is the equivalent that is
 	// actually more surgical — it fails inserts into this one table and nothing
-	// else, and DROP TRIGGER cleanly reverses it.
-	createTrigger := `CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages
- BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`
-	dropTrigger := `DROP TRIGGER tg_messages_force_fail`
-	if h.db.Dialect() == "postgres" {
-		createTrigger = `CREATE FUNCTION fail_ingest() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced ingest failure'; END $$;
-  CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages FOR EACH ROW EXECUTE FUNCTION fail_ingest();`
-		dropTrigger = `DROP TRIGGER tg_messages_force_fail ON tg_messages; DROP FUNCTION fail_ingest();`
-	}
-	if _, err := h.db.Exec(context.Background(), createTrigger); err != nil {
-		t.Fatalf("install failing trigger: %v", err)
-	}
+	// else, and removing the trigger cleanly reverses it (dbtest.FailInserts).
+	removeTrigger := dbtest.FailInserts(t, h.db, "tg_messages", "forced ingest failure")
 	got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret)
 	if got != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500 so Telegram redelivers", got)
 	}
-	if _, err := h.db.Exec(context.Background(), dropTrigger); err != nil {
-		t.Fatalf("drop trigger: %v", err)
-	}
+	removeTrigger()
 
 	// Once the database is healthy, the redelivery lands.
 	if got := h.tgWebhook(id, textUpdate(1, 100, 500100, "привет"), tgWebhookSecret); got != 200 {

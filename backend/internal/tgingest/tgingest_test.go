@@ -304,14 +304,10 @@ func TestProcessErrIngestOnIngestFailureEmitsNothing(t *testing.T) {
 	q, hub := newFakeQueue(), &fakeHub{}
 	p := newProcessor(st, q, hub)
 
-	// A BEFORE INSERT trigger that RAISEs — fails inserts into tg_messages
+	// A BEFORE INSERT trigger that raises — fails inserts into tg_messages
 	// specifically, mirroring internal/httpapi's own
 	// TestTelegramWebhookAnswers500WhenIngestFails fixture.
-	if _, err := db.Exec(context.Background(),
-		`CREATE TRIGGER tg_messages_force_fail BEFORE INSERT ON tg_messages
-		 BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`); err != nil {
-		t.Fatalf("install failing trigger: %v", err)
-	}
+	dbtest.FailInserts(t, db, "tg_messages", "forced ingest failure")
 
 	outcome, err := p.Process(context.Background(), acct, textUpdate(1, 1, 1, "hi"), []byte(`{}`))
 	if !errors.Is(err, tgingest.ErrIngest) {
