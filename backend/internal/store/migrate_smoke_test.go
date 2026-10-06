@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -44,6 +45,8 @@ func TestFreshDatabaseHasOnlyTheDefaultAdmin(t *testing.T) {
 // TestWaAccountChannelDefaultsToWhatsApp proves the channel column's default
 // applies to an insert that omits it — every legacy write path.
 func TestWaAccountChannelDefaultsToWhatsApp(t *testing.T) {
+	now := time.Now()
+
 	st, db := dbtest.Open(t)
 	ctx := context.Background()
 
@@ -53,9 +56,9 @@ func TestWaAccountChannelDefaultsToWhatsApp(t *testing.T) {
 	}
 	var channel string
 	err = db.QueryRow(ctx, `
-		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, connection_state)
-		VALUES ('11111111-1111-1111-1111-111111111111', $1, 'x', 'unspecified-channel-jid@s.whatsapp.net', 'connected')
-		RETURNING channel`, org.ID).Scan(&channel)
+		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, connection_state, created_at, updated_at)
+		VALUES ('11111111-1111-1111-1111-111111111111', $1, 'x', 'unspecified-channel-jid@s.whatsapp.net', 'connected', $2, $2)
+		RETURNING channel`, org.ID, now).Scan(&channel)
 	if err != nil {
 		t.Fatalf("insert account without channel: %v", err)
 	}

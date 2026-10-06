@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -286,18 +287,20 @@ func TestTelegramConcurrentConnectsConvergeOnOneAccount(t *testing.T) {
 // A bot owned by a DIFFERENT organization is a 409, never a takeover: its chats
 // and messages are that tenant's history.
 func TestTelegramConnectRefusesAnotherOrgsBot(t *testing.T) {
+	now := time.Now()
+
 	h := newHarness(t)
 	ctx := context.Background()
 	var otherOrg uuid.UUID
 	if err := h.db.QueryRow(ctx,
-		`INSERT INTO organizations (name) VALUES ('other-tenant') RETURNING id`).Scan(&otherOrg); err != nil {
+		`INSERT INTO organizations (name, id, created_at, updated_at) VALUES ('other-tenant', $1, $2, $2) RETURNING id`, uuid.New(), now).Scan(&otherOrg); err != nil {
 		t.Fatalf("seed other org: %v", err)
 	}
 	id := config.ChannelAccountID(config.TelegramOwnerRef(testBotID))
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
-		VALUES ($1, $2, 'Чужой бот', $3, $4, 'connected')`,
-		id, otherOrg, testBotID, testBotUsername); err != nil {
+		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state, created_at, updated_at)
+		VALUES ($1, $2, 'Чужой бот', $3, $4, 'connected', $5, $5)`,
+		id, otherOrg, testBotID, testBotUsername, now); err != nil {
 		t.Fatalf("seed foreign account: %v", err)
 	}
 
@@ -321,13 +324,15 @@ func TestTelegramConnectRefusesAnotherOrgsBot(t *testing.T) {
 // An ORPHANED account (organization_id NULL after its org was deleted) is not
 // claimable either: adopting the row would inherit someone else's history.
 func TestTelegramConnectRefusesOrphanedBot(t *testing.T) {
+	now := time.Now()
+
 	h := newHarness(t)
 	ctx := context.Background()
 	id := config.ChannelAccountID(config.TelegramOwnerRef(testBotID))
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state)
-		VALUES ($1, NULL, 'Осиротевший бот', $2, $3, 'disconnected')`,
-		id, testBotID, testBotUsername); err != nil {
+		INSERT INTO tg_accounts (id, organization_id, display_name, bot_id, bot_username, connection_state, created_at, updated_at)
+		VALUES ($1, NULL, 'Осиротевший бот', $2, $3, 'disconnected', $4, $4)`,
+		id, testBotID, testBotUsername, now); err != nil {
 		t.Fatalf("seed orphan: %v", err)
 	}
 	resp, _ := h.postJSON("/xchats/api/v1/telegram-accounts", map[string]any{"bot_token": testBotToken})

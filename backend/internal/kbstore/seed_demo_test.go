@@ -3,6 +3,9 @@ package kbstore_test
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestSeedDemoKB_InsertsFullDataset(t *testing.T) {
@@ -105,12 +108,14 @@ func TestSeedDemoKB_NoopWhenOrgAlreadyHasContent(t *testing.T) {
 }
 
 func TestSeedDemoKB_NoopWhenOrgHasPreexistingRealTopic(t *testing.T) {
+	now := time.Now()
+
 	kb, orgID, _, db := newTestKB(t)
 	ctx := context.Background()
 
 	if _, err := db.Exec(ctx,
-		`INSERT INTO ai_topics (organization_id, slug, title, body_md) VALUES ($1, 'real_topic', 'Real', 'Real content.')`,
-		orgID); err != nil {
+		`INSERT INTO ai_topics (organization_id, slug, title, body_md, id, created_at, updated_at) VALUES ($1, 'real_topic', 'Real', 'Real content.', $2, $3, $3)`,
+		orgID, uuid.New(), now); err != nil {
 		t.Fatalf("seed a real topic: %v", err)
 	}
 

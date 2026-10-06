@@ -39,7 +39,7 @@ func TestEnumChecksEnforced(t *testing.T) {
 		}
 		mustReject(t, db, ctx, `INSERT INTO ai_delivery_zones
 			(organization_id, ref, zone_level, delivery_available, id, created_at, updated_at)
-			VALUES ('11111111-1111-1111-1111-111111111111', 'bad', 'planet', 1, $1, $2, $2)`, uuid.New(), now)
+			VALUES ('11111111-1111-1111-1111-111111111111', 'bad', 'planet', TRUE, $1, $2, $2)`, uuid.New(), now)
 	})
 
 	t.Run("mcp_oauth_clients.registration_source", func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -234,6 +235,9 @@ func TestAppendMovesConversationToTopOfList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create second: %v", err)
 	}
+	// Timestamps have millisecond resolution: let the append land in a later millisecond than
+	// the creation of "second", or the activity order would be a tie.
+	time.Sleep(2 * time.Millisecond)
 	if _, err := cs.AppendMessage(ctx, alice, first.ID, chatstore.AppendInput{Role: chatstore.RoleUser, Content: "hello"}); err != nil {
 		t.Fatalf("append: %v", err)
 	}
@@ -317,7 +321,7 @@ func TestMessageOrderIsStableWithinOneMillisecond(t *testing.T) {
 	// Collapse every timestamp to one value: whatever ordering survives this
 	// is ordering that does not depend on the clock at all.
 	if _, err := db.Exec(ctx,
-		`UPDATE chat_messages SET created_at = '2026-01-01 00:00:00.000' WHERE conversation_id = $1`, conv.ID); err != nil {
+		`UPDATE chat_messages SET created_at = $2 WHERE conversation_id = $1`, conv.ID, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("flatten timestamps: %v", err)
 	}
 

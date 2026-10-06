@@ -339,6 +339,8 @@ func TestCustomerMergeEndpoint(t *testing.T) {
 // whose session is scoped to a DIFFERENT organization, must behave as if the
 // other tenant's data does not exist.
 func TestCrmTenantIsolation(t *testing.T) {
+	now := time.Now()
+
 	h := newHarness(t)
 	ctx := context.Background()
 
@@ -356,8 +358,8 @@ func TestCrmTenantIsolation(t *testing.T) {
 		t.Fatalf("seed second org: %v", err)
 	}
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, org2.ID, u.ID); err != nil {
+		INSERT INTO organization_users (organization_id, user_id, joined_at)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, org2.ID, u.ID, now); err != nil {
 		t.Fatalf("add membership: %v", err)
 	}
 	resp, _ := h.postJSON("/xchats/api/v1/organization/active", map[string]any{"organization_id": org2.ID})
