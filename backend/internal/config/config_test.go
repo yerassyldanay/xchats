@@ -212,8 +212,21 @@ func TestTelegramResolvedModeFollowsTheTunnelOrigin(t *testing.T) {
 	}
 }
 
+// unsetEnv removes key for the duration of the test (t.Setenv registers the
+// restore of the original value), so a variable exported in the developer's
+// shell cannot override the yaml under test.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+}
+
 func TestDatabaseEngineConfiguration(t *testing.T) {
-	t.Setenv("DATABASE_URL", "")
+	unsetEnv(t, "DATABASE_URL")
+	unsetEnv(t, "DB_PATH")
+	unsetEnv(t, "WA_DEVICE_DB_PATH")
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("storage:\n  db_path: ./local.db\n  wa_device_db_path: ./devices.db\n"), 0o600); err != nil {
 		t.Fatal(err)
