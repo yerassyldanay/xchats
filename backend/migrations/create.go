@@ -10,8 +10,8 @@ import (
 
 var descriptionPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// Create writes one migration file, shared by every dialect, named with a UTC
-// timestamp prefix. Exclusive creation prevents overwrites, including a
+// Create writes one migration file, plain SQL shared by every engine, named with
+// a UTC timestamp prefix. Exclusive creation prevents overwrites, including a
 // same-second same-name collision. It returns the identifier (the file name
 // without .sql).
 func Create(root, description string, now time.Time) (string, error) {
@@ -25,7 +25,7 @@ func Create(root, description string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = fmt.Fprintf(f, "-- %s\n-- Shared by SQLite and PostgreSQL; use the dialect macros from docs/database.md.\n-- Write idempotent SQL; the runner supplies the transaction.\n", description)
+	_, err = fmt.Fprintf(f, "-- %s\n-- Plain SQL executed verbatim on SQLite and PostgreSQL; portable types in docs/database.md.\n-- Write idempotent SQL; the runner supplies the transaction.\n", description)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}

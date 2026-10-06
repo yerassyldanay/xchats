@@ -2,8 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"encoding/json"
-	"reflect"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -76,36 +74,15 @@ func TestConcurrentMigrationRollbackAndLateArrival(t *testing.T) {
 	}
 }
 
-func TestJSONMergePatchParity(t *testing.T) {
-	db := OpenRaw(t)
-	ctx := context.Background()
-	var result string
-	if err := db.QueryRow(ctx, `SELECT `+db.JSONMergePatch("$1", "$2"),
-		`{"nested":{"keep":1,"remove":2},"list":[1,2],"other":true}`,
-		`{"nested":{"remove":null,"add":3},"list":[4]}`).Scan(&result); err != nil {
-		t.Fatal(err)
-	}
-	var got, want any
-	if err := json.Unmarshal([]byte(result), &got); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(`{"nested":{"keep":1,"add":3},"list":[4],"other":true}`), &want); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("merge patch result: %s", result)
-	}
-}
-
-// A migration file that is only a header comment, or whose statements all sit
-// in a block for the other engine, must apply as a recorded no-op on whichever
-// engine runs it. SQLite used to panic on comment-only SQL.
+// A migration file that is only comments (what `make migration-new` generates before it
+// is filled in) must apply as a recorded no-op on whichever engine runs it. SQLite used to
+// panic on comment-only SQL.
 func TestCommentOnlyMigrationIsRecordedOnBothEngines(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
 	files := fstest.MapFS{
-		"29990101000000_header_only.sql":  {Data: []byte("-- header only\n-- Shared by SQLite and PostgreSQL.\n")},
-		"29990102000000_other_engine.sql": {Data: []byte("-- engine blocks only\n{{if sqlite}}SELECT 1;{{end}}{{if postgres}}SELECT 2;{{end}}\n")},
+		"29990101000000_header_only.sql":   {Data: []byte("-- header only\n-- Plain SQL executed verbatim on SQLite and PostgreSQL.\n")},
+		"29990102000000_comments_only.sql": {Data: []byte("-- one\n\n/* two\n   lines */\n-- three\n")},
 	}
 	if err := dbx.RunMigrations(ctx, db, files); err != nil {
 		t.Fatal(err)

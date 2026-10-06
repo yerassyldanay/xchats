@@ -20,10 +20,14 @@ func TestCreateUTCAndRefuseCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"-- contacts_index", "SQLite and PostgreSQL", "idempotent"} {
+	for _, want := range []string{"-- contacts_index", "Plain SQL", "SQLite and PostgreSQL", "idempotent"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("generated file lacks %q:\n%s", want, body)
 		}
+	}
+	// There is no template step any more: a header that promises dialect macros misleads.
+	if strings.Contains(strings.ToLower(string(body)), "macro") {
+		t.Errorf("generated header still mentions macros:\n%s", body)
 	}
 	// One shared file: no per-dialect directories or copies.
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 {

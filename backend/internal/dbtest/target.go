@@ -29,22 +29,6 @@ func Target(t testing.TB) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Install the shared extension once under the public-schema transaction
-	// lock. Tests only create/drop their own schema, never the public schema.
-	tx, err := admin.Begin(ctx)
-	if err != nil {
-		_ = admin.Close()
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public`); err != nil {
-		_ = tx.Rollback(ctx)
-		_ = admin.Close()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		_ = admin.Close()
-		t.Fatal(err)
-	}
 	name := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if _, err := admin.Exec(ctx, `CREATE SCHEMA `+name); err != nil {
 		_ = admin.Close()
@@ -61,7 +45,9 @@ func Target(t testing.TB) string {
 		}
 	})
 	q := u.Query()
-	q.Set("search_path", name+",public")
+	// Only the test's own schema: the migrations need nothing from public (no extensions, no
+	// custom functions), so nothing outside the schema is reachable from a test.
+	q.Set("search_path", name)
 	u.RawQuery = q.Encode()
 	return u.String()
 }

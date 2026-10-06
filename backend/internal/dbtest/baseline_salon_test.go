@@ -3,59 +3,67 @@ package dbtest
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
-const salonTestOrgSQL = `INSERT INTO organizations (id, name) VALUES ('44444444-4444-4444-4444-444444444444', 'Salon Test Org')`
+const salonTestOrgSQL = `INSERT INTO organizations (id, name, created_at, updated_at) VALUES ('44444444-4444-4444-4444-444444444444', 'Salon Test Org', 1791244800000, 1791244800000)`
 
-func TestBaseline_ContactsSchemaValidJSON(t *testing.T) {
+// ai_contacts.schedule is plain TEXT holding a JSON document: the database does not
+// validate it (Go does, on write), and the bytes come back exactly as stored.
+func TestBaseline_ContactsScheduleRoundTripsAsText(t *testing.T) {
+	now := time.Now()
+
 	db := OpenRaw(t)
 	ctx := context.Background()
 	mustExec(t, db, ctx, salonTestOrgSQL)
-	if _, err := db.Exec(ctx, `INSERT INTO ai_contacts (organization_id, schedule) VALUES ('44444444-4444-4444-4444-444444444444', 'not json')`); err == nil {
-		t.Fatal("want an error inserting invalid JSON into ai_contacts.schedule")
+	const schedule = `[{"ref":"mon","day":"Понедельник","start":"10:00","end":"19:00","breaks":[]}]`
+	mustExec(t, db, ctx, `INSERT INTO ai_contacts (id, organization_id, booking_url, schedule, created_at, updated_at)
+		VALUES ($1, '44444444-4444-4444-4444-444444444444', 'https://example.com/book', $2, $3, $3)`, uuid.New(), schedule, now)
+
+	var got string
+	if err := db.QueryRow(ctx, `SELECT schedule FROM ai_contacts WHERE organization_id = '44444444-4444-4444-4444-444444444444'`).Scan(&got); err != nil {
+		t.Fatalf("read back schedule: %v", err)
 	}
-	mustExec(t, db, ctx, `INSERT INTO ai_contacts (organization_id, booking_url, schedule)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'https://example.com/book', '[{"ref":"mon","day":"Понедельник","start":"10:00","end":"19:00","breaks":[]}]')`)
+	if got != schedule {
+		t.Errorf("schedule = %q, want the stored bytes %q", got, schedule)
+	}
 }
 
 func TestBaseline_SpecialistsTableShape(t *testing.T) {
+	now := time.Now()
+
 	db := OpenRaw(t)
 	ctx := context.Background()
 	mustExec(t, db, ctx, salonTestOrgSQL)
 
+	wantID := uuid.NewString()
 	var id, salesStatus string
-	if err := db.QueryRow(ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Алина Ким')
-		RETURNING id, sales_status`).Scan(&id, &salesStatus); err != nil {
+	if err := db.QueryRow(ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Алина Ким', $1, $2, $2)
+		RETURNING id, sales_status`, wantID, now).Scan(&id, &salesStatus); err != nil {
 		t.Fatalf("insert with only required columns: %v", err)
 	}
-	if id == "" {
-		t.Error("want a generated id")
+	if id != wantID {
+		t.Errorf("id = %q, want the caller-supplied %q (the database generates none)", id, wantID)
 	}
 	if salesStatus != "active" {
 		t.Errorf("sales_status default = %q, want active", salesStatus)
 	}
 
 	// UNIQUE(organization_id, ref).
-	if _, err := db.Exec(ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Дубликат')`); err == nil {
-		t.Fatal("want a duplicate (organization_id, ref) to be rejected")
+	if _, err := db.Exec(ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Дубликат', $1, $2, $2)`, uuid.New(), now); !dbx.IsUniqueViolation(err) {
+		t.Fatalf("duplicate (organization_id, ref): err = %v, want a uniqueness violation", err)
 	}
 
 	// The same ref in a DIFFERENT organization is fine — org-scoped uniqueness only.
-	mustExec(t, db, ctx, `INSERT INTO organizations (id, name) VALUES ('55555555-5555-5555-5555-555555555555', 'Other Org')`)
-	mustExec(t, db, ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name)
-		VALUES ('55555555-5555-5555-5555-555555555555', 'alina-kim', 'Тёзка из другого салона')`)
-
-	// json_valid CHECK on schedule/portfolio_images.
-	if _, err := db.Exec(ctx, `INSERT INTO ai_specialists (organization_id, ref, schedule)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'bad-schedule', 'not json')`); err == nil {
-		t.Fatal("want invalid JSON in schedule to be rejected")
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO ai_specialists (organization_id, ref, portfolio_images)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'bad-portfolio', 'not json')`); err == nil {
-		t.Fatal("want invalid JSON in portfolio_images to be rejected")
-	}
+	mustExec(t, db, ctx, `INSERT INTO organizations (id, name, created_at, updated_at) VALUES ('55555555-5555-5555-5555-555555555555', 'Other Org', $1, $1)`, now)
+	mustExec(t, db, ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name, id, created_at, updated_at)
+		VALUES ('55555555-5555-5555-5555-555555555555', 'alina-kim', 'Тёзка из другого салона', $1, $2, $2)`, uuid.New(), now)
 
 	var schedule, portfolio string
 	if err := db.QueryRow(ctx, `SELECT schedule, portfolio_images FROM ai_specialists WHERE id = $1`, id).Scan(&schedule, &portfolio); err != nil {
@@ -67,14 +75,16 @@ func TestBaseline_SpecialistsTableShape(t *testing.T) {
 }
 
 func TestBaseline_ServicesTableShape(t *testing.T) {
+	now := time.Now()
+
 	db := OpenRaw(t)
 	ctx := context.Background()
 	mustExec(t, db, ctx, salonTestOrgSQL)
 
 	var id, serviceType, salesStatus, parentRef string
-	if err := db.QueryRow(ctx, `INSERT INTO ai_services (organization_id, ref, name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Женская стрижка')
-		RETURNING id, service_type, sales_status, parent_ref`).Scan(&id, &serviceType, &salesStatus, &parentRef); err != nil {
+	if err := db.QueryRow(ctx, `INSERT INTO ai_services (organization_id, ref, name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Женская стрижка', $1, $2, $2)
+		RETURNING id, service_type, sales_status, parent_ref`, uuid.New(), now).Scan(&id, &serviceType, &salesStatus, &parentRef); err != nil {
 		t.Fatalf("insert with only required columns: %v", err)
 	}
 	if serviceType != "base" {
@@ -96,19 +106,13 @@ func TestBaseline_ServicesTableShape(t *testing.T) {
 		t.Errorf("duration default = %v, want NULL", *duration)
 	}
 
-	mustExec(t, db, ctx, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, name, duration, specialist_refs)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-short', 'haircut-women', 'variant', 'Короткая стрижка', 45, '["alina-kim"]')`)
+	mustExec(t, db, ctx, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, name, duration, specialist_refs, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-short', 'haircut-women', 'variant', 'Короткая стрижка', 45, '["alina-kim"]', $1, $2, $2)`, uuid.New(), now)
 
 	// UNIQUE(organization_id, ref).
-	if _, err := db.Exec(ctx, `INSERT INTO ai_services (organization_id, ref, name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Дубликат')`); err == nil {
-		t.Fatal("want a duplicate (organization_id, ref) to be rejected")
-	}
-
-	// json_valid CHECK on specialist_refs.
-	if _, err := db.Exec(ctx, `INSERT INTO ai_services (organization_id, ref, specialist_refs)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'bad-refs', 'not json')`); err == nil {
-		t.Fatal("want invalid JSON in specialist_refs to be rejected")
+	if _, err := db.Exec(ctx, `INSERT INTO ai_services (organization_id, ref, name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Дубликат', $1, $2, $2)`, uuid.New(), now); !dbx.IsUniqueViolation(err) {
+		t.Fatalf("duplicate (organization_id, ref): err = %v, want a uniqueness violation", err)
 	}
 }
 
@@ -117,13 +121,15 @@ func TestBaseline_ServicesTableShape(t *testing.T) {
 // 20261006000003_ai_knowledge_base.sql) — deleting an organization must remove its
 // specialists and services, not leave them orphaned.
 func TestBaseline_OrganizationCascadeDelete(t *testing.T) {
+	now := time.Now()
+
 	db := OpenRaw(t)
 	ctx := context.Background()
 	mustExec(t, db, ctx, salonTestOrgSQL)
-	mustExec(t, db, ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Алина Ким')`)
-	mustExec(t, db, ctx, `INSERT INTO ai_services (organization_id, ref, name)
-		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Женская стрижка')`)
+	mustExec(t, db, ctx, `INSERT INTO ai_specialists (organization_id, ref, full_name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'alina-kim', 'Алина Ким', $1, $2, $2)`, uuid.New(), now)
+	mustExec(t, db, ctx, `INSERT INTO ai_services (organization_id, ref, name, id, created_at, updated_at)
+		VALUES ('44444444-4444-4444-4444-444444444444', 'haircut-women', 'Женская стрижка', $1, $2, $2)`, uuid.New(), now)
 
 	mustExec(t, db, ctx, `DELETE FROM organizations WHERE id = '44444444-4444-4444-4444-444444444444'`)
 

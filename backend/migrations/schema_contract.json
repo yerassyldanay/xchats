@@ -1,5 +1,6 @@
 {
   "schema": "xchats",
+  "note": "Names, nullability, primary keys, foreign keys and indexes are enforced by TestSchemaContract. pg_type and the default_* fields are the original PostgreSQL catalog snapshot, kept as documentation: the migrations are now plain portable SQL where ids are TEXT with no database default, timestamps are BIGINT UTC Unix milliseconds with no default, and JSON columns are TEXT.",
   "tables": {
     "ai_assistants": {
       "columns": [
@@ -2825,6 +2826,20 @@
           "pg_type": "text",
           "nullable": true,
           "has_default": false
+        },
+        {
+          "name": "import_run_id",
+          "position": 25,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
+        },
+        {
+          "name": "import_synthesis_status",
+          "position": 26,
+          "pg_type": "text",
+          "nullable": true,
+          "has_default": false
         }
       ],
       "primary_key": [
@@ -2846,6 +2861,16 @@
             "processing_status"
           ],
           "unique": false,
+          "backs_constraint": false
+        },
+        {
+          "name": "kbd_materials_import_run_idx",
+          "columns": [
+            "import_run_id",
+            "import_synthesis_status"
+          ],
+          "unique": false,
+          "where": "(import_run_id IS NOT NULL)",
           "backs_constraint": false
         }
       ],

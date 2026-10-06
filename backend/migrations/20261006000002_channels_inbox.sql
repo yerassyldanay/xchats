@@ -2,8 +2,8 @@
 -- (channel_*) accounts, contacts, chats, messages and media, Meta OAuth/webhook
 -- bookkeeping, and the four inbox_*_v views that unify the three transports.
 -- Depends on 20261006000001_identity_access.
--- Shared by SQLite and PostgreSQL: the migration runner expands the dialect macros
--- for the open engine (docs/database.md). Idempotent; the runner owns the transaction.
+-- Plain SQL, executed verbatim and identically on SQLite and PostgreSQL (portable types and
+-- rules: docs/database.md). Idempotent; the runner owns the transaction.
 
 CREATE TABLE IF NOT EXISTS wa_accounts (
     id                      TEXT PRIMARY KEY NOT NULL,
@@ -12,10 +12,10 @@ CREATE TABLE IF NOT EXISTS wa_accounts (
     owner_jid               TEXT NOT NULL UNIQUE,
     phone_number            TEXT NOT NULL DEFAULT '',
     connection_state        TEXT NOT NULL DEFAULT 'connected',
-    last_live_event_at      {{timestamp}},
-    created_at              {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at              {{timestamp}} NOT NULL DEFAULT {{now}},
-    deleted_at               {{timestamp}},
+    last_live_event_at      BIGINT,
+    created_at              BIGINT NOT NULL,
+    updated_at              BIGINT NOT NULL,
+    deleted_at               BIGINT,
     channel                 TEXT NOT NULL DEFAULT 'whatsapp' CHECK (channel IN ('whatsapp','simulator'))
 );
 
@@ -29,13 +29,13 @@ CREATE TABLE IF NOT EXISTS tg_accounts (
     bot_username             TEXT NOT NULL DEFAULT '',
     connection_state         TEXT NOT NULL DEFAULT 'connecting',
     webhook_url               TEXT NOT NULL DEFAULT '',
-    webhook_registered_at    {{timestamp}},
-    webhook_last_checked_at  {{timestamp}},
+    webhook_registered_at    BIGINT,
+    webhook_last_checked_at  BIGINT,
     webhook_last_error       TEXT NOT NULL DEFAULT '',
-    last_live_event_at       {{timestamp}},
-    deleted_at                {{timestamp}},
-    created_at                {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at                {{timestamp}} NOT NULL DEFAULT {{now}}
+    last_live_event_at       BIGINT,
+    deleted_at                BIGINT,
+    created_at                BIGINT NOT NULL,
+    updated_at                BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS tg_accounts_org_idx ON tg_accounts(organization_id) WHERE deleted_at IS NULL;
@@ -49,21 +49,21 @@ CREATE TABLE IF NOT EXISTS channel_accounts (
     handle                   TEXT NOT NULL DEFAULT '',
     connection_state         TEXT NOT NULL DEFAULT 'connecting',
     webhook_url               TEXT NOT NULL DEFAULT '',
-    webhook_registered_at    {{timestamp}},
-    webhook_last_checked_at  {{timestamp}},
+    webhook_registered_at    BIGINT,
+    webhook_last_checked_at  BIGINT,
     webhook_last_error       TEXT NOT NULL DEFAULT '',
-    last_live_event_at       {{timestamp}},
-    provider_meta             {{json "provider_meta"}} NOT NULL DEFAULT '{}',
-    deleted_at                {{timestamp}},
-    created_at                {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at                {{timestamp}} NOT NULL DEFAULT {{now}},
+    last_live_event_at       BIGINT,
+    provider_meta             TEXT NOT NULL DEFAULT '{}',
+    deleted_at                BIGINT,
+    created_at                BIGINT NOT NULL,
+    updated_at                BIGINT NOT NULL,
     UNIQUE (channel, external_account_id)
 );
 
 CREATE INDEX IF NOT EXISTS channel_accounts_org_idx ON channel_accounts(organization_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS wa_contacts (
-    id           TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id           TEXT PRIMARY KEY NOT NULL,
     account_id   TEXT NOT NULL REFERENCES wa_accounts(id) ON DELETE RESTRICT,
     phone_number TEXT NOT NULL DEFAULT '',
     phone_jid    TEXT NOT NULL,
@@ -71,9 +71,9 @@ CREATE TABLE IF NOT EXISTS wa_contacts (
     push_name    TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL DEFAULT '',
     avatar_url   TEXT,
-    attributes   {{json "attributes"}} NOT NULL DEFAULT '{}',
-    created_at   {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at   {{timestamp}} NOT NULL DEFAULT {{now}},
+    attributes   TEXT NOT NULL DEFAULT '{}',
+    created_at   BIGINT NOT NULL,
+    updated_at   BIGINT NOT NULL,
     UNIQUE (account_id, phone_jid)
 );
 
@@ -81,59 +81,59 @@ CREATE INDEX IF NOT EXISTS wa_contacts_lid_idx ON wa_contacts(account_id, lid_ji
 
 CREATE TABLE IF NOT EXISTS tg_credentials (
     account_id              TEXT PRIMARY KEY NOT NULL REFERENCES tg_accounts(id) ON DELETE CASCADE,
-    bot_token_enc           {{bytes}} NOT NULL,
+    bot_token_enc           BYTEA NOT NULL,
     encryption_key_version  INTEGER NOT NULL DEFAULT 1,
-    created_at              {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at              {{timestamp}} NOT NULL DEFAULT {{now}}
+    created_at              BIGINT NOT NULL,
+    updated_at              BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS tg_contacts (
-    id                TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                TEXT PRIMARY KEY NOT NULL,
     account_id        TEXT NOT NULL REFERENCES tg_accounts(id) ON DELETE RESTRICT,
     telegram_user_id  BIGINT NOT NULL,
     username          TEXT NOT NULL DEFAULT '',
     first_name        TEXT NOT NULL DEFAULT '',
     last_name         TEXT NOT NULL DEFAULT '',
     display_name      TEXT NOT NULL DEFAULT '',
-    created_at        {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at        {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at        BIGINT NOT NULL,
+    updated_at        BIGINT NOT NULL,
     UNIQUE (account_id, telegram_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS tg_poll_state (
     account_id      TEXT PRIMARY KEY NOT NULL REFERENCES tg_accounts(id) ON DELETE CASCADE,
     last_update_id  BIGINT NOT NULL,
-    updated_at      {{timestamp}} NOT NULL DEFAULT {{now}}
+    updated_at      BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS wa_credentials (
     account_id  TEXT PRIMARY KEY NOT NULL REFERENCES wa_accounts(id) ON DELETE CASCADE,
     device_jid  TEXT NOT NULL,
-    created_at  {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at  {{timestamp}} NOT NULL DEFAULT {{now}}
+    created_at  BIGINT NOT NULL,
+    updated_at  BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS channel_credentials (
     account_id              TEXT PRIMARY KEY NOT NULL REFERENCES channel_accounts(id) ON DELETE CASCADE,
-    secret_enc               {{bytes}} NOT NULL,
+    secret_enc               BYTEA NOT NULL,
     encryption_key_version   INTEGER NOT NULL DEFAULT 1,
     token_kind                TEXT NOT NULL DEFAULT '',
-    expires_at                {{timestamp}},
-    refreshed_at              {{timestamp}},
+    expires_at                BIGINT,
+    refreshed_at              BIGINT,
     refresh_last_error        TEXT NOT NULL DEFAULT '',
-    created_at                {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at                {{timestamp}} NOT NULL DEFAULT {{now}}
+    created_at                BIGINT NOT NULL,
+    updated_at                BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS channel_contacts (
-    id                    TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                    TEXT PRIMARY KEY NOT NULL,
     account_id            TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE RESTRICT,
     external_contact_id   TEXT NOT NULL,
     handle                TEXT NOT NULL DEFAULT '',
     display_name          TEXT NOT NULL DEFAULT '',
-    attributes            {{json "attributes"}} NOT NULL DEFAULT '{}',
-    created_at            {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at            {{timestamp}} NOT NULL DEFAULT {{now}},
+    attributes            TEXT NOT NULL DEFAULT '{}',
+    created_at            BIGINT NOT NULL,
+    updated_at            BIGINT NOT NULL,
     UNIQUE (account_id, external_contact_id)
 );
 
@@ -146,22 +146,22 @@ CREATE TABLE IF NOT EXISTS meta_oauth_states (
     status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','needs_selection','connected','failed','expired')),
     account_id        TEXT REFERENCES channel_accounts(id) ON DELETE SET NULL,
     last_error        TEXT NOT NULL DEFAULT '',
-    expires_at        {{timestamp}} NOT NULL,
-    settled_at        {{timestamp}},
-    created_at        {{timestamp}} NOT NULL DEFAULT {{now}}
+    expires_at        BIGINT NOT NULL,
+    settled_at        BIGINT,
+    created_at        BIGINT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS meta_oauth_states_expires_idx ON meta_oauth_states(expires_at);
 
 CREATE TABLE IF NOT EXISTS meta_webhook_events (
-    id            TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id            TEXT PRIMARY KEY NOT NULL,
     channel       TEXT NOT NULL CHECK (channel IN ('instagram','messenger','whatsapp_cloud')),
     object_id     TEXT NOT NULL DEFAULT '',
     account_id    TEXT REFERENCES channel_accounts(id) ON DELETE SET NULL,
     event_key     TEXT NOT NULL,
     outcome       TEXT NOT NULL CHECK (outcome IN ('stored','duplicate','ignored','unknown_account','bad_signature','error')),
     detail        TEXT NOT NULL DEFAULT '',
-    received_at   {{timestamp}} NOT NULL DEFAULT {{now}},
+    received_at   BIGINT NOT NULL,
     UNIQUE (channel, event_key)
 );
 
@@ -170,7 +170,7 @@ CREATE INDEX IF NOT EXISTS meta_webhook_events_account_idx ON meta_webhook_event
 CREATE INDEX IF NOT EXISTS meta_webhook_events_received_idx ON meta_webhook_events(received_at);
 
 CREATE TABLE IF NOT EXISTS wa_chats (
-    id                   TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                   TEXT PRIMARY KEY NOT NULL,
     account_id           TEXT NOT NULL REFERENCES wa_accounts(id) ON DELETE RESTRICT,
     contact_id           TEXT NOT NULL REFERENCES wa_contacts(id) ON DELETE RESTRICT,
     remote_jid           TEXT NOT NULL,
@@ -178,52 +178,52 @@ CREATE TABLE IF NOT EXISTS wa_chats (
     assignee_user_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
     stage                TEXT NOT NULL DEFAULT '',
     ai_summary           TEXT NOT NULL DEFAULT '',
-    last_message_at      {{timestamp}},
+    last_message_at      BIGINT,
     last_message_preview TEXT NOT NULL DEFAULT '',
     unread_count         INTEGER NOT NULL DEFAULT 0,
-    created_at           {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at           {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at           BIGINT NOT NULL,
+    updated_at           BIGINT NOT NULL,
     UNIQUE (account_id, remote_jid)
 );
 
 CREATE TABLE IF NOT EXISTS tg_chats (
-    id                    TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                    TEXT PRIMARY KEY NOT NULL,
     account_id            TEXT NOT NULL REFERENCES tg_accounts(id) ON DELETE RESTRICT,
     contact_id            TEXT NOT NULL REFERENCES tg_contacts(id) ON DELETE RESTRICT,
     telegram_chat_id      BIGINT NOT NULL,
     chat_type             TEXT NOT NULL DEFAULT 'private',
     chat_state            TEXT NOT NULL DEFAULT 'open',
     assignee_user_id      TEXT REFERENCES users(id) ON DELETE SET NULL,
-    last_message_at       {{timestamp}},
+    last_message_at       BIGINT,
     last_message_preview  TEXT NOT NULL DEFAULT '',
     unread_count          INTEGER NOT NULL DEFAULT 0,
-    created_at            {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at            {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at            BIGINT NOT NULL,
+    updated_at            BIGINT NOT NULL,
     UNIQUE (account_id, telegram_chat_id)
 );
 
 CREATE INDEX IF NOT EXISTS tg_chats_last_message_idx ON tg_chats(last_message_at DESC);
 
 CREATE TABLE IF NOT EXISTS channel_chats (
-    id                       TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                       TEXT PRIMARY KEY NOT NULL,
     account_id               TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE RESTRICT,
     contact_id               TEXT NOT NULL REFERENCES channel_contacts(id) ON DELETE RESTRICT,
     external_thread_id       TEXT NOT NULL,
     chat_state                TEXT NOT NULL DEFAULT 'open',
     assignee_user_id          TEXT REFERENCES users(id) ON DELETE SET NULL,
-    last_inbound_at           {{timestamp}},
-    last_message_at           {{timestamp}},
+    last_inbound_at           BIGINT,
+    last_message_at           BIGINT,
     last_message_preview      TEXT NOT NULL DEFAULT '',
     unread_count               INTEGER NOT NULL DEFAULT 0,
-    created_at                 {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at                 {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at                 BIGINT NOT NULL,
+    updated_at                 BIGINT NOT NULL,
     UNIQUE (account_id, external_thread_id)
 );
 
 CREATE INDEX IF NOT EXISTS channel_chats_last_message_idx ON channel_chats(last_message_at DESC);
 
 CREATE TABLE IF NOT EXISTS wa_messages (
-    id                   TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                   TEXT PRIMARY KEY NOT NULL,
     account_id           TEXT NOT NULL REFERENCES wa_accounts(id) ON DELETE RESTRICT,
     chat_id              TEXT NOT NULL REFERENCES wa_chats(id) ON DELETE CASCADE,
     direction            TEXT NOT NULL,
@@ -235,17 +235,17 @@ CREATE TABLE IF NOT EXISTS wa_messages (
     body                 TEXT NOT NULL DEFAULT '',
     delivery_state       TEXT NOT NULL DEFAULT 'queued',
     source               TEXT NOT NULL DEFAULT 'live_webhook',
-    raw                  {{json "raw"}},
-    message_ts           {{timestamp}},
-    created_at           {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at           {{timestamp}} NOT NULL DEFAULT {{now}},
+    raw                  TEXT,
+    message_ts           BIGINT,
+    created_at           BIGINT NOT NULL,
+    updated_at           BIGINT NOT NULL,
     UNIQUE (account_id, external_message_id)
 );
 
 CREATE INDEX IF NOT EXISTS wa_messages_chat_ts_idx ON wa_messages(chat_id, message_ts);
 
 CREATE TABLE IF NOT EXISTS tg_messages (
-    id                    TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                    TEXT PRIMARY KEY NOT NULL,
     account_id            TEXT NOT NULL REFERENCES tg_accounts(id) ON DELETE RESTRICT,
     chat_id               TEXT NOT NULL REFERENCES tg_chats(id) ON DELETE CASCADE,
     direction             TEXT NOT NULL,
@@ -257,10 +257,10 @@ CREATE TABLE IF NOT EXISTS tg_messages (
     body                  TEXT NOT NULL DEFAULT '',
     delivery_state        TEXT NOT NULL DEFAULT 'queued',
     source                TEXT NOT NULL DEFAULT 'live_webhook',
-    raw                   {{json "raw"}},
-    message_ts            {{timestamp}},
-    created_at            {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at            {{timestamp}} NOT NULL DEFAULT {{now}},
+    raw                   TEXT,
+    message_ts            BIGINT,
+    created_at            BIGINT NOT NULL,
+    updated_at            BIGINT NOT NULL,
     UNIQUE (account_id, telegram_update_id),
     UNIQUE (chat_id, telegram_message_id)
 );
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS tg_messages (
 CREATE INDEX IF NOT EXISTS tg_messages_chat_ts_idx ON tg_messages(chat_id, message_ts);
 
 CREATE TABLE IF NOT EXISTS channel_messages (
-    id                    TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id                    TEXT PRIMARY KEY NOT NULL,
     account_id            TEXT NOT NULL REFERENCES channel_accounts(id) ON DELETE RESTRICT,
     chat_id               TEXT NOT NULL REFERENCES channel_chats(id) ON DELETE CASCADE,
     direction              TEXT NOT NULL,
@@ -280,17 +280,17 @@ CREATE TABLE IF NOT EXISTS channel_messages (
     delivery_state          TEXT NOT NULL DEFAULT 'queued',
     failure_reason          TEXT NOT NULL DEFAULT '',
     source                  TEXT NOT NULL DEFAULT 'live_webhook',
-    raw                      {{json "raw"}},
-    message_ts               {{timestamp}},
-    created_at                {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at                {{timestamp}} NOT NULL DEFAULT {{now}},
+    raw                      TEXT,
+    message_ts               BIGINT,
+    created_at                BIGINT NOT NULL,
+    updated_at                BIGINT NOT NULL,
     UNIQUE (account_id, external_message_id)
 );
 
 CREATE INDEX IF NOT EXISTS channel_messages_chat_ts_idx ON channel_messages(chat_id, message_ts);
 
 CREATE TABLE IF NOT EXISTS message_media (
-    id              TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id              TEXT PRIMARY KEY NOT NULL,
     message_id      TEXT NOT NULL UNIQUE REFERENCES wa_messages(id) ON DELETE CASCADE,
     media_type      TEXT NOT NULL,
     mimetype        TEXT NOT NULL DEFAULT '',
@@ -298,13 +298,13 @@ CREATE TABLE IF NOT EXISTS message_media (
     file_size       INTEGER NOT NULL DEFAULT 0,
     storage_url     TEXT NOT NULL DEFAULT '',
     download_status TEXT NOT NULL DEFAULT 'pending',
-    created_at      {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at      {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at      BIGINT NOT NULL,
+    updated_at      BIGINT NOT NULL,
     transcript TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS tg_message_media (
-    id              TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id              TEXT PRIMARY KEY NOT NULL,
     message_id      TEXT NOT NULL UNIQUE REFERENCES tg_messages(id) ON DELETE CASCADE,
     file_id         TEXT NOT NULL,
     file_unique_id  TEXT NOT NULL DEFAULT '',
@@ -314,15 +314,15 @@ CREATE TABLE IF NOT EXISTS tg_message_media (
     size            INTEGER NOT NULL DEFAULT 0,
     storage_key     TEXT NOT NULL DEFAULT '',
     download_status TEXT NOT NULL DEFAULT 'pending',
-    created_at      {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at      {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at      BIGINT NOT NULL,
+    updated_at      BIGINT NOT NULL,
     transcript TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS tg_message_media_pending_idx ON tg_message_media(updated_at) WHERE download_status <> 'ready';
 
 CREATE TABLE IF NOT EXISTS channel_message_media (
-    id              TEXT PRIMARY KEY NOT NULL DEFAULT {{uuid}},
+    id              TEXT PRIMARY KEY NOT NULL,
     message_id      TEXT NOT NULL UNIQUE REFERENCES channel_messages(id) ON DELETE CASCADE,
     provider_ref     TEXT NOT NULL DEFAULT '',
     source_url       TEXT NOT NULL DEFAULT '',
@@ -332,8 +332,8 @@ CREATE TABLE IF NOT EXISTS channel_message_media (
     size              INTEGER NOT NULL DEFAULT 0,
     storage_key       TEXT NOT NULL DEFAULT '',
     download_status   TEXT NOT NULL DEFAULT 'pending',
-    created_at         {{timestamp}} NOT NULL DEFAULT {{now}},
-    updated_at         {{timestamp}} NOT NULL DEFAULT {{now}},
+    created_at         BIGINT NOT NULL,
+    updated_at         BIGINT NOT NULL,
     transcript TEXT NOT NULL DEFAULT ''
 );
 
@@ -356,8 +356,8 @@ SELECT a.id,
     a.deleted_at,
     a.created_at,
     NULL AS webhook_url,
-    CAST(NULL AS {{timestamp}}) AS webhook_registered_at,
-    CAST(NULL AS {{timestamp}}) AS webhook_last_checked_at,
+    CAST(NULL AS BIGINT) AS webhook_registered_at,
+    CAST(NULL AS BIGINT) AS webhook_last_checked_at,
     NULL AS webhook_last_error
 FROM wa_accounts a
 UNION ALL
@@ -405,7 +405,7 @@ SELECT c.id,
     c.chat_state,
     c.assignee_user_id,
     c.last_message_at,
-    CAST(NULL AS {{timestamp}}) AS last_inbound_at,
+    CAST(NULL AS BIGINT) AS last_inbound_at,
     c.last_message_preview,
     c.unread_count,
     c.created_at,
@@ -430,7 +430,7 @@ SELECT c.id,
     c.chat_state,
     c.assignee_user_id,
     c.last_message_at,
-    CAST(NULL AS {{timestamp}}) AS last_inbound_at,
+    CAST(NULL AS BIGINT) AS last_inbound_at,
     c.last_message_preview,
     c.unread_count,
     c.created_at,
