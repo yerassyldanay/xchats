@@ -102,7 +102,7 @@ type goListPackage struct {
 // is the same shape of check that, had it existed earlier, would have flagged
 // the stray backend/force-user.go — a root package main holding its own pgx
 // pool and a hardcoded local DSN, outside the persistence layer of its era.
-// That file is now deleted; migration 0006_init_admin does its job.
+// That file is now deleted; the identity migration's seed does its job.
 func TestArchitectureBoundary(t *testing.T) {
 	root := moduleRoot(t)
 

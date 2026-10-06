@@ -1433,7 +1433,7 @@ func runRestore(log *slog.Logger, args []string) {
 // longer pre-configured or seeded here — they are paired dynamically via the
 // UI (internal/whatsmeow), so the derived account id only ever comes into
 // existence once a phone actually completes pairing. Admin user credentials
-// are created by migration 0006_init_admin — no boot-time user creation is
+// are seeded by migration 20261006000001_identity_access.sql — no boot-time user creation is
 // performed here either.
 func seedBase(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
 	if _, err := st.SeedOrganization(ctx, cfg.OrgName); err != nil {

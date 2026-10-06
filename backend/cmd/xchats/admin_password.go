@@ -21,9 +21,8 @@ const (
 )
 
 // ensureBootstrapAdminPassword completes the sentinel admin's bootstrap.
-// Migration 0006_init_admin ships that account with a static default
-// password (defaultBootstrapAdminPassword, restored by
-// 0011_restore_default_admin_password after 0008/0006 briefly retired it),
+// Migration 20261006000001_identity_access.sql ships that account with a
+// static default password (defaultBootstrapAdminPassword),
 // so on a fresh install Store.BootstrapSentinelAdminPassword's guard — it
 // only writes when password_hash is still the "" blanked sentinel — makes
 // this whole function a no-op: minted comes back false and nothing is

@@ -65,7 +65,7 @@ func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (Simula
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// ai_drafts.chat_id is polymorphic (no FK — see 20260929000000_baseline.sql's
+	// ai_drafts.chat_id is polymorphic (no FK — see 20261006000003_ai_knowledge_base.sql's
 	// file header), so this must run BEFORE wa_chats rows disappear below.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM ai_drafts WHERE channel = 'simulator'
@@ -89,7 +89,7 @@ func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (Simula
 
 	// Simulator-only customers: cascades crm_customer_identities/notes/
 	// followups/timeline/tags automatically (all ON DELETE CASCADE from
-	// crm_customers — see 20260929000000_baseline.sql). A customer with a mix of
+	// crm_customers — see 20261006000004_crm.sql). A customer with a mix of
 	// identities (a manual merge — crm_merge.go) keeps its real identities;
 	// only its simulator identity/chat is gone as an ordinary orphaned
 	// conversation once wa_chats is cleared below.

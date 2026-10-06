@@ -32,8 +32,8 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/store"
 )
 
-// The sentinel admin's shipped default credential (migrations
-// 0006_init_admin/0011_restore_default_admin_password — see admin_password.go's
+// The sentinel admin's shipped default credential (migration
+// 20261006000001_identity_access.sql — see admin_password.go's
 // own doc comment) — public, documented, and exactly what a fresh install
 // logs into.
 const (

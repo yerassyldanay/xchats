@@ -75,7 +75,7 @@ type CustomerNote struct {
 // Followup is one scheduled next action. DueAt is the UTC instant everything
 // orders and buckets by; DueDate/DueMinute are the wall clock the manager
 // typed, so the edit form round-trips without a timezone drift (see
-// 20260929000000_baseline.sql). DueMinute is null for an all-day follow-up.
+// 20261006000004_crm.sql). DueMinute is null for an all-day follow-up.
 type Followup struct {
 	ID             string  `json:"id"`
 	CustomerID     string  `json:"customer_id"`

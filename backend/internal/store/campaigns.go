@@ -18,7 +18,7 @@ import (
 // ---------------------------------------------------------------------------
 // account_id columns below carry no foreign key: an account is a wa_accounts,
 // tg_accounts or channel_accounts row and a single FK cannot express an
-// either/or reference — see migrations/sqlite/20260929000000_baseline.sql's file
+// either/or reference — see migrations/20261006000005_campaigns_automation.sql's file
 // header for the identical, already-established reasoning.
 
 // Campaign is one bulk-send campaign.
@@ -148,7 +148,7 @@ type CampaignWindowInput struct {
 
 // CampaignWindow is one recurring UTC window, stored (either an account's
 // own campaign_account_windows row or a campaign's own campaign_windows
-// row — both share this shape, see 20260929000000_baseline.sql).
+// row — both share this shape, see 20261006000005_campaigns_automation.sql).
 type CampaignWindow struct {
 	ID          uuid.UUID
 	Weekday     int

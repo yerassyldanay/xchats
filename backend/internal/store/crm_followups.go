@@ -14,7 +14,7 @@ import (
 // ---------------------------------------------------------------------------
 // Follow-ups — "what needs to happen next"
 // ---------------------------------------------------------------------------
-// Time is stored twice on purpose (see 20260929000000_baseline.sql). DueAt is a UTC
+// Time is stored twice on purpose (see 20261006000004_crm.sql). DueAt is a UTC
 // instant and is the only thing ordering, overdue and bucketing read; DueDate
 // and DueMinute preserve the wall clock the manager typed so the edit form
 // round-trips exactly instead of drifting by a timezone offset.

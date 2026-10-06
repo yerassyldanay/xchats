@@ -16,7 +16,7 @@ func TestBaselineReplayPreservesData(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
 	mustExec(t, db, ctx, `UPDATE users SET password_hash='operator-changed', must_change_password=FALSE WHERE id='00000000-0000-0000-0000-000000000002'`)
-	if err := dbx.RunMigrationsWithOptions(ctx, db, migrations.ForDialect(string(db.Dialect())), dbx.MigrationOptions{Force: "all"}); err != nil {
+	if err := dbx.RunMigrationsWithOptions(ctx, db, migrations.FS, dbx.MigrationOptions{Force: "all"}); err != nil {
 		t.Fatal(err)
 	}
 	var hash string

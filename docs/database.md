@@ -43,20 +43,25 @@ that library's own upgrade mechanism, outside the application's baseline.
 ```text
 backend/
   migrations/
-    migrations.go                 # embeds and selects a dialect directory
-    create.go                     # paired UTC migration generator
-    schema_contract.json          # shared relation/constraint test contract
-    sqlite/20260929000000_baseline.sql
-    postgres/20260929000000_baseline.sql
-  internal/dbx/                   # engine access, dialect helpers, migration runner
-  cmd/migration/                  # developer file-generation command
+    migrations.go                              # embeds the *.sql files (migrations.FS)
+    create.go                                  # UTC-timestamp migration generator
+    schema_contract.json                       # shared relation/constraint test contract
+    20261006000001_identity_access.sql         # 1/5 organizations, users, sessions, MCP OAuth, default admin
+    20261006000002_channels_inbox.sql          # 2/5 wa_*, tg_*, channel_*, Meta bookkeeping, inbox views
+    20261006000003_ai_knowledge_base.sql       # 3/5 assistant, knowledge tables, drafts, KB-gap telemetry, KB chat
+    20261006000004_crm.sql                     # 4/5 customers, identities, statuses, tags, notes, follow-ups
+    20261006000005_campaigns_automation.sql    # 5/5 campaigns, templates, send limits, channel automation
+  internal/dbx/                                # engine access, dialect helpers, migration runner and renderer
+  cmd/migration/                               # developer file-generation command
 ```
 
-There is one authoritative baseline per dialect: 70 application tables, four inbox
-views, their constraints/indexes, and required organization/admin/CRM seed rows.
-Subsequent changes are paired files with the **same identifier** in both directories.
-The shared contract and integration tests guard divergence; there is no runtime SQL
-translation or sequential migration history. The embedded files ship in the binary.
+There is **one file per migration, shared by both engines**. Today's five files hold the
+whole schema: 70 application tables, four inbox views, their constraints and indexes, and
+the required organization/admin/CRM seed rows. Files 2-5 depend only on file 1. Each
+file is plain SQL plus a few dialect macros (next section) that the runner renders for
+the open engine before executing it. The shared contract and integration tests guard
+divergence between the engines; there is no sequential migration history to replay. The
+embedded files ship in the binary.
 
 `store.New` and the other repository constructors select the dialect and migrate
 before returning. The CLI can migrate without starting a server. Each file and its
@@ -71,17 +76,45 @@ to overwrite an existing name. Files are sorted for deterministic initial applic
 every unapplied identifier is eligible, including one older than the latest applied
 file. An out-of-order migration must still satisfy its real schema dependencies.
 
+### Dialect macros
+
+The runner renders every file with Go's `text/template` for the open engine, before
+anything is applied: a file that does not render fails the run without applying any
+earlier file. The checksum is the SHA-256 of the **unrendered** file, so it means the
+same on every engine.
+
+| Macro | SQLite | PostgreSQL |
+| --- | --- | --- |
+| `{{uuid}}` | random UUIDv4 expression | `(gen_random_uuid()::text)` |
+| `{{now}}` | `(strftime('%Y-%m-%d %H:%M:%f','now'))` | `(xchats_now())` |
+| `{{timestamp}}` | `TEXT` (UTC, milliseconds) | `TIMESTAMPTZ` |
+| `{{json "col"}}` | `TEXT CHECK (col IS NULL OR json_valid(col))` | `JSONB` |
+| `{{citext}}` | `TEXT COLLATE NOCASE` | `CITEXT` |
+| `{{bytes}}` | `BLOB` | `BYTEA` |
+| `{{if sqlite}}…{{end}}` | statements only SQLite runs | skipped |
+| `{{if postgres}}…{{end}}` | skipped | statements only PostgreSQL runs |
+
+`{{json "col"}}` takes the name of the column being declared (lower snake case), e.g.
+`meta {{json "meta"}} NOT NULL DEFAULT '{}'`.
+
+- Macros are **frozen once shipped**: an applied file is immutable, so changing what a
+  macro expands to would silently diverge new databases from existing ones. Add a new
+  macro instead (in `internal/dbx/render.go`, with its test).
+- A file whose render is blank (all statements sit in blocks for the other engine) is
+  valid; it is recorded as applied without being executed.
+- Write a literal double brace in SQL as `{{"{{"}}`. Do not put `{{` in comments.
+
 ## Type and query rules
 
-| Concern | SQLite | PostgreSQL |
-| --- | --- | --- |
-| Application identifiers | TEXT UUIDs | TEXT UUIDs |
-| Generated UUID defaults | SQLite random UUID expression | `gen_random_uuid()::text` |
-| Timestamps | UTC ISO date/time TEXT, milliseconds (`2006-01-02 15:04:05.000`) | TIMESTAMPTZ |
-| Booleans | 0/1 INTEGER; use Go bool and SQL TRUE/FALSE | BOOLEAN |
-| JSON and lists | TEXT with `json_valid` checks | JSONB |
-| Binary secrets | BLOB | BYTEA |
-| Email uniqueness | TEXT COLLATE NOCASE | CITEXT |
+| Concern | SQLite | PostgreSQL | In a migration |
+| --- | --- | --- | --- |
+| Application identifiers | TEXT UUIDs | TEXT UUIDs | `TEXT … DEFAULT {{uuid}}` |
+| Timestamps | UTC ISO date/time TEXT, milliseconds (`2006-01-02 15:04:05.000`) | TIMESTAMPTZ | `{{timestamp}}`, `DEFAULT {{now}}` |
+| Booleans | BOOLEAN, stored 0/1; use Go bool and SQL TRUE/FALSE | BOOLEAN | `BOOLEAN … DEFAULT FALSE` |
+| Integers | INTEGER (64-bit) | BIGINT | `BIGINT` |
+| JSON and lists | TEXT with `json_valid` checks | JSONB | `{{json "col"}}` |
+| Binary secrets | BLOB | BYTEA | `{{bytes}}` |
+| Email uniqueness | TEXT COLLATE NOCASE | CITEXT | `{{citext}}` |
 
 All current generated primary keys use UUIDs, avoiding sequence allocation differences.
 For future integer keys pair SQLite `INTEGER PRIMARY KEY` with PostgreSQL
@@ -128,16 +161,19 @@ DATABASE_URL='postgres://xchats:password@localhost:5432/xchats?sslmode=disable' 
   go run ./cmd/xchats -config ../config.yaml migrate
 ```
 
-Fill both generated SQL files and update the shared contract when relations change.
+This creates **one** file, `backend/migrations/<UTC timestamp>_contacts_lookup_index.sql`,
+for both engines. Write it as plain SQL plus the macros above, and update the shared
+contract when relations change.
 Use `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, and seed inserts
 with `ON CONFLICT DO NOTHING`. Never overwrite an operator's data in baseline seeds.
-PostgreSQL functions/views use `CREATE OR REPLACE`; SQLite views can use
-`CREATE VIEW IF NOT EXISTS` or an explicit `DROP VIEW IF EXISTS` + recreation.
+PostgreSQL functions use `CREATE OR REPLACE`; views are dropped and recreated
+(`DROP VIEW IF EXISTS` + `CREATE VIEW`) because SQLite has no `CREATE OR REPLACE VIEW`.
 
-For constraints and column changes, PostgreSQL supports conditional blocks and
-catalog checks. SQLite has no `ADD COLUMN IF NOT EXISTS`: design a repeatable table
-rebuild/copy with explicit columns and preserved foreign keys, or use an idempotent
-replacement table. Do not hide arbitrary DDL errors. Run each new file twice on
+For constraints and column changes, put each engine's DDL in its own
+`{{if postgres}}` / `{{if sqlite}}` block of the same file. PostgreSQL supports
+conditional blocks and catalog checks. SQLite has no `ADD COLUMN IF NOT EXISTS`: design a
+repeatable table rebuild/copy with explicit columns and preserved foreign keys, or use an
+idempotent replacement table. Do not hide arbitrary DDL errors. Run each new file twice on
 both engines, including a database with representative rows. Keep transaction
 control out of scripts: the runner owns BEGIN/COMMIT/ROLLBACK. Operations that cannot
 run inside a transaction (e.g. `CREATE INDEX CONCURRENTLY`) need a separate, explicit
@@ -148,7 +184,7 @@ all files after an intentional edit:
 
 ```sh
 cd backend
-go run ./cmd/xchats -config ../config.yaml migrate -force 20260929000000_baseline
+go run ./cmd/xchats -config ../config.yaml migrate -force 20261006000003_ai_knowledge_base
 go run ./cmd/xchats -config ../config.yaml migrate -force all
 ```
 
@@ -157,8 +193,11 @@ The CLI refuses forced replay when `environment: production` is configured.
 
 **Reset development:** stop the app; remove the disposable SQLite database and its
 `-wal`/`-shm` files, or drop and recreate the disposable PostgreSQL database; then run
-`migrate`. Do not delete migration history while retaining a mismatched schema. Old
-databases from before this rewrite are intentionally unsupported: recreate them.
+`migrate`. Do not delete migration history while retaining a mismatched schema.
+Databases created by the earlier single-baseline build (`20260929000000_baseline`) upgrade
+in place: every statement is idempotent, so the five files apply on top and leave existing
+data untouched. Databases from before that rewrite (numbered `0001_…` migrations) are
+intentionally unsupported: recreate them.
 
 ## Verification
 

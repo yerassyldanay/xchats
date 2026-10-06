@@ -114,7 +114,7 @@ func TestBaseline_ServicesTableShape(t *testing.T) {
 
 // TestBaseline_OrganizationCascadeDelete mirrors every other ai_*
 // table's ON DELETE CASCADE from organizations (see ai_products in
-// 20260929000000_baseline.sql) — deleting an organization must remove its
+// 20261006000003_ai_knowledge_base.sql) — deleting an organization must remove its
 // specialists and services, not leave them orphaned.
 func TestBaseline_OrganizationCascadeDelete(t *testing.T) {
 	db := OpenRaw(t)

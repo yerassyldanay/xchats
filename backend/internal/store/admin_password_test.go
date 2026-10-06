@@ -17,7 +17,7 @@ var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 // BootstrapSentinelAdminPassword's idempotency: it must write the hash
 // exactly once (on a row with a blanked "" password_hash — what
 // ResetSentinelAdminPassword produces; a freshly migrated DB no longer
-// starts there now that 0011_restore_default_admin_password seeds a real
+// starts there now that 20261006000001_identity_access.sql seeds a real
 // default hash) and report minted=false on every call after — the property
 // cmd/xchats' bootstrap depends on to never re-mint (and re-print) a fresh
 // password on a normal restart.
@@ -79,9 +79,9 @@ func TestBootstrapSentinelAdminPassword_MintsOnceNotTwice(t *testing.T) {
 // hash and re-sets must_change_password, and the NEXT
 // BootstrapSentinelAdminPassword call (the next boot) mints again. The
 // initial reset+mint below only gets the row to "some password already
-// set" — 0011_restore_default_admin_password means a freshly migrated DB
+// set" — the identity migration's seed means a freshly migrated DB
 // starts there already, but blanking first keeps this test independent of
-// that migration's exact default.
+// that seed's exact default.
 func TestResetSentinelAdminPassword_RemintsOnNextBoot(t *testing.T) {
 	st, _ := dbtest.Open(t)
 	ctx := context.Background()

@@ -10,7 +10,7 @@ import (
 
 // New returns a fresh, migrated *store.Store at t.TempDir() — the default
 // entry point for any repository package's tests. The default organization
-// and admin user already exist (migration 0006_init_admin); callers seed
+// and admin user already exist (seeded by 20261006000001_identity_access.sql); callers seed
 // only their own per-test extras via the ordinary Store API (SeedOrganization,
 // SeedAccount, ...).
 func New(t testing.TB) *store.Store {

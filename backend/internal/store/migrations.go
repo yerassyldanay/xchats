@@ -16,5 +16,5 @@ func Migrate(ctx context.Context, target, force string) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-	return dbx.RunMigrationsWithOptions(ctx, db, migrations.ForDialect(string(db.Dialect())), dbx.MigrationOptions{Force: force})
+	return dbx.RunMigrationsWithOptions(ctx, db, migrations.FS, dbx.MigrationOptions{Force: force})
 }

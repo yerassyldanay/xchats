@@ -9,22 +9,17 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 )
 
-// defaultAdminID is migrations/sqlite/20260929000000_baseline.sql's fixed sentinel
-// user id.
+// defaultAdminID is the fixed sentinel user id seeded by
+// migrations/20261006000001_identity_access.sql.
 var defaultAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 
 // TestFreshDatabaseHasOnlyTheDefaultAdmin proves store.New's migration step
-// (internal/dbx.RunMigrations over migrations/sqlite) leaves a brand-new
+// (internal/dbx.RunMigrations over migrations.FS) leaves a brand-new
 // database with exactly the required initial state — the default
-// organization and admin user from 0006_init_admin — and nothing else: no
-// stray seed data, no accounts. This is the SQLite-era replacement for the
-// old pgx harness's migration-history smoke tests (TestMigrations_*): those
-// tested properties of INCREMENTAL Postgres migration steps (0008's demo
-// data being idempotent, 0013 dropping FKs) that have no equivalent here —
-// the sqlite migrations encode the final schema directly rather than
-// replaying that history, and internal/dbtest's own TestSchemaContract and
-// TestInitAdminMigration (package dbtest) already cover the shape and
-// seed-migration behavior those tests were really guarding.
+// organization and admin user from 20261006000001_identity_access.sql — and
+// nothing else: no stray seed data, no accounts. internal/dbtest's own
+// TestSchemaContract and TestInitAdminMigration cover the schema shape and
+// the seed rows in detail.
 func TestFreshDatabaseHasOnlyTheDefaultAdmin(t *testing.T) {
 	st, db := dbtest.Open(t)
 	ctx := context.Background()
@@ -34,7 +29,7 @@ func TestFreshDatabaseHasOnlyTheDefaultAdmin(t *testing.T) {
 		t.Fatalf("OrgsForUser(admin): %v", err)
 	}
 	if len(orgs) != 1 {
-		t.Fatalf("admin belongs to %d orgs, want 1 (the default org from 0006_init_admin)", len(orgs))
+		t.Fatalf("admin belongs to %d orgs, want 1 (the default org seeded by 20261006000001_identity_access.sql)", len(orgs))
 	}
 
 	var accountCount int

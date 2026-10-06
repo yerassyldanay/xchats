@@ -14,7 +14,7 @@ import (
 )
 
 // CampaignTemplate is one reusable, organization-wide message template
-// (CAM-14) — see migrations/sqlite/20260929000000_baseline.sql's own
+// (CAM-14) — see migrations/20261006000005_campaigns_automation.sql's own
 // doc comment for why it is a standalone entity rather than a campaign
 // with no recipients.
 type CampaignTemplate struct {

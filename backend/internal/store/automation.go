@@ -15,7 +15,7 @@ import (
 // ---------------------------------------------------------------------------
 // account_id carries no foreign key, on purpose: an account is either a
 // wa_accounts or tg_accounts row and a single FK cannot express an
-// either/or reference — see 20260929000000_baseline.sql's file header for the
+// either/or reference — see 20261006000003_ai_knowledge_base.sql's file header for the
 // identical reasoning behind ai_drafts.chat_id. Ownership is enforced in
 // internal/httpapi instead.
 

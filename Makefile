@@ -184,7 +184,7 @@ ruleset-apply: ## Apply .github/rulesets/*.json to the repo via the GitHub API (
 		gh api -X PUT  repos/yerassyldanay/xchats/rulesets/$$(gh api repos/yerassyldanay/xchats/rulesets --jq ".[] | select(.name==\"$$(basename $$f .json)\") | .id") --input "$$f" >/dev/null; \
 	done
 
-migration-new: ## Create paired UTC timestamp migrations (make migration-new NAME=contacts_index)
+migration-new: ## Create one UTC-timestamped migration shared by SQLite and PostgreSQL (make migration-new NAME=contacts_index)
 	cd $(BACKEND) && go run ./cmd/migration $(NAME)
 
 test-postgres: ## Run persistence and HTTP tests against an isolated schema per test (set TEST_DATABASE_URL)

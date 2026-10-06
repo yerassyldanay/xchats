@@ -30,7 +30,7 @@ func OpenRaw(t testing.TB) *dbx.DB {
 			t.Errorf("dbtest: close: %v", err)
 		}
 	})
-	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		t.Fatalf("dbtest: migrate: %v", err)
 	}
 	return db
@@ -41,7 +41,7 @@ func OpenRaw(t testing.TB) *dbx.DB {
 // a no-op, not an error and not a duplicate insert).
 func reapplyMigrations(t testing.TB, db *dbx.DB) error {
 	t.Helper()
-	return dbx.RunMigrations(context.Background(), db, migrations.ForDialect(string(db.Dialect())))
+	return dbx.RunMigrations(context.Background(), db, migrations.FS)
 }
 
 // moduleRoot returns the directory containing the backend module's go.mod —

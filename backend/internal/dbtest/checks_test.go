@@ -8,13 +8,10 @@ import (
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 )
 
-// TestEnumChecksEnforced behaviorally verifies the four enum-shaped CHECK
-// constraints translated from Postgres's "= ANY (ARRAY[...])"/literal-equality
-// checks (see migrations/sqlite/000{2,3,5}_*.up.sql and the per-PG-ism
-// translation table) actually reject an out-of-vocabulary value — the
-// schema contract test deliberately does not compare CHECK definitions as
-// text (they read completely differently: IN (...) vs = ANY(ARRAY[...])),
-// so this is what actually pins their behavior.
+// TestEnumChecksEnforced behaviorally verifies the enum-shaped CHECK
+// constraints in migrations/*.sql actually reject an out-of-vocabulary
+// value. The schema contract test deliberately does not compare CHECK
+// definitions as text, so this is what pins their behavior on each engine.
 func TestEnumChecksEnforced(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()

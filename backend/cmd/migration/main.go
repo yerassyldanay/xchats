@@ -1,4 +1,4 @@
-// Command migration creates paired timestamped SQL files. Run from backend/.
+// Command migration creates a timestamped SQL migration shared by SQLite and PostgreSQL. Run from backend/.
 package main
 
 import (
@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	dir := flag.String("dir", "migrations", "migration root containing sqlite/ and postgres/")
+	dir := flag.String("dir", "migrations", "directory that holds the migration .sql files")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: migration [-dir migrations] descriptive_name")
@@ -21,5 +21,5 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("Created", id, "for sqlite and postgres")
+	fmt.Println("Created", id+".sql", "(shared by sqlite and postgres)")
 }

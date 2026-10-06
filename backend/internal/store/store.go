@@ -47,7 +47,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -258,7 +258,7 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 // SeedUser upserts a user by (case-insensitive) email and joins them to the
 // org as its admin. Every existing caller (test harnesses across the module,
 // via internal/dbtest and its own package-local Stores) uses this to create
-// the one operator for a freshly seeded org, mirroring migration 0006's own
+// the one operator for a freshly seeded org, mirroring the identity migration's own
 // sentinel-admin seed — never a second, lesser-privileged user in the same
 // org — so hardcoding "admin" here needs no role parameter threaded through
 // every call site. Tests that specifically need a "member" for an RBAC
@@ -540,7 +540,7 @@ func (s *Store) DeleteOtherSessions(ctx context.Context, userID uuid.UUID, keepS
 	return err
 }
 
-// sentinelAdminID is migration 20260929000000_baseline.sql's fixed seeded-admin
+// sentinelAdminID is migration 20261006000001_identity_access.sql's fixed seeded-admin
 // user id — the one row BootstrapSentinelAdminPassword and
 // ResetSentinelAdminPassword ever touch.
 var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
@@ -551,9 +551,9 @@ var sentinelAdminID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 // coupling every ordinary user password change to bootstrap storage.
 func IsSentinelAdmin(id uuid.UUID) bool { return id == sentinelAdminID }
 
-// defaultAdminPasswordHash is 20260929000000_baseline.sql's precomputed argon2id
+// defaultAdminPasswordHash is 20261006000001_identity_access.sql's precomputed argon2id
 // hash for admin@xchat.kz / xchat-admin-change-me — the exact literal
-// 20260929000000_baseline.sql restores, reused here (not
+// that file seeds, reused here (not
 // regenerated) so DefaultAdminCredentialPending can recognize the row is
 // still sitting on the documented default rather than something an
 // operator has since replaced.
@@ -594,11 +594,10 @@ func (s *Store) DefaultAdminCredentialPending(ctx context.Context) (bool, error)
 
 // BootstrapSentinelAdminPassword mints the sentinel admin's first real
 // password on boot (cmd/xchats' first-boot bootstrap). It writes
-// passwordHash ONLY if the row still carries 0008_bootstrap_admin's blanked
-// "" sentinel — the same WHERE-guarded idempotency pattern that migration
-// uses — which a fresh install never has, since
-// 0011_restore_default_admin_password already restores the static default
-// password. It clears must_change_password so a mint here (the "xchats
+// passwordHash ONLY if the row still carries the blanked "" sentinel (what
+// ResetSentinelAdminPassword leaves behind) — a WHERE-guarded idempotent
+// write — which a fresh install never has, since 20261006000001_identity_access.sql
+// seeds the static default password. It clears must_change_password so a mint here (the "xchats
 // reset-admin-password" recovery path, or an operator-supplied
 // XCHATS_BOOTSTRAP_ADMIN_PASSWORD) lands on the same no-forced-change state
 // as a fresh install. minted reports whether this call actually wrote it

@@ -437,7 +437,7 @@ func nullIfEmpty(s string) *string {
 // An earlier version of this file added a Provenance string straight onto
 // every Draft* struct instead, and every MCP upsert wrote plan/mcp.md's
 // provenance argument into it — but no live ai_* table has ever had a
-// provenance column (migration 20260929000000_baseline.sql: "live tables hold LIVE
+// provenance column (20261006000003_ai_knowledge_base.sql: "Live ai_* tables hold LIVE
 // ROWS ONLY — no review_state, no provenance, no drafted_at"), so that value
 // was silently discarded the moment a draft entry was approved into live.
 // The legacy manual-editor and confirm_fact write paths had the exact same

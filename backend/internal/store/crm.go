@@ -25,7 +25,7 @@ import (
 // crm_customer_identities.account_id/contact_id carry no foreign key: each can
 // reference a wa_* or a tg_* row and a single FK cannot express an either/or
 // reference — the same constraint ai_drafts.chat_id lives with (see
-// 20260929000000_baseline.sql's file header). Ownership is enforced here instead:
+// 20261006000004_crm.sql's file header). Ownership is enforced here instead:
 // every read and write below takes an organization id and puts it in the WHERE
 // clause, so a cross-org id resolves to no row rather than to someone else's
 // customer.
@@ -117,7 +117,7 @@ type CustomFieldDef struct {
 }
 
 // defaultStatuses is the lifecycle every organization starts with. It is the
-// exact set 20260929000000_baseline.sql seeds for organizations that predate the
+// exact set 20261006000004_crm.sql seeds for the default organization;
 // migration; EnsureDefaultStatuses applies it to every organization created
 // after. Both are idempotent via UNIQUE (organization_id, slug), so running
 // one after the other is a no-op rather than a duplicate.

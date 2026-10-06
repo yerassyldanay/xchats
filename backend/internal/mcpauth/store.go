@@ -35,7 +35,7 @@ func NewStore(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, migrations.ForDialect(string(db.Dialect()))); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		_ = db.Close()
 		return nil, err
 	}

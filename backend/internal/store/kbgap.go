@@ -307,7 +307,7 @@ func topTargetEntitiesFor(ctx context.Context, db *dbx.DB, clause string, args [
 // KBGapReportFor — field names live in ai_kb_gap_missing_fields, so this is
 // the one query here that joins back to ai_kb_gap_events for the filter and
 // for target_entity_type (a field's own row has no entity-type column of
-// its own; see 20260929000000_baseline.sql). kbGapFilterClause(f, "e.")
+// its own; see 20261006000003_ai_knowledge_base.sql). kbGapFilterClause(f, "e.")
 // yields the same filter values as the caller's own args, qualified for the
 // "e" alias — a fresh call rather than string-editing the caller's clause.
 func topMissingFieldsFor(ctx context.Context, db *dbx.DB, f KBGapFilter, args []any) ([]KBGapMissingFieldCount, error) {
@@ -460,8 +460,8 @@ func chatOrganizationIDTx(ctx context.Context, tx *dbx.Tx, chatID uuid.UUID) (st
 // allKBGapReasonCodes/allKBGapEntityTypes are this package's own copies of
 // aiprompt's closed vocabularies (built once, not per insert), checked
 // again in insertKBGapEventTx — the final gate before a row exists in the
-// DB at all (migration 0018 deliberately carries no CHECK constraint of its
-// own; see 20260929000000_baseline.sql). DraftOption is exported, so
+// DB at all (the schema deliberately carries no CHECK constraint on them; see
+// 20261006000003_ai_knowledge_base.sql). DraftOption is exported, so
 // aiprompt.sanitizeKBGap having already validated a MODEL-authored
 // diagnostic is not a guarantee every caller went through it — a value
 // outside the closed set here is normalized to the same default an absent
