@@ -100,8 +100,8 @@ same on every engine.
 - Macros are **frozen once shipped**: an applied file is immutable, so changing what a
   macro expands to would silently diverge new databases from existing ones. Add a new
   macro instead (in `internal/dbx/render.go`, with its test).
-- A file whose render is blank (all statements sit in blocks for the other engine) is
-  valid; it is recorded as applied without being executed.
+- A file whose render has no statements (blank or only comments, e.g. everything sits in
+  blocks for the other engine) is valid: it is recorded as applied and runs as a no-op.
 - Write a literal double brace in SQL as `{{"{{"}}`. Do not put `{{` in comments.
 
 ## Type and query rules
@@ -111,7 +111,7 @@ same on every engine.
 | Application identifiers | TEXT UUIDs | TEXT UUIDs | `TEXT … DEFAULT {{uuid}}` |
 | Timestamps | UTC ISO date/time TEXT, milliseconds (`2006-01-02 15:04:05.000`) | TIMESTAMPTZ | `{{timestamp}}`, `DEFAULT {{now}}` |
 | Booleans | BOOLEAN, stored 0/1; use Go bool and SQL TRUE/FALSE | BOOLEAN | `BOOLEAN … DEFAULT FALSE` |
-| Integers | INTEGER (64-bit) | BIGINT | `BIGINT` |
+| Integers | INTEGER or BIGINT, both stored as 64-bit | INTEGER (32-bit) or BIGINT | `INTEGER`; `BIGINT` for ids and counters that can pass 2^31 |
 | JSON and lists | TEXT with `json_valid` checks | JSONB | `{{json "col"}}` |
 | Binary secrets | BLOB | BYTEA | `{{bytes}}` |
 | Email uniqueness | TEXT COLLATE NOCASE | CITEXT | `{{citext}}` |
