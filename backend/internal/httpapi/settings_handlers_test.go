@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -79,6 +80,34 @@ func TestGetSettingsExposesStorageLocations(t *testing.T) {
 	}
 	if got.StorageLocations.BlobDir == "" {
 		t.Error("storage_locations.blob_dir is empty, want cfg.Storage.BlobDir")
+	}
+}
+
+// The storage locations reach the browser (and bug reports). A PostgreSQL URL carries the
+// password, and with DATABASE_URL set the SQLite default is not the database at all: Settings
+// shows the database that is in use, without credentials.
+func TestGetSettingsHidesDatabaseCredentials(t *testing.T) {
+	const secret = "s3cr3t-Pa55"
+	h := newSettingsHarness(t)
+	h.cfg.Storage.DatabaseURL = "postgres://app:" + secret + "@db.example:5432/xchats?sslmode=require&password=" + secret
+
+	resp, env := h.get("/xchats/api/v1/settings")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /settings: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got struct {
+		StorageLocations struct {
+			DBPath         string `json:"db_path"`
+			WADeviceDBPath string `json:"wa_device_db_path"`
+		} `json:"storage_locations"`
+	}
+	mustDecode(t, env, &got)
+	raw, _ := json.Marshal(env)
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("GET /settings leaks the database password: %s", raw)
+	}
+	if want := "postgres://db.example:5432/xchats"; got.StorageLocations.DBPath != want || got.StorageLocations.WADeviceDBPath != want {
+		t.Errorf("db_path = %q, wa_device_db_path = %q, want both %q (the database in use)", got.StorageLocations.DBPath, got.StorageLocations.WADeviceDBPath, want)
 	}
 }
 

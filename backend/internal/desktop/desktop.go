@@ -124,6 +124,9 @@ func rebase(base, p, def string) string {
 	if p == "" {
 		p = def
 	}
+	if config.IsPostgresURL(p) {
+		return p // a database URL, not a path under the data directory
+	}
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)
 	}

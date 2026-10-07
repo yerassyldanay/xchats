@@ -48,8 +48,10 @@ func (s *Server) storageLocations() storageLocations {
 		DataDir:    s.resolvedDataDir,
 	}
 	if s.cfg != nil {
-		loc.DBPath = s.cfg.Storage.DBPath
-		loc.WADeviceDBPath = s.cfg.Storage.WADeviceDBPath
+		// The effective database, redacted: with DATABASE_URL set DBPath is an unused SQLite
+		// default, and a PostgreSQL URL carries the password.
+		loc.DBPath = s.cfg.Storage.DatabaseLocation()
+		loc.WADeviceDBPath = s.cfg.Storage.DeviceDatabaseLocation()
 		loc.BlobDir = s.cfg.Storage.BlobDir
 	}
 	return loc

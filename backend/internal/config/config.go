@@ -8,6 +8,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -643,13 +644,40 @@ func (s StorageConfig) Database() string {
 	return s.DBPath
 }
 
+// IsPostgresURL reports whether a storage target is a PostgreSQL URL rather than a SQLite file path.
+func IsPostgresURL(target string) bool {
+	return strings.HasPrefix(target, "postgres://") || strings.HasPrefix(target, "postgresql://")
+}
+
+// DatabaseLocation is where the application database lives, safe to show in Settings or a bug
+// report: a SQLite path as it is, a PostgreSQL URL as scheme://host/database with the user, the
+// password and every query parameter removed (a password can sit in either). Never show
+// Database() itself.
+func (s StorageConfig) DatabaseLocation() string { return redactDatabaseTarget(s.Database()) }
+
+// DeviceDatabaseLocation is DeviceDatabase, redacted the same way.
+func (s StorageConfig) DeviceDatabaseLocation() string {
+	return redactDatabaseTarget(s.DeviceDatabase())
+}
+
+func redactDatabaseTarget(target string) string {
+	if !IsPostgresURL(target) {
+		return target
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Host == "" {
+		return "postgres://" // say nothing about a URL that cannot be read
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
 // DeviceDatabase follows the engine toggle while keeping SQLite sessions in
 // their own file. The provider library owns its whatsmeow_* tables and runner.
 func (s StorageConfig) DeviceDatabase() string {
 	if s.DatabaseURL != "" {
 		return s.DatabaseURL
 	}
-	if strings.HasPrefix(s.DBPath, "postgres://") || strings.HasPrefix(s.DBPath, "postgresql://") {
+	if IsPostgresURL(s.DBPath) {
 		return s.DBPath
 	}
 	return s.WADeviceDBPath

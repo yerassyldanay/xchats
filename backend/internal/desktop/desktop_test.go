@@ -72,6 +72,24 @@ func TestApplyDefaultsLeavesAbsolutePathsAlone(t *testing.T) {
 	}
 }
 
+// A PostgreSQL URL is not a path: joining it onto the data directory would turn the database
+// into a directory name and the desktop app would silently open a file there.
+func TestApplyDefaultsLeavesADatabaseURLAlone(t *testing.T) {
+	clearStorageEnv(t)
+	t.Setenv("XCHATS_DATA_DIR", t.TempDir())
+
+	const url = "postgres://app:pw@db.example:5432/xchats"
+	cfg := loadDefaults(t)
+	cfg.Storage.DBPath = url
+	cfg.Server.HTTPAddr = ":0"
+	if err := ApplyDefaults(cfg); err != nil {
+		t.Fatalf("ApplyDefaults: %v", err)
+	}
+	if cfg.Storage.DBPath != url {
+		t.Errorf("DBPath = %q, want the URL %q untouched", cfg.Storage.DBPath, url)
+	}
+}
+
 func TestApplyDefaultsCreatesTheDataDirectory(t *testing.T) {
 	clearStorageEnv(t)
 	dataDir := filepath.Join(t.TempDir(), "not", "created", "yet")
