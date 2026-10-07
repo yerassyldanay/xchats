@@ -103,9 +103,11 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 		// Plain lower(): SQLite's built-in folds ASCII only (so searching "али"
 		// never matched a contact stored as «Алия»), which internal/dbx's lower.go
 		// replaces with a Unicode-aware one; PostgreSQL's own lower() already is.
+		// Every column is lowered, not just the ones that are likely to hold capitals: SQLite's LIKE
+		// ignores ASCII case and PostgreSQL's does not, so a bare column is found on one engine only.
 		where = append(where, "(lower(c.contact_display_name) LIKE $"+i+
 			" OR lower(c.contact_phone_number) LIKE $"+i+
-			" OR c.external_contact_ref LIKE $"+i+")")
+			" OR lower(c.external_contact_ref) LIKE $"+i+")")
 	}
 	clause := strings.Join(where, " AND ")
 	const from = `inbox_chats_v c` + chatCustomerJoin

@@ -130,6 +130,8 @@ func TestSQLLintRulesCatchViolations(t *testing.T) {
 		{"N1 concurrent index", mig, `CREATE INDEX CONCURRENTLY i ON t (a)`, "N1"},
 		{"N1 intersect all", stm, `SELECT a FROM t1 WHERE x = $1 INTERSECT ALL SELECT a FROM t2 WHERE x = $1`, "N1"},
 		{"N1 nulls last in an index", mig, `CREATE INDEX i ON t (a DESC NULLS LAST)`, "N1"},
+		{"N1 bare column like", stm, `SELECT id FROM t WHERE name LIKE $1`, "N1"},
+		{"N1 bare column not like", stm, `SELECT id FROM t WHERE name NOT LIKE $1`, "N1"},
 		{"N1 greatest", stm, `SELECT GREATEST(a, b) FROM t WHERE c = $1`, "N1"},
 		{"N1 is distinct from", stm, `SELECT 1 FROM t WHERE a IS DISTINCT FROM $1`, "N1"},
 		{"N1 create or replace view", mig, `CREATE OR REPLACE VIEW v AS SELECT 1 FROM t`, "N1"},
@@ -147,6 +149,7 @@ func TestSQLLintRulesCatchViolations(t *testing.T) {
 		{"fragment json operator", frg, `doc->>'k' = $`, "E1"},
 		{"fragment xchats_now", frg, `updated_at = xchats_now()`, "E1"},
 		{"fragment question mark", frg, `c.status_id = ?`, "P1"},
+		{"fragment bare column like", frg, `OR c.external_contact_ref LIKE $`, "E1"},
 		{"fragment engine function", frg, `string_agg(name, ',')`, "E1"},
 	}
 	for _, tc := range tests {
@@ -185,6 +188,7 @@ func TestSQLLintAcceptsPortableSQL(t *testing.T) {
 		{"not exists", stm, `SELECT c.id FROM chats c WHERE c.org = $1 AND NOT EXISTS (
 			SELECT 1 FROM chat_members m WHERE m.chat_id = c.id AND m.user_id = $2)`},
 		{"in list", stm, `SELECT id FROM t WHERE org = $1 AND id IN ($2, $3, $4)`},
+		{"lower like escape", stm, `SELECT id FROM t WHERE lower(name) LIKE $1 ESCAPE '\'`},
 		{"lower like paging", stm, `SELECT id FROM t WHERE lower(name) LIKE $1 ORDER BY name LIMIT $2 OFFSET $3`},
 		{"coalesce case cast nullif", stm, `SELECT COALESCE(a, ''), CASE WHEN b > 0 THEN 'y' ELSE 'n' END,
 			CAST(NULL AS BIGINT), NULLIF(c, '') FROM t WHERE d = $1`},

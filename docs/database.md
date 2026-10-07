@@ -165,7 +165,7 @@ Only string literals are read, never comments.
 | T1 | column and `CAST` types outside `text`, `bigint`, `integer`, `smallint`, `boolean`, `bytea`, `numeric`, `real` (`BLOB`, `UUID`, `TIMESTAMP`, `VARCHAR`, …) |
 | D1 | a column `DEFAULT` that is not a constant |
 | M1 | statements other than `SELECT`/`INSERT`/`UPDATE`/`DELETE` and `CREATE`/`DROP` of tables, indexes and views; `ALTER TABLE` other than `ADD COLUMN` and `RENAME` (SQLite cannot alter a column or constraint in place: rebuild the table) |
-| N1 | constructs only one engine has: `DISTINCT ON`, `= ANY(…)`, `ARRAY[…]`, `CURRENT_TIMESTAMP`, `ROLLUP`, `LATERAL`, identity columns, operators other than `= <> < <= > >= + - * / % \|\|` |
+| N1 | constructs only one engine has: `DISTINCT ON`, `= ANY(…)`, `ARRAY[…]`, `CURRENT_TIMESTAMP`, `ROLLUP`, `LATERAL`, identity columns, `LIKE` on anything but `lower(column)` (SQLite's `LIKE` ignores ASCII case, PostgreSQL's does not), operators other than `= <> < <= > >= + - * / % \|\|` |
 | F1 | functions other than `count`, `sum`, `min`, `max`, `lower` (one argument each), `TRIM(x)` and `LIKE … ESCAPE` |
 
 Each finding names `file:line` and the rule. Fix it at the source. A construct that is

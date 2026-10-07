@@ -34,7 +34,8 @@ package dbtest
 //	D1  defaults                a column DEFAULT is a constant: the repository supplies ids and times
 //	M1  statement kinds         SELECT/INSERT/UPDATE/DELETE and the DDL both engines run identically
 //	N1  engine-only constructs  DISTINCT ON, = ANY(...), ARRAY[...], CURRENT_TIMESTAMP, ROLLUP, LATERAL,
-//	                            identity columns, operators other than = <> < <= > >= + - * / % || ...
+//	                            identity columns, operators other than = <> < <= > >= + - * / % ||,
+//	                            LIKE on anything but lower(column) (it is case-insensitive on SQLite only) ...
 //	F1  functions               count, sum, min, max, lower (one argument each); anything else is
 //	                            unverified on one engine or the other
 //
@@ -183,6 +184,9 @@ var engineTokens = func() []engineToken {
 		newToken("$$", `\$\$`, "PostgreSQL dollar quoting", true, false),
 		newToken("CREATE FUNCTION", `\bcreate\s+(?:or\s+replace\s+)?(?:function|extension)\b`, "no custom functions or extensions: PostgreSQL must need no superuser", true, false),
 		callToken("json function", `\bjsonb?_[a-z_]+\s*\(`, "JSON functions differ per engine; handle JSON in Go", true, true),
+		// A fragment such as "c.ref LIKE $" is half of a statement the tree rules never see; a column
+		// (not a closing parenthesis) right before LIKE is the bare-column case N1 reports in a whole statement.
+		newToken("LIKE on a bare column", `[\w."]\s+like\s+\$`, "SQLite's LIKE ignores ASCII case and PostgreSQL's does not: write lower(column) LIKE a pattern lowered in Go", false, true),
 		// In a whole statement the parse tree reports these precisely; in a fragment it cannot.
 		newToken("CURRENT_TIMESTAMP", `\bcurrent_(?:timestamp|date|time)\b`, "bind a UTC Unix millisecond value from Go", false, true),
 	}
@@ -559,7 +563,11 @@ func (l *treeLint) visit(m protoreflect.Message) bool {
 			if !portableOps[op] && !e1Operators[op] {
 				l.add("N1", off, "operator %s does not exist on both engines (portable: = <> < <= > >= + - * / %% ||)", op)
 			}
-		case "AEXPR_LIKE", "AEXPR_IN", "AEXPR_NULLIF", "AEXPR_BETWEEN", "AEXPR_NOT_BETWEEN", "AEXPR_ILIKE":
+		case "AEXPR_LIKE":
+			if !isLowerCall(msgOf(m, "lexpr")) {
+				l.add("N1", off, "LIKE on a bare column behaves differently per engine (SQLite's ignores ASCII case, PostgreSQL's does not): write lower(column) LIKE a pattern lowered in Go")
+			}
+		case "AEXPR_IN", "AEXPR_NULLIF", "AEXPR_BETWEEN", "AEXPR_NOT_BETWEEN", "AEXPR_ILIKE":
 			// ILIKE is E1's
 		case "AEXPR_OP_ANY", "AEXPR_OP_ALL":
 			l.add("N1", off, "= ANY(...) / ALL(...) over an array is PostgreSQL-only; expand the list into IN ($1, $2, ...)")
@@ -663,6 +671,11 @@ func (l *treeLint) visit(m protoreflect.Message) bool {
 		}
 	}
 	return true
+}
+
+// isLowerCall reports whether e is a call of lower(...).
+func isLowerCall(e protoreflect.Message) bool {
+	return e != nil && nameOf(e) == "FuncCall" && strings.EqualFold(strings.Join(stringsOf(e, "funcname"), "."), "lower")
 }
 
 // standardSyntaxNote explains a pg_catalog name: the SQL never spelled it that way.

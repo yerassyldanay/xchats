@@ -88,7 +88,7 @@ func TestCommentOnlyMigrationIsRecordedOnBothEngines(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE identifier LIKE '2999%'`).Scan(&n); err != nil || n != 2 {
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE lower(identifier) LIKE '2999%'`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("recorded %d no-op migrations (%v), want 2", n, err)
 	}
 }
