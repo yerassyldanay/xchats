@@ -13,6 +13,7 @@ import (
 // The shared contract checks both dialects against the same application schema.
 type contractColumn struct {
 	Name       string `json:"name"`
+	Type       string `json:"type"`
 	Nullable   bool   `json:"nullable"`
 	HasDefault bool   `json:"has_default"`
 }
@@ -70,9 +71,11 @@ func loadContract(t *testing.T) schemaContract {
 	return c
 }
 
-// TestSchemaContract checks every application table, view, column, primary key,
-// foreign key/delete action, and index shape on the selected database engine.
-// Engine-specific defaults and checks are covered by behavioral tests.
+// TestSchemaContract checks every application table, view, column (its declared
+// type, nullability and whether it has a default), primary key, foreign
+// key/delete action, and index shape on the selected database engine. The types
+// are the portable ones, so SQLite's declared type and PostgreSQL's data_type
+// must read the same. CHECK constraints are covered by checks_test.go.
 func TestSchemaContract(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
@@ -139,6 +142,12 @@ func checkTable(t *testing.T, db *dbx.DB, ctx context.Context, table string, wan
 		}
 		if gc.nullable != wc.Nullable {
 			t.Errorf("column %q: nullable = %v, want %v", name, gc.nullable, wc.Nullable)
+		}
+		if gc.typ != wc.Type {
+			t.Errorf("column %q: type = %s, want %s", name, gc.typ, wc.Type)
+		}
+		if gc.hasDefault != wc.HasDefault {
+			t.Errorf("column %q: has a default = %v, want %v", name, gc.hasDefault, wc.HasDefault)
 		}
 	}
 	for name := range cols {
@@ -242,16 +251,18 @@ func sqliteColumnNameSet(t *testing.T, db *dbx.DB, ctx context.Context, table st
 }
 
 type sqliteColumn struct {
-	nullable bool
+	nullable   bool
+	typ        string // declared type, lower case; a view's computed columns have none
+	hasDefault bool
 }
 
 // sqliteColumns reads PRAGMA table_info(table). It works for views too
 // (SQLite reports a view's output columns the same way).
 func sqliteColumns(t *testing.T, db *dbx.DB, ctx context.Context, table string) map[string]sqliteColumn {
 	t.Helper()
-	query := `SELECT name, "notnull" FROM pragma_table_info($1)`
+	query := `SELECT name, "notnull", lower(type), CASE WHEN dflt_value IS NULL THEN 0 ELSE 1 END FROM pragma_table_info($1)`
 	if db.Dialect() == dbx.Postgres {
-		query = `SELECT column_name, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1`
+		query = `SELECT column_name, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END, data_type, CASE WHEN column_default IS NULL THEN 0 ELSE 1 END FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1`
 	}
 	rows, err := db.Query(ctx, query, table)
 	if err != nil {
@@ -260,12 +271,12 @@ func sqliteColumns(t *testing.T, db *dbx.DB, ctx context.Context, table string) 
 	defer rows.Close()
 	out := map[string]sqliteColumn{}
 	for rows.Next() {
-		var name string
-		var notNull int
-		if err := rows.Scan(&name, &notNull); err != nil {
+		var name, typ string
+		var notNull, hasDefault int
+		if err := rows.Scan(&name, &notNull, &typ, &hasDefault); err != nil {
 			t.Fatal(err)
 		}
-		out[name] = sqliteColumn{nullable: notNull == 0}
+		out[name] = sqliteColumn{nullable: notNull == 0, typ: typ, hasDefault: hasDefault == 1}
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)

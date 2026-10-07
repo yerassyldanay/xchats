@@ -243,7 +243,8 @@ database: no extension and no superuser. `make test-postgres` runs the whole bac
 suite, every package, on PostgreSQL, including the seeded composition-root test in
 `cmd/xchats`; SQLite tests need no service. The default CI job runs the SQLite suite
 only, so run `make test-postgres` before changing persistence code. Tests cover schema
-parity, constraints/cascades, replay, checksum rejection, late arrivals, transaction
+parity (`migrations/schema_contract.json`: names, types, nullability, defaults, keys and
+indexes, identical on both engines), constraints/cascades, replay, checksum rejection, late arrivals, transaction
 rollback, concurrent runners, the import queue's concurrency, and application persistence
 behavior. `TestSchemaHasNoServerSideObjects` asserts the migrated PostgreSQL schema holds
 no functions, sequences, triggers or extension types.
