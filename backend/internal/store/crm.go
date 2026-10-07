@@ -552,7 +552,7 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	args = append(args, f.Limit, f.Offset)
 	q := `SELECT ` + customerCols + ` FROM crm_customers c
 		WHERE ` + clause + `
-		ORDER BY c.updated_at DESC
+		ORDER BY c.updated_at DESC, c.id
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {

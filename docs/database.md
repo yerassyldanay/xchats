@@ -102,9 +102,13 @@ Rules for application SQL and migrations:
 - **No SQL clock, no SQL id generator.** There is no `now()`, `xchats_now()`,
   `gen_random_uuid()` or column default for either; INSERTs bind `id`, `created_at` and
   `updated_at` explicitly, and an upsert takes `updated_at = EXCLUDED.updated_at`. Do
-  interval arithmetic in Go and bind the cutoff. Timestamps have millisecond resolution:
-  two rows written in one millisecond tie, so order by an explicit sequence when order
-  matters (see `chat_messages.seq`).
+  interval arithmetic in Go and bind the cutoff. Timestamps have millisecond resolution,
+  and rows that tie come back in no particular order on PostgreSQL. So every paginated
+  list ends its `ORDER BY` with the row id (pages never repeat or skip a row), and code
+  that inserts rows in a loop and later lists or processes them by `created_at` spaces
+  them one millisecond apart with `rowStamp` (`internal/store`): campaign recipients keep
+  the order they were imported in. Where the order must be exact use an explicit
+  sequence (see `chat_messages.seq`).
 - **No SQL JSON.** Do not use `->`, `->>`, `json_*`/`jsonb_*`, merge-patch helpers or
   JSON table functions. Read the column, edit the value in Go and write it back. When the
   write races with others, make it a compare-and-swap on the text that was read; the

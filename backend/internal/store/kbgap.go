@@ -522,7 +522,7 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 		Scan(&eventID); err != nil {
 		return err
 	}
-	for _, field := range o.KBGapMissingFields {
+	for i, field := range o.KBGapMissingFields {
 		if field == "" {
 			continue
 		}
@@ -535,7 +535,7 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO ai_kb_gap_missing_fields (event_id, field_name, id, created_at) VALUES ($1, $2, $3, $4)
 				ON CONFLICT (event_id, field_name) DO NOTHING`,
-			eventID, field, uuid.New(), now); err != nil {
+			eventID, field, uuid.New(), rowStamp(now, i)); err != nil {
 			return err
 		}
 	}

@@ -113,7 +113,7 @@ func (s *Store) ListChatsForOrg(ctx context.Context, f ChatFilter) ([]Chat, int,
 	args = append(args, f.Limit, f.Offset)
 	q := `SELECT ` + chatCols + ` FROM ` + from + `
 		WHERE ` + clause + `
-		ORDER BY c.last_message_at DESC NULLS LAST
+		ORDER BY c.last_message_at DESC NULLS LAST, c.id
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {

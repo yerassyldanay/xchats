@@ -316,7 +316,7 @@ func (s *Store) DeleteCampaign(ctx context.Context, id uuid.UUID) error {
 func (s *Store) ListCampaignsForOrg(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]Campaign, int, error) {
 	rows, err := s.db.Query(ctx, `SELECT `+campaignCols+`
 		FROM campaigns WHERE organization_id = $1
-		ORDER BY created_at DESC LIMIT $2 OFFSET $3`, orgID, limit, offset)
+		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -517,11 +517,11 @@ func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.U
 		return Campaign{}, wrap("read never-contacted recipients", err)
 	}
 	_ = srcRecipients.Close()
-	for _, c := range copies {
+	for i, c := range copies {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO campaign_recipients (id, campaign_id, normalized_identity, raw_input, name, attributes, created_at, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
-			uuid.New(), out.ID, c.identity, c.raw, c.name, c.attributes, now); err != nil {
+			uuid.New(), out.ID, c.identity, c.raw, c.name, c.attributes, rowStamp(now, i)); err != nil {
 			return Campaign{}, wrap("copy never-contacted recipients", err)
 		}
 	}
@@ -539,7 +539,7 @@ func (s *Store) DuplicateCampaign(ctx context.Context, srcID, actorUserID uuid.U
 // ---------------------------------------------------------------------------
 
 func insertCampaignEvent(ctx context.Context, q dbx.DBTX, campaignID uuid.UUID, event string, actorUserID uuid.NullUUID, detail map[string]any) error {
-	now := time.Now()
+	now := eventStamp() // the timeline is read newest first: two events in one millisecond must not tie
 
 	var actor any
 	if actorUserID.Valid {
@@ -568,7 +568,7 @@ func (s *Store) ListCampaignEvents(ctx context.Context, campaignID uuid.UUID, li
 	rows, err := s.db.Query(ctx, `
 		SELECT id, campaign_id, event, actor_user_id, detail, created_at
 		FROM campaign_events WHERE campaign_id = $1
-		ORDER BY created_at DESC LIMIT $2 OFFSET $3`, campaignID, limit, offset)
+		ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, campaignID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -678,7 +678,7 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 		}
 	}
 
-	for _, identity := range order {
+	for i, identity := range order {
 		r := deduped[identity]
 		attrsJSON, err := json.Marshal(r.Attributes)
 		if err != nil {
@@ -691,7 +691,7 @@ func (s *Store) ReplaceCampaignRecipients(ctx context.Context, campaignID uuid.U
 				raw_input = excluded.raw_input, name = excluded.name, attributes = excluded.attributes,
 				updated_at = EXCLUDED.updated_at
 			WHERE campaign_recipients.status = 'pending'`,
-			campaignID, identity, r.RawInput, r.Name, string(attrsJSON), uuid.New(), now); err != nil {
+			campaignID, identity, r.RawInput, r.Name, string(attrsJSON), uuid.New(), rowStamp(now, i)); err != nil {
 			return wrap("upsert campaign recipient", err)
 		}
 	}
@@ -721,7 +721,7 @@ func (s *Store) ListCampaignRecipients(ctx context.Context, campaignID uuid.UUID
 	q := `SELECT ` + campaignRecipientCols + `
 		FROM campaign_recipients r LEFT JOIN ` + msgTable + ` m ON m.id = r.message_id
 		WHERE ` + where +
-		` ORDER BY r.created_at LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
+		` ORDER BY r.created_at, r.id LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err

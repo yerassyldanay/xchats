@@ -158,7 +158,7 @@ func (s *Store) ListFollowups(ctx context.Context, f FollowupFilter) ([]Followup
 	args = append(args, limit, offset)
 	rows, err := s.db.Query(ctx, `SELECT `+followupCols+` FROM `+followupFrom+`
 		WHERE `+clause+`
-		ORDER BY f.due_at ASC
+		ORDER BY f.due_at ASC, f.id
 		LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
 	if err != nil {
 		return nil, 0, wrap("list followups", err)

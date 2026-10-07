@@ -98,7 +98,7 @@ func (s *Store) ListCampaignTemplatesForOrg(ctx context.Context, orgID uuid.UUID
 	rows, err := s.db.Query(ctx, `SELECT `+campaignTemplateCols+`
 		FROM campaign_templates
 		WHERE organization_id = $1 AND is_archived = $2 AND ($3 = '' OR lower(name) LIKE $3)
-		ORDER BY updated_at DESC LIMIT $4 OFFSET $5`,
+		ORDER BY updated_at DESC, id LIMIT $4 OFFSET $5`,
 		orgID, archived, search, limit, offset)
 	if err != nil {
 		return nil, 0, wrap("list campaign templates", err)

@@ -694,7 +694,7 @@ func (s *Store) ListUsersForOrg(ctx context.Context, orgID uuid.UUID, limit, off
 		FROM users u
 		JOIN organization_users ou ON ou.user_id = u.id
 		WHERE ou.organization_id = $1
-		ORDER BY u.created_at LIMIT $2 OFFSET $3`, orgID, limit, offset)
+		ORDER BY u.created_at, u.id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
