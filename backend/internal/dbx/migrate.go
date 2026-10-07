@@ -1,6 +1,7 @@
 package dbx
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -23,8 +24,17 @@ type MigrationOptions struct{ Force string }
 
 // migration is one plain-SQL file. body is the file exactly as written — there
 // is no template step and no per-engine variant — and checksum is the SHA-256 of
-// those same bytes, so one recorded checksum means the same on every engine.
+// those same bytes with CRLF read as LF (see checksumOf), so one recorded checksum
+// means the same on every engine and for every checkout.
 type migration struct{ id, body, checksum string }
+
+// checksumOf is the SHA-256 of a migration file with Windows line endings read as
+// Unix ones. go:embed embeds a file as it was checked out, and a checkout with
+// autocrlf (the Windows desktop build) turns LF into CRLF; the migration is the
+// same migration, so a database migrated by one build must not be rejected by the other.
+func checksumOf(b []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))))
+}
 
 // RunMigrations applies every unrecorded identifier, including files older than
 // the newest applied one. The full timestamp AND description are the identity.
@@ -47,6 +57,9 @@ func RunMigrationsWithOptions(ctx context.Context, db *DB, mfs fs.FS, opts Migra
 	}
 	if !found {
 		return fmt.Errorf("dbx: unknown migration to replay: %s", opts.Force)
+	}
+	if err := refuseOlderBuildDatabase(ctx, db); err != nil {
+		return err
 	}
 	// Initialize under the same cross-process lock as application write
 	// transactions. PostgreSQL CREATE IF NOT EXISTS alone can race in pg_class.
@@ -96,7 +109,7 @@ func loadMigrations(mfs fs.FS) ([]migration, error) {
 		if strings.TrimSpace(string(b)) == "" {
 			return nil, fmt.Errorf("dbx: empty migration %s", e.Name())
 		}
-		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), string(b), fmt.Sprintf("%x", sha256.Sum256(b))})
+		files = append(files, migration{strings.TrimSuffix(e.Name(), ".sql"), string(b), checksumOf(b)})
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("dbx: no SQL migrations found")
@@ -136,4 +149,39 @@ func applyMigration(ctx context.Context, db *DB, m migration, force bool) error 
 		return fmt.Errorf("dbx: commit migration %s: %w", m.id, err)
 	}
 	return nil
+}
+
+// legacyHistoryTable is where the pre-squash runner (before the five plain-SQL baselines) kept
+// its history.
+const legacyHistoryTable = "xchats_schema_migrations"
+
+// refuseOlderBuildDatabase stops a database created by an older xchats build from being
+// migrated. Its tables have a different shape, and the baseline files are all
+// CREATE ... IF NOT EXISTS: they would be recorded as applied over the old tables as silent
+// no-ops, and the application would then write BIGINT milliseconds into the old columns. There
+// is no upgrade path while xchats is unreleased, so the only safe answer is a clear refusal that
+// changes nothing.
+func refuseOlderBuildDatabase(ctx context.Context, db *DB) error {
+	legacy, err := tableExists(ctx, db, legacyHistoryTable)
+	if err != nil || !legacy {
+		return err
+	}
+	current, err := tableExists(ctx, db, "schema_migrations")
+	if err != nil || current {
+		return err
+	}
+	return fmt.Errorf("dbx: this database was created by an older xchats build (it has the table %s) and its schema is not compatible with the current migrations; recreate it (delete the SQLite file, or drop and recreate the PostgreSQL database) and run migrate again", legacyHistoryTable)
+}
+
+// tableExists asks the engine's own catalog: this is the engine boundary, so it may.
+func tableExists(ctx context.Context, db *DB, name string) (bool, error) {
+	query := `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = $1`
+	if db.Dialect() == Postgres {
+		query = `SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1`
+	}
+	var n int
+	if err := db.QueryRow(ctx, query, name).Scan(&n); err != nil {
+		return false, fmt.Errorf("dbx: look for table %s: %w", name, err)
+	}
+	return n > 0, nil
 }

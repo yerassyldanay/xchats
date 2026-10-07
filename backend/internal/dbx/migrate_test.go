@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -253,5 +254,26 @@ func TestRunMigrationsCommentOnlyFileIsRecorded(t *testing.T) {
 	var n int
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("recorded %d migrations (%v), want 1", n, err)
+	}
+}
+
+// A checkout may convert line endings (Windows with autocrlf builds the desktop app from CRLF
+// files), and go:embed embeds the files as checked out. The same migration must keep the same
+// checksum, or a database migrated by one build is rejected by the other.
+func TestMigrationChecksumIgnoresLineEndings(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	lf := "CREATE TABLE IF NOT EXISTS eol (a BIGINT NOT NULL);\n-- second line\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+
+	if err := RunMigrations(ctx, db, fstest.MapFS{"20260101000000_eol.sql": {Data: []byte(lf)}}); err != nil {
+		t.Fatalf("migrate with LF: %v", err)
+	}
+	if err := RunMigrations(ctx, db, fstest.MapFS{"20260101000000_eol.sql": {Data: []byte(crlf)}}); err != nil {
+		t.Fatalf("the same migration with CRLF line endings was rejected: %v", err)
+	}
+	// A real edit is still caught.
+	if err := RunMigrations(ctx, db, fstest.MapFS{"20260101000000_eol.sql": {Data: []byte(lf + "-- edited\n")}}); err == nil {
+		t.Fatal("an edited migration was accepted")
 	}
 }

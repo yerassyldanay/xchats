@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -90,5 +91,29 @@ func TestCommentOnlyMigrationIsRecordedOnBothEngines(t *testing.T) {
 	var n int
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE lower(identifier) LIKE '2999%'`).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("recorded %d no-op migrations (%v), want 2", n, err)
+	}
+}
+
+// A database created by an older xchats build keeps its history in xchats_schema_migrations and
+// has tables of a different shape. The baseline files are all CREATE ... IF NOT EXISTS, so running
+// them over such a database would be silent no-ops followed by writes in the new representation
+// (BIGINT milliseconds into the old columns). The runner must refuse, and change nothing.
+func TestMigrationsRefuseADatabaseFromAnOlderBuild(t *testing.T) {
+	ctx := context.Background()
+	db, err := dbx.Open(ctx, Target(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mustExec(t, db, ctx, `CREATE TABLE xchats_schema_migrations (version TEXT PRIMARY KEY)`)
+	mustExec(t, db, ctx, `CREATE TABLE users (id TEXT PRIMARY KEY NOT NULL, created_at TEXT)`)
+
+	err = dbx.RunMigrations(ctx, db, migrations.FS)
+	if err == nil || !strings.Contains(err.Error(), "older xchats build") {
+		t.Fatalf("RunMigrations over a database from an older build: err = %v, want a refusal naming the older build", err)
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err == nil {
+		t.Fatal("the refused run still created schema_migrations")
 	}
 }

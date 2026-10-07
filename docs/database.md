@@ -72,8 +72,12 @@ history to replay. The embedded files ship in the binary.
 before returning. The CLI can migrate without starting a server. Each file and its
 history insert commit in one transaction. On failure both roll back. The runner
 serializes migration checks and execution across callers (and PostgreSQL processes),
-records `identifier`, SHA-256 `checksum` of the file, and `applied_at` (UTC Unix
-milliseconds) in `schema_migrations`, and rejects changed applied files. It does not maintain old migration tables.
+records `identifier`, SHA-256 `checksum` of the file (Windows line endings read as Unix
+ones, so a CRLF checkout of the same file matches; `.gitattributes` also pins
+`backend/migrations/*.sql` to LF), and `applied_at` (UTC Unix milliseconds) in
+`schema_migrations`, and rejects changed applied files. It does not maintain old migration
+tables: a database that still has the `xchats_schema_migrations` table of an older build
+and no `schema_migrations` is refused outright, before anything is changed.
 
 The complete `YYYYMMDDHHMMSS_description` is the identifier, **not just the timestamp**.
 Two descriptive names created in the same second are distinct. The generator refuses
@@ -228,9 +232,11 @@ The CLI refuses forced replay when `environment: production` is configured.
 `migrate`. Do not delete migration history while retaining a mismatched schema.
 The five files were rewritten in place when the schema became plain portable SQL
 (`TEXT` ids, `BIGINT` millisecond timestamps, no extensions), and the project is
-unreleased, so a development database created by any earlier build is not upgraded: it
-fails with a checksum mismatch on the first changed file. Recreate it (drop and recreate
-the PostgreSQL database, or delete the SQLite file) and run `migrate`.
+unreleased, so a development database created by any earlier build is not upgraded: one
+from before the squash (it has `xchats_schema_migrations`) is refused with a message that
+says so, and one migrated by an earlier commit of this runner fails with a checksum
+mismatch on the first changed file. Recreate it (drop and recreate the PostgreSQL
+database, or delete the SQLite file) and run `migrate`.
 
 ## Verification
 
