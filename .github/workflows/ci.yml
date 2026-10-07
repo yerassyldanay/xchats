@@ -129,6 +129,14 @@ jobs:
             --config="$GITHUB_WORKSPACE/.golangci.yml" \
             --new-from-merge-base=origin/${{ github.base_ref || 'master' }}
 
+      # The same guard `go test -race` already ran above, as its own named step so a
+      # portability failure reads as one: it parses every migration and repository
+      # statement with PostgreSQL's grammar and rejects engine-specific tokens. No database,
+      # no C compiler (see backend/internal/dbtest/sql_linter_test.go).
+      - name: SQL portability lint
+        working-directory: backend
+        run: CGO_ENABLED=0 go test -count=1 -run '^TestSQLLint' ./internal/dbtest
+
   # A separate job, not a step in backend-test: evals/harness/go.mod
   # declares go 1.26.4, newer than backend/go.mod's 1.25.0. Under the
   # default GOTOOLCHAIN=auto a single job could build both by silently
