@@ -38,7 +38,7 @@ func TestDatabaseLocationNeverCarriesCredentials(t *testing.T) {
 			"postgresql://h/xchats", "/data/whatsmeow.db"},
 		{"sqlite", StorageConfig{DatabaseTarget: "/data/xchats.db", WADeviceDatabaseTarget: "/data/whatsmeow.db"},
 			"/data/xchats.db", "/data/whatsmeow.db"},
-		{"unparseable url", StorageConfig{DatabaseTarget: "postgres://app:" + secret + "@exa mple/xchats"},
+		{"unparseable url", StorageConfig{DatabaseTarget: "postgres://app:" + secret + "@exa mple/xchats", WADeviceDatabaseTarget: "postgres://wa:" + secret + "@exa mple/whatsmeow"},
 			"postgres://", "postgres://"},
 	}
 	for _, tc := range tests {
