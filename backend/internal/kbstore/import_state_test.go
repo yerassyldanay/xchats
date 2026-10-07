@@ -229,3 +229,89 @@ func TestEnqueueImport_File_ConcurrentEnqueueExactlyOneWins(t *testing.T) {
 		t.Fatalf("stored import_run_id = %s, want the winner's %s", str(run), runs[winner])
 	}
 }
+
+// An MCP upsert that cites a material tags its extraction_metadata with the provenance target.
+// The import queue edits the same document through its own compare-and-swap, holding no lock
+// the upsert's transaction holds (on PostgreSQL the advisory lock only serialises transactions
+// that took it), so a write that lands between the tagger's read and its write must not be
+// overwritten with the stale merge.
+func TestProvenanceTaggingKeepsAConcurrentImportWrite(t *testing.T) {
+	kb, orgID, _, db := newTestKB(t)
+	ctx := context.Background()
+
+	id, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: uuid.New(), Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const target = `{"mcp_target":{"type":"topic","key":"warranty"}}`
+	raced := false
+	err = kbstore.TagMaterialProvenance(ctx, db, orgID, id, target, func() {
+		if raced {
+			return
+		}
+		raced = true
+		// the queue records a failed attempt after the tagger has read the document
+		if _, err := kb.RequeueImportJob(ctx, id, "timeout", 5); err != nil {
+			t.Errorf("concurrent RequeueImportJob: %v", err)
+		}
+	})
+	if err != nil {
+		t.Fatalf("TagMaterialProvenance: %v", err)
+	}
+
+	var raw string
+	if err := db.QueryRow(ctx, `SELECT extraction_metadata FROM kbd_materials WHERE id = $1`, id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Import struct {
+			Attempts  int    `json:"attempts"`
+			LastError string `json:"last_error"`
+		} `json:"import"`
+		Target *struct {
+			Key string `json:"key"`
+		} `json:"mcp_target"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("stored document %q: %v", raw, err)
+	}
+	if doc.Target == nil || doc.Target.Key != "warranty" {
+		t.Errorf("the provenance target is missing from %s", raw)
+	}
+	if doc.Import.Attempts != 1 || doc.Import.LastError != "timeout" {
+		t.Errorf("the concurrent import write was overwritten: attempts=%d last_error=%q in %s", doc.Import.Attempts, doc.Import.LastError, raw)
+	}
+}
+
+// FinishImportExtraction changes the status and the extracted text together with the import
+// params; a failure part-way must leave the material exactly as it was, not parsed with a
+// stale last_error and an error returned for an extraction that was stored.
+func TestFinishImportExtractionIsAllOrNothing(t *testing.T) {
+	kb, orgID, _, db := newTestKB(t)
+	ctx := context.Background()
+
+	id, err := kb.EnqueueImport(ctx, orgID, kbstore.ImportInput{RunID: uuid.New(), Provider: "native", TargetType: "auto", Primary: true, URL: "https://example.com/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jobs, err := kb.ClaimImportJobs(ctx, 1); err != nil || len(jobs) != 1 {
+		t.Fatalf("ClaimImportJobs: %d jobs, err %v", len(jobs), err)
+	}
+	// The stored import state cannot be parsed, so the params half of the write fails.
+	if _, err := db.Exec(ctx, `UPDATE kbd_materials SET extraction_metadata = $2 WHERE id = $1`, id, "not json"); err != nil {
+		t.Fatal(err)
+	}
+
+	err = kb.FinishImportExtraction(ctx, id, kbstore.ExtractionOutcome{Status: "parsed", ExtractedText: "the page text", VisualSummary: "a chart"})
+	if err == nil {
+		t.Fatal("FinishImportExtraction succeeded over an unreadable import state")
+	}
+	var status string
+	var text, summary *string
+	if err := db.QueryRow(ctx, `SELECT processing_status, extracted_text, visual_summary FROM kbd_materials WHERE id = $1`, id).Scan(&status, &text, &summary); err != nil {
+		t.Fatal(err)
+	}
+	if status != "extracting" || (text != nil && *text != "") || (summary != nil && *summary != "") {
+		t.Errorf("a failed FinishImportExtraction left status=%q text=%q summary=%q behind, want the claimed row untouched", status, str(text), str(summary))
+	}
+}

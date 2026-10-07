@@ -536,13 +536,21 @@ func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, 
 		}
 	}
 	for _, id := range prov.MaterialIDs {
-		// SQLite has no jsonb `||`: read the current value and merge in Go
-		// (jsonShallowMerge) instead of merging inside the UPDATE statement.
-		// Safe without an explicit row lock — this always runs inside the
-		// caller's already-open write transaction (see doc comment above),
-		// which under internal/dbx's single-connection design already holds
-		// the database's one write lock for its whole duration, so no
-		// concurrent writer can observe or race this read-modify-write.
+		if err := tagMaterialProvenance(ctx, db, orgID, id, string(target), nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tagMaterialProvenance merges the provenance target into one material's extraction_metadata.
+// SQL has no portable JSON merge, so it reads the document, merges in Go and writes it back; the
+// write is a compare-and-swap on the text that was read, because the import queue edits the same
+// document (mutateImportParams) without taking any lock this transaction holds. A lost race
+// re-reads and merges again, up to importCASAttempts times. afterRead, when not nil, runs between
+// the read and the write: tests use it to be the concurrent writer.
+func tagMaterialProvenance(ctx context.Context, db dbtx, orgID, id uuid.UUID, target string, afterRead func()) error {
+	for attempt := 0; attempt < importCASAttempts; attempt++ {
 		var current string
 		err := db.QueryRow(ctx, `SELECT extraction_metadata FROM kbd_materials
 			WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&current)
@@ -552,16 +560,23 @@ func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, 
 		if err != nil {
 			return fmt.Errorf("read material_id %s extraction_metadata: %w", id, err)
 		}
-		merged, err := jsonShallowMerge(current, string(target))
+		merged, err := jsonShallowMerge(current, target)
 		if err != nil {
 			return fmt.Errorf("merge provenance into material_id %s: %w", id, err)
 		}
-		if _, err := db.Exec(ctx, `UPDATE kbd_materials
+		if afterRead != nil {
+			afterRead()
+		}
+		tag, err := db.Exec(ctx, `UPDATE kbd_materials
 			SET extraction_metadata = $3
-			WHERE id = $1 AND organization_id = $2`,
-			id, orgID, merged); err != nil {
+			WHERE id = $1 AND organization_id = $2 AND extraction_metadata = $4`,
+			id, orgID, merged, current)
+		if err != nil {
 			return fmt.Errorf("tag material_id %s with provenance: %w", id, err)
 		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("tag material_id %s with provenance: %w", id, errImportConflict)
 }

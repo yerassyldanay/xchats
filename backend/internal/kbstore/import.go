@@ -517,19 +517,36 @@ func (s *Store) ClaimImportJobs(ctx context.Context, limit int) ([]ImportJob, er
 // clause documenting that assumption. Clears any LastError from a prior
 // failed attempt on success (out.Status == "parsed").
 func (s *Store) FinishImportExtraction(ctx context.Context, id uuid.UUID, out ExtractionOutcome) error {
-	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET processing_status = $2, extracted_text = $3,
-		    visual_summary = CASE WHEN $4 <> '' THEN $4 ELSE visual_summary END,
-		    updated_at = $5
-		WHERE id = $1 AND processing_status = 'extracting'`,
-		id, out.Status, out.ExtractedText, out.VisualSummary, time.Now())
+	// The status, the extracted text and the cleared last_error are one change: a failure part way
+	// must not leave a parsed material that still shows the previous attempt's error, or report an
+	// error for an extraction that was stored.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	applied, err := mutateImportParams(ctx, tx, id, func(r *importRow) bool {
+		if r.Status != "extracting" {
+			return false
+		}
+		r.Status = out.Status
+		r.Params.LastError = ""
+		return true
+	})
 	if err != nil {
 		return fmt.Errorf("kbstore: finish import extraction: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if !applied {
 		return ErrUnknownKind
 	}
-	return s.mergeImportParams(ctx, id, func(p *ImportParams) { p.LastError = "" })
+	if _, err := tx.Exec(ctx, `UPDATE kbd_materials
+		SET extracted_text = $2,
+		    visual_summary = CASE WHEN $3 <> '' THEN $3 ELSE visual_summary END
+		WHERE id = $1`,
+		id, out.ExtractedText, out.VisualSummary); err != nil {
+		return fmt.Errorf("kbstore: finish import extraction: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 // RequeueImportJob handles a REPORTED (not crash-recovered) extraction
