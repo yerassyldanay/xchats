@@ -49,16 +49,11 @@ type ServerConfig struct {
 }
 
 // StorageConfig is where every on-disk file this process owns lives.
-// db_path has a committed default now (./data/xchats.db) — a fresh clone
-// boots without DB_PATH set at all.
+// database_target accepts either a SQLite path or a PostgreSQL URL.
 type StorageConfig struct {
-	DBPath      string `yaml:"db_path" env:"DB_PATH"`
-	DatabaseURL string `yaml:"database_url" env:"DATABASE_URL"`
-	// WADeviceDBPath is whatsmeow's own device-session SQLite file — kept
-	// separate from DBPath since whatsmeow's sqlstore manages that schema
-	// entirely on its own (see internal/whatsmeow/store.go).
-	WADeviceDBPath string `yaml:"wa_device_db_path" env:"WA_DEVICE_DB_PATH"`
-	BlobDir        string `yaml:"blob_dir" env:"BLOB_DIR"`
+	DatabaseTarget         string `yaml:"database_target" env:"DATABASE_TARGET"`
+	WADeviceDatabaseTarget string `yaml:"wa_device_database_target" env:"WA_DEVICE_DATABASE_TARGET"`
+	BlobDir                string `yaml:"blob_dir" env:"BLOB_DIR"`
 }
 
 // SystemConfig is process-wide operational tunables: logging, the queue's
@@ -298,9 +293,9 @@ func defaults() Config {
 			SecureCookies:   false,
 		},
 		Storage: StorageConfig{
-			DBPath:         "./data/xchats.db",
-			WADeviceDBPath: "./data/whatsmeow.db",
-			BlobDir:        "./blobdata",
+			DatabaseTarget:         "./data/xchats.db",
+			WADeviceDatabaseTarget: "./data/whatsmeow.db",
+			BlobDir:                "./blobdata",
 		},
 		System: SystemConfig{
 			LogFormat:                  "logfmt",
@@ -636,12 +631,9 @@ func PhoneFromJID(jid string) string {
 	return jid[:at]
 }
 
-// Database returns the configured PostgreSQL URL or local SQLite path.
+// Database returns the configured SQLite path or PostgreSQL URL.
 func (s StorageConfig) Database() string {
-	if s.DatabaseURL != "" {
-		return s.DatabaseURL
-	}
-	return s.DBPath
+	return s.DatabaseTarget
 }
 
 // IsPostgresURL reports whether a storage target is a PostgreSQL URL rather than a SQLite file path.
@@ -671,14 +663,8 @@ func redactDatabaseTarget(target string) string {
 	return u.Scheme + "://" + u.Host + u.Path
 }
 
-// DeviceDatabase follows the engine toggle while keeping SQLite sessions in
-// their own file. The provider library owns its whatsmeow_* tables and runner.
+// DeviceDatabase is independent from the application database. Configure a
+// separate PostgreSQL URL or SQLite path for whatsmeow's provider-owned schema.
 func (s StorageConfig) DeviceDatabase() string {
-	if s.DatabaseURL != "" {
-		return s.DatabaseURL
-	}
-	if IsPostgresURL(s.DBPath) {
-		return s.DBPath
-	}
-	return s.WADeviceDBPath
+	return s.WADeviceDatabaseTarget
 }

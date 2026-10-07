@@ -129,13 +129,38 @@ jobs:
             --config="$GITHUB_WORKSPACE/.golangci.yml" \
             --new-from-merge-base=origin/${{ github.base_ref || 'master' }}
 
-      # The same guard `go test -race` already ran above, as its own named step so a
-      # portability failure reads as one: it parses every migration and repository
-      # statement with PostgreSQL's grammar and rejects engine-specific tokens. No database,
-      # no C compiler (see backend/internal/dbtest/sql_linter_test.go).
-      - name: SQL portability lint
+
+  backend-postgres-test:
+    name: backend-postgres-test
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: xchats
+          POSTGRES_PASSWORD: xchats
+          POSTGRES_DB: xchats_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U xchats -d xchats_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      GOTOOLCHAIN: local
+      TEST_DATABASE_URL: postgres://xchats:xchats@localhost:5432/xchats_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Test PostgreSQL
         working-directory: backend
-        run: CGO_ENABLED=0 go test -count=1 -run '^TestSQLLint' ./internal/dbtest
+        run: go test -race -count=1 -timeout=45m ./...
 
   # A separate job, not a step in backend-test: evals/harness/go.mod
   # declares go 1.26.4, newer than backend/go.mod's 1.25.0. Under the

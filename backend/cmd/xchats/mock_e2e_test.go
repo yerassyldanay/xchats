@@ -68,11 +68,10 @@ func mockE2EConfig(t *testing.T) *config.Config {
 	cfg.System.MockExternals = true
 	// dbtest.Target is a local SQLite file, or an isolated PostgreSQL schema
 	// when TEST_DATABASE_URL is set, so this seeded composition-root test runs
-	// against whichever engine is under test. Storage.Database() then returns
-	// it, and DeviceDatabase() follows it onto PostgreSQL.
-	cfg.Storage.DatabaseURL = ""
-	cfg.Storage.DBPath = dbtest.Target(t)
-	cfg.Storage.WADeviceDBPath = filepath.Join(dir, "whatsmeow.db")
+	// against whichever engine is under test. Device persistence remains a
+	// separate SQLite file in this composition-root test.
+	cfg.Storage.DatabaseTarget = dbtest.Target(t)
+	cfg.Storage.WADeviceDatabaseTarget = filepath.Join(dir, "whatsmeow.db")
 	cfg.Storage.BlobDir = filepath.Join(dir, "blobdata")
 	return cfg
 }
@@ -80,7 +79,7 @@ func mockE2EConfig(t *testing.T) *config.Config {
 // mockE2ESeed seeds the base organization plus the full demo dataset
 // (every channel account and its chats, KB content, and — since
 // MockExternals is set — the mock credential backfill SeedDemoMockCredentials
-// provides) at cfg.Storage.DBPath, mirroring the "xchats seed && xchats
+// provides) at cfg.Storage.DatabaseTarget, mirroring the "xchats seed && xchats
 // serve" two-step a real profiling run performs (scripts/profile/server.sh).
 // A dedicated *store.Store is opened and fully closed here, before
 // buildServer opens its own — internal/dbx.Open's per-path refcounting
@@ -90,7 +89,7 @@ func mockE2EConfig(t *testing.T) *config.Config {
 func mockE2ESeed(t *testing.T, cfg *config.Config, log *slog.Logger) {
 	t.Helper()
 	ctx := context.Background()
-	st, err := store.New(ctx, cfg.Storage.DBPath)
+	st, err := store.New(ctx, cfg.Storage.DatabaseTarget)
 	if err != nil {
 		t.Fatalf("open seed store: %v", err)
 	}

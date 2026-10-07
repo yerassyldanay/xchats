@@ -32,13 +32,13 @@ func TestDatabaseLocationNeverCarriesCredentials(t *testing.T) {
 		db   string
 		dev  string
 	}{
-		{"database url", StorageConfig{DatabaseURL: "postgres://app:" + secret + "@db.example:5432/xchats?sslmode=require&password=" + secret, DBPath: "./data/xchats.db", WADeviceDBPath: "./data/whatsmeow.db"},
-			"postgres://db.example:5432/xchats", "postgres://db.example:5432/xchats"},
-		{"url in db path", StorageConfig{DBPath: "postgresql://app:" + secret + "@h/xchats", WADeviceDBPath: "./data/whatsmeow.db"},
-			"postgresql://h/xchats", "postgresql://h/xchats"},
-		{"sqlite", StorageConfig{DBPath: "/data/xchats.db", WADeviceDBPath: "/data/whatsmeow.db"},
+		{"separate postgres urls", StorageConfig{DatabaseTarget: "postgres://app:" + secret + "@db.example:5432/xchats?sslmode=require&password=" + secret, WADeviceDatabaseTarget: "postgres://wa:" + secret + "@db.example:5432/whatsmeow?sslmode=require"},
+			"postgres://db.example:5432/xchats", "postgres://db.example:5432/whatsmeow"},
+		{"url and sqlite", StorageConfig{DatabaseTarget: "postgresql://app:" + secret + "@h/xchats", WADeviceDatabaseTarget: "/data/whatsmeow.db"},
+			"postgresql://h/xchats", "/data/whatsmeow.db"},
+		{"sqlite", StorageConfig{DatabaseTarget: "/data/xchats.db", WADeviceDatabaseTarget: "/data/whatsmeow.db"},
 			"/data/xchats.db", "/data/whatsmeow.db"},
-		{"unparseable url", StorageConfig{DatabaseURL: "postgres://app:" + secret + "@exa mple/xchats"},
+		{"unparseable url", StorageConfig{DatabaseTarget: "postgres://app:" + secret + "@exa mple/xchats"},
 			"postgres://", "postgres://"},
 	}
 	for _, tc := range tests {

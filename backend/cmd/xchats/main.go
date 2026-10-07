@@ -1374,10 +1374,10 @@ func runMigrate(cfg *config.Config, log *slog.Logger, args []string) {
 	log.Info("migrations applied")
 }
 
-// runBackup writes a consistent, compacted snapshot of DB_PATH to the given
+// runBackup writes a consistent, compacted snapshot of DATABASE_TARGET to the given
 // destination path (VACUUM INTO; the destination must not already exist).
 // Opening the store acquires internal/dbx's single-process lock, so this
-// subcommand — like "check" below — cannot run against a DB_PATH that
+// subcommand — like "check" below — cannot run against a PostgreSQL target that
 // "xchats serve" already has open; stop the server first, or use the
 // in-app "Download Backup" action (internal/httpapi's settings surface),
 // which runs inside the already-open server process instead.
@@ -1393,7 +1393,7 @@ func runBackup(cfg *config.Config, log *slog.Logger, args []string) {
 	log.Info("backup complete", "dest", args[0])
 }
 
-// runCheck runs SQLite's own consistency check against DB_PATH and reports
+// runCheck runs SQLite's own consistency check against DATABASE_TARGET and reports
 // every problem found, if any. See runBackup's doc comment for why this
 // needs the server stopped (or run the "Download Backup" flow instead,
 // whose zip manifest records the same check).
@@ -1445,7 +1445,7 @@ func seedBase(ctx context.Context, cfg *config.Config, st *store.Store, log *slo
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
 	if cfg.Storage.Database() == "" {
-		fatal("config", errString("DB_PATH is required"))
+		fatal("config", errString("DATABASE_TARGET is required"))
 	}
 	st, err := store.New(context.Background(), cfg.Storage.Database())
 	if err != nil {

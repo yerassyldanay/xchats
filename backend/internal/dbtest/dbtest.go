@@ -14,7 +14,7 @@ import (
 
 // OpenRaw opens a fresh, migrated database at t.TempDir() and returns the
 // bare *dbx.DB — for tests that verify the schema/migration machinery
-// itself (the architecture and contract tests in this package) rather than
+// itself (the architecture and migration tests in this package) rather than
 // exercising a repository package. Repository package tests want New (added
 // in Phase 2 alongside internal/store), not this.
 func OpenRaw(t testing.TB) *dbx.DB {
@@ -46,7 +46,7 @@ func reapplyMigrations(t testing.TB, db *dbx.DB) error {
 
 // moduleRoot returns the directory containing the backend module's go.mod —
 // used by tests in this package that need a stable filesystem anchor
-// (schema_contract.json, `go list` for the architecture check) independent
+// (`go list` for the architecture check) independent
 // of the working directory `go test` happens to run from.
 func moduleRoot(t testing.TB) string {
 	t.Helper()

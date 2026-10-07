@@ -62,7 +62,7 @@ resolves its config path (`$XCHATS_CONFIG` → `./config.yaml` → the OS config
 dir; the compose file's `XCHATS_CONFIG=/config.yaml` env var wins first).
 It's the same schema as the repo-root `config.yaml`, with paths pointed at
 the container's mounted volumes instead of a local checkout
-(`db_path: /data/xchats.db`, `blob_dir: /data/blob`, ...).
+(`database_target: /data/xchats.db`, `blob_dir: /data/blob`, ...).
 
 The `backend` service's own `environment:` block in `docker-compose.yaml`
 carries only what genuinely needs a per-deployment override at container-run

@@ -27,13 +27,13 @@ ephemeral `$HOME` — see [`docker.md`](docker.md). Every directory
 
 | File                                  | Location                              | Contents                                                                 |
 |-----------------------------------------|-----------------------------------------|-----------------------------------------------------------------------------|
-| `xchats.db` (+ `-wal`/`-shm` sidecars)   | `storage.db_path` (config.yaml)         | Everything except WhatsApp's own device/session state and blob bytes: chats, messages, KB content, users/orgs, MCP OAuth grants, Telegram poll offsets, etc. |
-| `whatsmeow.db`                          | `storage.wa_device_db_path`             | WhatsApp's own end-to-end-encryption session/device keys (`whatsmeow`'s SQLite store) |
+| `xchats.db` (+ `-wal`/`-shm` sidecars)   | `storage.database_target` (config.yaml) | Everything except WhatsApp's own device/session state and blob bytes: chats, messages, KB content, users/orgs, MCP OAuth grants, Telegram poll offsets, etc. |
+| `whatsmeow.db`                          | `storage.wa_device_database_target`     | WhatsApp's own end-to-end-encryption session/device keys (`whatsmeow`'s independent store) |
 | Blob files                              | `storage.blob_dir`                      | Media bytes: photos, documents, voice notes sent or received over WhatsApp/Telegram |
 | `credentials.enc` + `credentials.key`   | data dir (file-backed credential store only) | Encrypted system secrets + integration API keys — see [`credentials.md`](credentials.md) |
 | `settings.json`                         | data dir                                | Non-secret settings: default LLM provider/model, ngrok region/domain, onboarding flags |
 
-`storage.db_path`/`wa_device_db_path`/`blob_dir` are set in `config.yaml` —
+`storage.database_target`/`wa_device_database_target`/`blob_dir` are set in `config.yaml` —
 by default, relative paths under the working directory (`./data/xchats.db`,
 `./blobdata/`) for a source checkout, or `/data/...` volume paths in Docker.
 None of the config.yaml defaults are secrets, which is why that file is

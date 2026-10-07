@@ -224,11 +224,10 @@ func unsetEnv(t *testing.T, key string) {
 }
 
 func TestDatabaseEngineConfiguration(t *testing.T) {
-	unsetEnv(t, "DATABASE_URL")
-	unsetEnv(t, "DB_PATH")
-	unsetEnv(t, "WA_DEVICE_DB_PATH")
+	unsetEnv(t, "DATABASE_TARGET")
+	unsetEnv(t, "WA_DEVICE_DATABASE_TARGET")
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("storage:\n  db_path: ./local.db\n  wa_device_db_path: ./devices.db\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("storage:\n  database_target: ./local.db\n  wa_device_database_target: ./devices.db\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
@@ -239,17 +238,14 @@ func TestDatabaseEngineConfiguration(t *testing.T) {
 		t.Fatal("SQLite paths not selected")
 	}
 	const target = "postgres://test@localhost/test"
-	t.Setenv("DATABASE_URL", target)
+	const deviceTarget = "postgres://test@localhost/whatsmeow"
+	t.Setenv("DATABASE_TARGET", target)
+	t.Setenv("WA_DEVICE_DATABASE_TARGET", deviceTarget)
 	cfg, err = Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != target {
-		t.Fatal("DATABASE_URL must switch both application and device persistence")
-	}
-	cfg.Storage.DatabaseURL = ""
-	cfg.Storage.DBPath = target
-	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != target {
-		t.Fatal("connection-string toggle not honored")
+	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != deviceTarget {
+		t.Fatal("xchats and whatsmeow database targets must remain independent")
 	}
 }

@@ -26,10 +26,9 @@ server:
   secure_cookies: false     # set true once served over HTTPS (native reverse proxy, or the ngrok tunnel)
 
 storage:
-  # Set database_url or DATABASE_URL for PostgreSQL (see docs/database.md).
-  database_url: ""
-  db_path: "./data/xchats.db"
-  wa_device_db_path: "./data/whatsmeow.db"
+  # Each target accepts a SQLite path or PostgreSQL URL (see docs/database.md).
+  database_target: "./data/xchats.db"
+  wa_device_database_target: "./data/whatsmeow.db"
   blob_dir: "./blobdata"
 
 system:

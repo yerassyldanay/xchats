@@ -92,7 +92,7 @@ func ConfigPath() string {
 // actually free.
 //
 // Absolute paths are left exactly as configured — an operator who pinned
-// storage.db_path (or exported DB_PATH) meant that path, and $XCHATS_DATA_DIR
+// storage.database_target (or exported DATABASE_TARGET) meant that path, and $XCHATS_DATA_DIR
 // still redirects the whole profile, so this adds a sane default without
 // taking any existing override away.
 func ApplyDefaults(cfg *config.Config) error {
@@ -104,8 +104,8 @@ func ApplyDefaults(cfg *config.Config) error {
 		return fmt.Errorf("create %s: %w", dataDir, err)
 	}
 
-	cfg.Storage.DBPath = rebase(dataDir, cfg.Storage.DBPath, defaultDBPath)
-	cfg.Storage.WADeviceDBPath = rebase(dataDir, cfg.Storage.WADeviceDBPath, defaultWADeviceDBPath)
+	cfg.Storage.DatabaseTarget = rebase(dataDir, cfg.Storage.DatabaseTarget, defaultDBPath)
+	cfg.Storage.WADeviceDatabaseTarget = rebase(dataDir, cfg.Storage.WADeviceDatabaseTarget, defaultWADeviceDBPath)
 	cfg.Storage.BlobDir = rebase(dataDir, cfg.Storage.BlobDir, defaultBlobDir)
 	cfg.Server.HTTPAddr = freeAddr(loopbackAddr(cfg.Server.HTTPAddr))
 	cfg.Server.APIBaseURL = localAPIBaseURL(cfg.Server.APIBaseURL, cfg.Server.HTTPAddr)

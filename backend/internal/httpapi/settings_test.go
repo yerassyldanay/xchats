@@ -118,8 +118,8 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 		PageSize: 50,
 		Server:   config.ServerConfig{CORSOrigins: []string{"*"}},
 		Storage: config.StorageConfig{
-			DBPath:         filepath.Join(testDataDir, "data", "xchats.db"),
-			WADeviceDBPath: filepath.Join(testDataDir, "data", "whatsmeow.db"),
+			DatabaseTarget:         filepath.Join(testDataDir, "data", "xchats.db"),
+			WADeviceDatabaseTarget: filepath.Join(testDataDir, "data", "whatsmeow.db"),
 			BlobDir:        filepath.Join(testDataDir, "blobdata"),
 		},
 	}

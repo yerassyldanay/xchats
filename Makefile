@@ -37,7 +37,7 @@ WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
 PORTS ?= 8080 8090 5173 8081
 
 .PHONY: migration-new test-postgres help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
-        test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-sql lint-frontend notices ruleset-apply \
+        test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
         desktop-tools desktop-assets desktop-dev desktop-build desktop-clean desktop-test-ui \
         profile-server profile-load profile-view profile-trace profile-bench profile-compare
 
@@ -165,13 +165,8 @@ desktop-test-ui: ## Playwright against the REAL packaged executable (builds it f
 
 lint: lint-backend lint-frontend ## Run every linter (same checks as CI's lint jobs)
 
-lint-backend: lint-sql ## SQL portability linter, then golangci-lint over the backend module (see .golangci.yml)
+lint-backend: ## golangci-lint over the backend module (see .golangci.yml)
 	cd $(BACKEND) && golangci-lint run ./...
-
-# CGO_ENABLED=0: the linter parses SQL with a pure-Go build of PostgreSQL's parser, so this
-# needs no C compiler and no database. It also runs inside `go test ./...`.
-lint-sql: ## SQL portability linter: migrations and repository SQL must run identically on SQLite and PostgreSQL (no database needed)
-	cd $(BACKEND) && CGO_ENABLED=0 go test -count=1 -run '^TestSQLLint' ./internal/dbtest
 
 lint-frontend: ## eslint over the frontend (see frontend/eslint.config.js)
 	cd $(FRONTEND) && npx eslint .

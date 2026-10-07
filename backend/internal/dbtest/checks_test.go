@@ -12,8 +12,7 @@ import (
 
 // TestEnumChecksEnforced behaviorally verifies the enum-shaped CHECK
 // constraints in migrations/*.sql actually reject an out-of-vocabulary
-// value. The schema contract test deliberately does not compare CHECK
-// definitions as text, so this is what pins their behavior on each engine.
+// value and verifies CHECK behavior on whichever engine the suite targets.
 // farFuture is 2030-01-01T00:00:00Z, the expiry the fixtures below use.
 var farFuture = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 
