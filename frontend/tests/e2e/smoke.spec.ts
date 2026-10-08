@@ -16,8 +16,8 @@ test('NavRail exposes the two Knowledge-Base destinations', async ({ page }) => 
 
 // /knowledge-base is the sole creation/edit surface (kb-draft-review-
 // boundaries) — every write here stages into the draft, so there is no
-// "Правки" tab, and the tab row is the fixed seven kinds plus Промпт/Файлы,
-// never dynamic the way Черновик's is.
+// "Правки" tab, and the tab row is the fixed seven kinds plus Общий шаблон/
+// Итоговый шаблон/Файлы, never dynamic the way Черновик's is.
 test('База знаний: the live KB shows the fixed tab row, no draft/Правки here', async ({ page }) => {
   await login(page)
   await page.goto('/knowledge-base')
@@ -25,22 +25,51 @@ test('База знаний: the live KB shows the fixed tab row, no draft/Пр�
   await expect(page.getByRole('button', { name: 'Темы' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Тарифы' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Зоны доставки' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Промпт' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Общий шаблон', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Итоговый шаблон', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Правки' })).toHaveCount(0)
   // switch to the Тарифы tab and confirm a seeded tariff row renders
   await page.getByRole('button', { name: 'Тарифы' }).click()
   await expect(page.getByText('demo_basic', { exact: true })).toBeVisible()
 })
 
-// The Промпт tab renders the exact prompt GET /kb/prompt returns — proof the
-// page shows what the AI actually reads, not a second/divergent view of it.
-test('База знаний: Промпт tab renders the rendered prompt with its status', async ({ page }) => {
+// The Итоговый шаблон (formerly Промпт) tab renders the exact prompt
+// GET /kb/prompt returns — proof the page shows what the AI actually reads, not
+// a second/divergent view of it. It is built from the active template, so the
+// version badge names the template profile rather than a frame file.
+test('База знаний: Итоговый шаблон tab renders the rendered prompt with its status', async ({ page }) => {
   await login(page)
   await page.goto('/knowledge-base')
-  await page.getByRole('button', { name: 'Промпт' }).click()
-  await expect(page.getByText('Промпт ассистента')).toBeVisible()
-  await expect(page.getByText('shop-kb@v5')).toBeVisible()
+  await page.getByRole('button', { name: 'Итоговый шаблон', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Итоговый шаблон', exact: true })).toBeVisible()
+  await expect(page.getByText(/template:[a-z-]+@/)).toBeVisible()
   await expect(page.getByText('Собран успешно')).toBeVisible()
+})
+
+// The Общий шаблон tab edits the instructions the Итоговый шаблон is built from:
+// a saved edit shows up in the final prompt, and the profile choice is optional.
+test('База знаний: Общий шаблон edits flow into the Итоговый шаблон', async ({ page }) => {
+  await login(page)
+  await page.goto('/knowledge-base')
+  await page.getByRole('button', { name: 'Общий шаблон', exact: true }).click()
+  const box = page.getByTestId('template-instructions')
+  await expect(box).toHaveValue(/ИСТОЧНИК ФАКТОВ/)
+  const marker = `МАРКЕР-E2E-${Date.now()}`
+  const original = await box.inputValue()
+  try {
+    await box.fill(`${marker}\n${original}`)
+    await page.getByTestId('template-save').click()
+    await expect(page.getByTestId('template-saved')).toBeVisible()
+    await page.getByRole('button', { name: 'Итоговый шаблон', exact: true }).click()
+    await expect(page.getByTestId('prompt-text')).toContainText(marker)
+  } finally {
+    // Always put the shipped text back (even if an assertion above failed), so a
+    // failing run cannot leave a marker in the shared database's live prompt.
+    await page.getByRole('button', { name: 'Общий шаблон', exact: true }).click()
+    await box.fill(original)
+    await page.getByTestId('template-save').click()
+    await expect(page.getByTestId('template-saved')).toBeVisible()
+  }
 })
 
 // Черновик is review-only (decision 1): no RECORD-CREATION button anywhere

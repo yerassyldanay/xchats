@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client'
 import { t } from '../i18n'
 import { connectRealtime } from '../lib/sse'
 import type {
-  CancelChangeResponse, DraftChangeSet, DraftView, KbGapFilter, KbGapReport, KbGateReason, KbMaterial, PromptView, ServiceRow, SpecialistRow,
+  CancelChangeResponse, DraftChangeSet, DraftView, KbGapFilter, KbGapReport, KbGateReason, KbMaterial, PromptTemplateId, PromptTemplatesView, PromptView, ServiceRow, SpecialistRow,
 } from '../types'
 import type { ChangeKind } from '@/composables/draftChanges'
 import type {
@@ -49,7 +49,17 @@ export const usePlayground = defineStore('playground', {
     liveLoading: false,
     liveError: '' as string,
 
-    // --- prompt (Промпт tab) — the rendered prompt GET /kb/prompt returns,
+    // --- prompt templates (General Template tab) — GET /kb/templates: the four
+    // editable instruction templates and which one is active. Reloaded on every
+    // kb.row.changed SSE event once loaded; a reload only replaces this SERVER
+    // state, never the tab's unsaved local edits. -------------------------------
+    templates: null as PromptTemplatesView | null,
+    templatesLoading: false,
+    templatesLoadError: '' as string,
+    templateSaving: false,
+    templateSaveError: '' as string,
+
+    // --- prompt (Final Template tab) — the rendered prompt GET /kb/prompt returns,
     // auto-refreshed alongside `live` on every kb.row.changed SSE event once
     // the tab has been opened at least once (see startRealtime below). -------
     promptView: null as PromptView | null,
@@ -624,6 +634,43 @@ export const usePlayground = defineStore('playground', {
       }
     },
 
+    // --- templates (General Template tab) — GET/PUT /kb/templates.
+    async loadTemplates() {
+      this.templatesLoading = true
+      this.templatesLoadError = ''
+      try {
+        this.templates = await api.get<PromptTemplatesView>('/kb/templates')
+      } catch (e) {
+        this.templatesLoadError = e instanceof ApiError ? e.message : t('kb.template.errLoad')
+      } finally {
+        this.templatesLoading = false
+      }
+    },
+
+    // saveTemplate stores `instructions` for template `id` and makes it the
+    // active profile (the tab's Save always activates). On success the Final
+    // Template preview is refreshed from the server; on a rejection the
+    // server's message is kept in templateSaveError and false is returned.
+    async saveTemplate(id: PromptTemplateId, instructions: string): Promise<boolean> {
+      this.templateSaving = true
+      this.templateSaveError = ''
+      try {
+        this.templates = await api.put<PromptTemplatesView>('/kb/templates/' + encodeURIComponent(id), {
+          instructions,
+          activate: true,
+        })
+        // Always re-render: the server also pushes kb.row.changed, but this tab
+        // must not depend on the SSE round trip to show the new final prompt.
+        await this.loadPrompt()
+        return true
+      } catch (e) {
+        this.templateSaveError = e instanceof ApiError ? e.message : t('kb.template.errSave')
+        return false
+      } finally {
+        this.templateSaving = false
+      }
+    },
+
     // --- gaps (Пробелы в базе tab) — GET /kb/gaps, filtered.
     async loadGaps(filter?: KbGapFilter) {
       filter ??= this.gapsFilter
@@ -670,6 +717,7 @@ export const usePlayground = defineStore('playground', {
           // these are no-ops until that tab has been opened at least once —
           // same pattern as `live`.
           if (this.promptView) this.loadPrompt()
+          if (this.templates) this.loadTemplates()
           if (this.gapsReport) this.loadGaps()
         }, 250)
       }

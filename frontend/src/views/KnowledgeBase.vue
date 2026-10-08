@@ -8,7 +8,7 @@
 // actually publish it.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, FileText, Plus, TriangleAlert, WandSparkles } from 'lucide-vue-next'
+import { CircleAlert, FileCog, FileText, Plus, TriangleAlert, WandSparkles } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useEntityTabs } from '@/composables/useEntityTabs'
 import { usePendingIndex } from '@/composables/usePendingIndex'
@@ -20,6 +20,7 @@ import { kbActions, LIVE_CONFIG_ACTIONS } from '@/components/kb/records/actions'
 import { kindOfMime, materialContentURL } from '@/components/kb/records/shared'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import GeneralTemplateTab from '@/components/kb/GeneralTemplateTab.vue'
 import PromptTab from '@/components/kb/PromptTab.vue'
 import GapsTab from '@/components/kb/GapsTab.vue'
 import EntityTabs from '@/components/kb/EntityTabs.vue'
@@ -56,6 +57,9 @@ onBeforeUnmount(() => pg.stopRealtime())
 const { tabs, active } = useEntityTabs({
   source: 'live',
   extra: [
+    // General Template (editable instructions) sits immediately BEFORE Final
+    // Template (the read-only assembled prompt).
+    { key: 'template', label: t('kb.page.generalTemplateTab'), icon: FileCog },
     { key: 'prompt', label: t('kb.page.promptTab'), icon: WandSparkles },
     { key: 'gaps', label: t('kb.page.gapsTab'), icon: TriangleAlert },
     { key: 'materials', label: t('kb.page.materialsTab'), icon: FileText },
@@ -135,7 +139,10 @@ function materialKind(m: KbMaterial): string {
 }
 
 watch(active, (a) => {
-  if (a === 'prompt' && !pg.promptView) pg.loadPrompt()
+  if (a === 'template' && !pg.templates) pg.loadTemplates()
+  // The Final Template is always re-fetched when opened, so it is current even if
+  // a realtime event was missed (the SSE refresh covers the already-open case).
+  if (a === 'prompt') pg.loadPrompt()
   if (a === 'gaps' && !pg.gapsReport) pg.loadGaps()
 })
 </script>
@@ -263,7 +270,11 @@ watch(active, (a) => {
         />
       </div>
 
-      <div v-show="active === 'prompt'">
+      <div v-show="active === 'template'" data-testid="live-tab-template">
+        <GeneralTemplateTab @view-final="active = 'prompt'" />
+      </div>
+
+      <div v-show="active === 'prompt'" data-testid="live-tab-prompt">
         <PromptTab />
       </div>
 
