@@ -36,7 +36,7 @@ WAILS_FLAGS := -skipbindings $(WAILS_TAGS)
 # there via a local compose override, so a stale container may still hold it.
 PORTS ?= 8080 8090 5173 8081
 
-.PHONY: help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
+.PHONY: migration-new test-postgres help up up-fg down logs ps kill-ports migrate seed seed-local seed-demo seed-kb-demo dev-backend dev-frontend \
         test test-backend test-frontend test-e2e build screenshots lint lint-backend lint-frontend notices ruleset-apply \
         desktop-tools desktop-assets desktop-dev desktop-build desktop-clean desktop-test-ui \
         profile-server profile-load profile-view profile-trace profile-bench profile-compare
@@ -183,3 +183,10 @@ ruleset-apply: ## Apply .github/rulesets/*.json to the repo via the GitHub API (
 		gh api -X POST repos/yerassyldanay/xchats/rulesets --input "$$f" >/dev/null || \
 		gh api -X PUT  repos/yerassyldanay/xchats/rulesets/$$(gh api repos/yerassyldanay/xchats/rulesets --jq ".[] | select(.name==\"$$(basename $$f .json)\") | .id") --input "$$f" >/dev/null; \
 	done
+
+migration-new: ## Create one UTC-timestamped migration shared by SQLite and PostgreSQL (make migration-new NAME=contacts_index)
+	cd $(BACKEND) && go run ./cmd/migration $(NAME)
+
+test-postgres: ## Run the whole backend suite on PostgreSQL, an isolated schema per test (set TEST_DATABASE_URL)
+	@test -n "$$TEST_DATABASE_URL" || (echo 'Set TEST_DATABASE_URL to a disposable PostgreSQL database'; exit 1)
+	cd $(BACKEND) && go test -race -count=1 -timeout=45m ./...

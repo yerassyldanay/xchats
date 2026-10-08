@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -269,14 +270,16 @@ type UploadMaterialInput struct {
 // vocabulary collision to worry about) with processing_status='uploaded':
 // bytes have not arrived yet.
 func (s *Store) CreateUploadMaterial(ctx context.Context, orgID uuid.UUID, in UploadMaterialInput) (uuid.UUID, error) {
+	now := time.Now()
+
 	var id uuid.UUID
 	err := s.db.QueryRow(ctx, `INSERT INTO kbd_materials
 		(organization_id, source_type, filename, mime_type, size_bytes, sha256_checksum,
-		 processing_status, customer_visibility)
-		VALUES ($1,'file',$2,$3,$4,$5,'uploaded',$6)
+		 processing_status, customer_visibility, id, created_at, updated_at)
+		VALUES ($1,'file',$2,$3,$4,$5,'uploaded',$6, $7, $8, $8)
 		RETURNING id`,
 		orgID, in.Filename, in.MimeType, in.SizeBytes, nullIfEmpty(in.SHA256Checksum),
-		orDefault(in.CustomerVisibility, "auto")).
+		orDefault(in.CustomerVisibility, "auto"), uuid.New(), now).
 		Scan(&id)
 	return id, err
 }
@@ -343,20 +346,17 @@ func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uui
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.Query(ctx, `SELECT id, filename, mime_type, size_bytes, processing_status
-		FROM kbd_materials
-		WHERE organization_id = $1 AND id IN (SELECT value FROM json_each($2))
-		  AND storage_key IS NOT NULL AND storage_key <> ''`, orgID, dbx.UUIDArray(ids))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
+	err := dbx.QueryInChunks(ctx, s.db, []any{orgID}, ids, func(list string) string {
+		return `SELECT id, filename, mime_type, size_bytes, processing_status
+			FROM kbd_materials
+			WHERE organization_id = $1 AND id IN ` + list + `
+			  AND storage_key IS NOT NULL AND storage_key <> ''`
+	}, func(rows *dbx.Rows) error {
 		var p MaterialPreview
 		var filename, mimeType *string
 		var sizeBytes *int64
 		if err := rows.Scan(&p.ID, &filename, &mimeType, &sizeBytes, &p.Status); err != nil {
-			return nil, err
+			return err
 		}
 		p.Filename, p.MimeType = strOrEmpty(filename), strOrEmpty(mimeType)
 		if sizeBytes != nil {
@@ -364,8 +364,12 @@ func (s *Store) MaterialPreviews(ctx context.Context, orgID uuid.UUID, ids []uui
 		}
 		p.Kind = KindOfMime(p.MimeType)
 		out[p.ID] = p
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // KindOfMime is the four-way split mimeMatchesKind validates against, in
@@ -407,10 +411,12 @@ var ErrUploadAlreadyCompleted = errors.New("kbstore: material upload already com
 // ErrUploadAlreadyCompleted, never overwriting the winner's already-recorded
 // storage_key.
 func (s *Store) CompleteMaterialUpload(ctx context.Context, id uuid.UUID, storageBackend, storageKey string, sizeBytes int64, sha256Checksum string) error {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		storage_backend = $2, storage_key = $3, size_bytes = $4, sha256_checksum = $5,
-		processing_status = 'parsed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1 AND processing_status = 'uploaded'`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum))
+		processing_status = 'parsed', updated_at = $6
+		WHERE id = $1 AND processing_status = 'uploaded'`, id, storageBackend, storageKey, sizeBytes, nullIfEmpty(sha256Checksum), now)
 	if err != nil {
 		return err
 	}
@@ -437,7 +443,7 @@ func nullIfEmpty(s string) *string {
 // An earlier version of this file added a Provenance string straight onto
 // every Draft* struct instead, and every MCP upsert wrote plan/mcp.md's
 // provenance argument into it — but no live ai_* table has ever had a
-// provenance column (migration 0004_kb_living.up.sql: "live tables hold LIVE
+// provenance column (20261006000003_ai_knowledge_base.sql: "Live ai_* tables hold LIVE
 // ROWS ONLY — no review_state, no provenance, no drafted_at"), so that value
 // was silently discarded the moment a draft entry was approved into live.
 // The legacy manual-editor and confirm_fact write paths had the exact same
@@ -510,6 +516,8 @@ func jsonShallowMerge(base, patch string) (string, error) {
 // audit trail — silently accepting a foreign org's material id would let
 // one organization probe/tag another's rows.
 func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, kbType, key string, prov MCPProvenance) error {
+	now := time.Now()
+
 	if prov.empty() {
 		return nil
 	}
@@ -521,20 +529,28 @@ func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, 
 	}
 	if prov.SourceURL != "" {
 		if _, err := db.Exec(ctx, `INSERT INTO kbd_materials
-			(organization_id, source_type, source_ref, extraction_metadata, processing_status, customer_visibility)
-			VALUES ($1, 'url', $2, $3, 'parsed', 'invisible')`,
-			orgID, prov.SourceURL, string(target)); err != nil {
+			(organization_id, source_type, source_ref, extraction_metadata, processing_status, customer_visibility, id, created_at, updated_at)
+			VALUES ($1, 'url', $2, $3, 'parsed', 'invisible', $4, $5, $5)`,
+			orgID, prov.SourceURL, string(target), uuid.New(), now); err != nil {
 			return fmt.Errorf("record source_url provenance: %w", err)
 		}
 	}
 	for _, id := range prov.MaterialIDs {
-		// SQLite has no jsonb `||`: read the current value and merge in Go
-		// (jsonShallowMerge) instead of merging inside the UPDATE statement.
-		// Safe without an explicit row lock — this always runs inside the
-		// caller's already-open write transaction (see doc comment above),
-		// which under internal/dbx's single-connection design already holds
-		// the database's one write lock for its whole duration, so no
-		// concurrent writer can observe or race this read-modify-write.
+		if err := tagMaterialProvenance(ctx, db, orgID, id, string(target), nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// tagMaterialProvenance merges the provenance target into one material's extraction_metadata.
+// SQL has no portable JSON merge, so it reads the document, merges in Go and writes it back; the
+// write is a compare-and-swap on the text that was read, because the import queue edits the same
+// document (mutateImportParams) without taking any lock this transaction holds. A lost race
+// re-reads and merges again, up to importCASAttempts times. afterRead, when not nil, runs between
+// the read and the write: tests use it to be the concurrent writer.
+func tagMaterialProvenance(ctx context.Context, db dbtx, orgID, id uuid.UUID, target string, afterRead func()) error {
+	for attempt := 0; attempt < importCASAttempts; attempt++ {
 		var current string
 		err := db.QueryRow(ctx, `SELECT extraction_metadata FROM kbd_materials
 			WHERE id = $1 AND organization_id = $2`, id, orgID).Scan(&current)
@@ -544,16 +560,23 @@ func (s *Store) recordProvenance(ctx context.Context, db dbtx, orgID uuid.UUID, 
 		if err != nil {
 			return fmt.Errorf("read material_id %s extraction_metadata: %w", id, err)
 		}
-		merged, err := jsonShallowMerge(current, string(target))
+		merged, err := jsonShallowMerge(current, target)
 		if err != nil {
 			return fmt.Errorf("merge provenance into material_id %s: %w", id, err)
 		}
-		if _, err := db.Exec(ctx, `UPDATE kbd_materials
+		if afterRead != nil {
+			afterRead()
+		}
+		tag, err := db.Exec(ctx, `UPDATE kbd_materials
 			SET extraction_metadata = $3
-			WHERE id = $1 AND organization_id = $2`,
-			id, orgID, merged); err != nil {
+			WHERE id = $1 AND organization_id = $2 AND extraction_metadata = $4`,
+			id, orgID, merged, current)
+		if err != nil {
 			return fmt.Errorf("tag material_id %s with provenance: %w", id, err)
 		}
+		if tag.RowsAffected() == 1 {
+			return nil
+		}
 	}
-	return nil
+	return fmt.Errorf("tag material_id %s with provenance: %w", id, errImportConflict)
 }

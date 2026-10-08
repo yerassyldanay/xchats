@@ -93,6 +93,8 @@ type TelegramClaim struct {
 // deleted_at = NULL, and because the id is derived from the bot id, its chats
 // and messages come back with it.
 func (s *Store) ClaimTelegramAccount(ctx context.Context, in TelegramClaim) (TelegramAccount, error) {
+	now := time.Now()
+
 	if s.creds == nil {
 		return TelegramAccount{}, ErrNoCredentialsKey
 	}
@@ -109,18 +111,18 @@ func (s *Store) ClaimTelegramAccount(ctx context.Context, in TelegramClaim) (Tel
 
 	acct, err := scanTgAccount(tx.QueryRow(ctx, `
 		INSERT INTO tg_accounts
-			(id, organization_id, display_name, bot_id, bot_username, connection_state)
-		VALUES ($1, $2, $3, $4, $5, 'connecting')
+			(id, organization_id, display_name, bot_id, bot_username, connection_state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'connecting', $6, $6)
 		ON CONFLICT (bot_id) DO UPDATE
 		   SET display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
 		                           ELSE tg_accounts.display_name END,
 		       bot_username = EXCLUDED.bot_username,
 		       connection_state = 'connecting',
 		       deleted_at = NULL,
-		       updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		       updated_at = EXCLUDED.updated_at
 		 WHERE tg_accounts.organization_id = EXCLUDED.organization_id
 		RETURNING `+tgAccountCols,
-		in.ID, in.OrganizationID, in.DisplayName, in.BotID, in.BotUsername))
+		in.ID, in.OrganizationID, in.DisplayName, in.BotID, in.BotUsername, now))
 	if errors.Is(err, dbx.ErrNoRows) {
 		return TelegramAccount{}, ErrAccountClaimed
 	}
@@ -129,13 +131,13 @@ func (s *Store) ClaimTelegramAccount(ctx context.Context, in TelegramClaim) (Tel
 	}
 
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO tg_credentials (account_id, bot_token_enc, encryption_key_version)
-		VALUES ($1, $2, $3)
+		INSERT INTO tg_credentials (account_id, bot_token_enc, encryption_key_version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
 		ON CONFLICT (account_id) DO UPDATE SET
 			bot_token_enc = EXCLUDED.bot_token_enc,
 			encryption_key_version = EXCLUDED.encryption_key_version,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
-		acct.ID, sealed, secretbox.KeyVersion); err != nil {
+			updated_at = EXCLUDED.updated_at`,
+		acct.ID, sealed, secretbox.KeyVersion, now); err != nil {
 		return TelegramAccount{}, wrap("store telegram credentials", err)
 	}
 	return acct, tx.Commit(ctx)
@@ -145,6 +147,8 @@ func (s *Store) ClaimTelegramAccount(ctx context.Context, in TelegramClaim) (Tel
 // a different bot: the account id is derived from bot_id, so accepting one
 // would silently point an existing conversation history at a different bot.
 func (s *Store) ReplaceTelegramToken(ctx context.Context, accountID uuid.UUID, botID int64, botUsername, token string) error {
+	now := time.Now()
+
 	if s.creds == nil {
 		return ErrNoCredentialsKey
 	}
@@ -160,9 +164,9 @@ func (s *Store) ReplaceTelegramToken(ctx context.Context, accountID uuid.UUID, b
 
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `
-		UPDATE tg_accounts SET bot_username = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE tg_accounts SET bot_username = $3, updated_at = $4
 		WHERE id = $1 AND bot_id = $2 AND deleted_at IS NULL
-		RETURNING id`, accountID, botID, botUsername).Scan(&id)
+		RETURNING id`, accountID, botID, botUsername, now).Scan(&id)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return ErrAccountClaimed
 	}
@@ -170,13 +174,13 @@ func (s *Store) ReplaceTelegramToken(ctx context.Context, accountID uuid.UUID, b
 		return wrap("replace telegram token", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO tg_credentials (account_id, bot_token_enc, encryption_key_version)
-		VALUES ($1, $2, $3)
+		INSERT INTO tg_credentials (account_id, bot_token_enc, encryption_key_version, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4)
 		ON CONFLICT (account_id) DO UPDATE SET
 			bot_token_enc = EXCLUDED.bot_token_enc,
 			encryption_key_version = EXCLUDED.encryption_key_version,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
-		accountID, sealed, secretbox.KeyVersion); err != nil {
+			updated_at = EXCLUDED.updated_at`,
+		accountID, sealed, secretbox.KeyVersion, now); err != nil {
 		return wrap("store telegram credentials", err)
 	}
 	return tx.Commit(ctx)
@@ -243,23 +247,27 @@ type TelegramWebhookState struct {
 
 // SetTelegramWebhookState records a transition plus its health columns.
 func (s *Store) SetTelegramWebhookState(ctx context.Context, id uuid.UUID, st TelegramWebhookState) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE tg_accounts SET
 			connection_state = $2,
 			webhook_url = CASE WHEN $3 <> '' THEN $3 ELSE webhook_url END,
 			webhook_last_error = $4,
-			webhook_registered_at = CASE WHEN $5 THEN strftime('%Y-%m-%d %H:%M:%f','now') ELSE webhook_registered_at END,
-			webhook_last_checked_at = CASE WHEN $6 THEN strftime('%Y-%m-%d %H:%M:%f','now') ELSE webhook_last_checked_at END,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1`, id, st.State, st.URL, st.LastError, st.Registered, st.Checked)
+			webhook_registered_at = CASE WHEN $5 THEN $7 ELSE webhook_registered_at END,
+			webhook_last_checked_at = CASE WHEN $6 THEN $7 ELSE webhook_last_checked_at END,
+			updated_at = $7
+		WHERE id = $1`, id, st.State, st.URL, st.LastError, st.Registered, st.Checked, now)
 	return err
 }
 
 // TouchTelegramAccount stamps live activity (an inbound update arrived).
 func (s *Store) TouchTelegramAccount(ctx context.Context, id uuid.UUID) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE tg_accounts SET last_live_event_at = strftime('%Y-%m-%d %H:%M:%f','now'), updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1 AND deleted_at IS NULL`, id)
+		UPDATE tg_accounts SET last_live_event_at = $2, updated_at = $2
+		WHERE id = $1 AND deleted_at IS NULL`, id, now)
 	return err
 }
 
@@ -268,6 +276,8 @@ func (s *Store) TouchTelegramAccount(ctx context.Context, id uuid.UUID) error {
 // (the token is the thing worth destroying promptly) and soft-deletes the
 // account, so the chats drop out of the inbox but survive for a re-connect.
 func (s *Store) ConfirmTelegramDisconnect(ctx context.Context, id uuid.UUID) error {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -278,9 +288,9 @@ func (s *Store) ConfirmTelegramDisconnect(ctx context.Context, id uuid.UUID) err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE tg_accounts
-		SET deleted_at = strftime('%Y-%m-%d %H:%M:%f','now'), connection_state = 'disconnected',
-		    webhook_url = '', webhook_registered_at = NULL, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
+		SET deleted_at = $2, connection_state = 'disconnected',
+		    webhook_url = '', webhook_registered_at = NULL, updated_at = $2
+		WHERE id = $1 AND deleted_at IS NULL`, id, now); err != nil {
 		return wrap("soft delete telegram account", err)
 	}
 	return tx.Commit(ctx)
@@ -358,6 +368,8 @@ func telegramIdentityName(in TgInbound) string {
 // 2xx, and a redelivery lands on the unique keys below as a no-op
 // (MessageInserted=false) — which is why there is no inbound_events table.
 func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInboundResult, error) {
+	now := time.Now()
+
 	var res TgInboundResult
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -367,17 +379,17 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO tg_contacts
-			(account_id, telegram_user_id, username, first_name, last_name, display_name)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			(account_id, telegram_user_id, username, first_name, last_name, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 		ON CONFLICT (account_id, telegram_user_id) DO UPDATE SET
 			username = EXCLUDED.username,
 			first_name = EXCLUDED.first_name,
 			last_name = EXCLUDED.last_name,
 			display_name = CASE WHEN EXCLUDED.display_name <> '' THEN EXCLUDED.display_name
 			                    ELSE tg_contacts.display_name END,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = EXCLUDED.updated_at
 		RETURNING id`,
-		in.AccountID, in.TelegramUserID, in.Username, in.FirstName, in.LastName, in.DisplayName).
+		in.AccountID, in.TelegramUserID, in.Username, in.FirstName, in.LastName, in.DisplayName, uuid.New(), now).
 		Scan(&res.ContactID); err != nil {
 		return res, wrap("upsert tg contact", err)
 	}
@@ -389,19 +401,19 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 	// two-step insert-detection (SQLite has no xmax) — see the per-PG-ism
 	// translation table and internal/store/ingest.go's upsertChatTwoStep.
 	err = tx.QueryRow(ctx, `
-		INSERT INTO tg_chats (account_id, contact_id, telegram_chat_id, chat_type)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO tg_chats (account_id, contact_id, telegram_chat_id, chat_type, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
 		ON CONFLICT (account_id, telegram_chat_id) DO NOTHING
 		RETURNING id`,
-		in.AccountID, res.ContactID, in.TelegramChatID, chatType).Scan(&res.ChatID)
+		in.AccountID, res.ContactID, in.TelegramChatID, chatType, uuid.New(), now).Scan(&res.ChatID)
 	switch {
 	case err == nil:
 		res.ChatCreated = true
 	case errors.Is(err, dbx.ErrNoRows):
 		if err := tx.QueryRow(ctx, `
-			UPDATE tg_chats SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			UPDATE tg_chats SET updated_at = $3
 			WHERE account_id = $1 AND telegram_chat_id = $2
-			RETURNING id`, in.AccountID, in.TelegramChatID).Scan(&res.ChatID); err != nil {
+			RETURNING id`, in.AccountID, in.TelegramChatID, now).Scan(&res.ChatID); err != nil {
 			return res, wrap("update tg chat", err)
 		}
 	default:
@@ -432,6 +444,11 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 	if !in.MessageTS.IsZero() {
 		ts = in.MessageTS
 	}
+	// The chat's last-message time is the message's own timestamp when it has one, else now.
+	lastAt := now
+	if !in.MessageTS.IsZero() {
+		lastAt = in.MessageTS
+	}
 	// Unconstrained ON CONFLICT DO NOTHING, not a targeted one: BOTH unique keys
 	// on tg_messages can fire (the update id on a redelivery, the per-chat
 	// message id if Telegram ever re-sends the same message under a new update
@@ -441,12 +458,12 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 	err = tx.QueryRow(ctx, `
 		INSERT INTO tg_messages
 			(account_id, chat_id, direction, sender_kind, telegram_update_id, telegram_message_id,
-			 message_kind, body, delivery_state, source, raw, message_ts)
-		VALUES ($1, $2, 'in', 'contact', $3, $4, $5, $6, 'delivered', 'live_webhook', $7, $8)
+			 message_kind, body, delivery_state, source, raw, message_ts, id, created_at, updated_at)
+		VALUES ($1, $2, 'in', 'contact', $3, $4, $5, $6, 'delivered', 'live_webhook', $7, $8, $9, $10, $10)
 		ON CONFLICT DO NOTHING
 		RETURNING id`,
 		in.AccountID, res.ChatID, in.UpdateID, nullableInt64(in.TelegramMessageID),
-		in.MessageKind, in.Body, jsonbOrNil(in.Raw), ts).Scan(&res.MessageID)
+		in.MessageKind, in.Body, jsonbOrNil(in.Raw), ts, uuid.New(), now).Scan(&res.MessageID)
 	switch {
 	case err == nil:
 		inserted = true
@@ -470,21 +487,21 @@ func (s *Store) IngestTelegramInbound(ctx context.Context, in TgInbound) (TgInbo
 	if inserted {
 		if _, err := tx.Exec(ctx, `
 			UPDATE tg_chats SET
-				last_message_at = COALESCE($2, strftime('%Y-%m-%d %H:%M:%f','now')),
+				last_message_at = $2,
 				last_message_preview = $3,
 				unread_count = unread_count + 1,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE id = $1`, res.ChatID, ts, in.Preview); err != nil {
+				updated_at = $4
+			WHERE id = $1`, res.ChatID, lastAt, in.Preview, now); err != nil {
 			return res, wrap("update tg aggregates", err)
 		}
 		if in.Media != nil {
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO tg_message_media
-					(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, download_status)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+					(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, download_status, id, created_at, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $9)
 				ON CONFLICT (message_id) DO NOTHING`,
 				res.MessageID, in.Media.FileID, in.Media.FileUniqueID, in.Media.MediaType,
-				in.Media.Mimetype, in.Media.FileName, in.Media.Size); err != nil {
+				in.Media.Mimetype, in.Media.FileName, in.Media.Size, uuid.New(), now); err != nil {
 				return res, wrap("insert tg media", err)
 			}
 		}
@@ -517,10 +534,12 @@ func (s *Store) TelegramMediaMeta(ctx context.Context, messageID uuid.UUID) (TgM
 
 // SetTelegramMediaReady records a completed download.
 func (s *Store) SetTelegramMediaReady(ctx context.Context, messageID uuid.UUID, storageKey string, size int) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE tg_message_media
-		SET storage_key = $2, size = $3, download_status = 'ready', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE message_id = $1`, messageID, storageKey, size)
+		SET storage_key = $2, size = $3, download_status = 'ready', updated_at = $4
+		WHERE message_id = $1`, messageID, storageKey, size, now)
 	return err
 }
 
@@ -528,10 +547,12 @@ func (s *Store) SetTelegramMediaReady(ctx context.Context, messageID uuid.UUID, 
 // file handles, so the sweeper can retry it; touching updated_at is what gives
 // that retry a backoff instead of a hot loop.
 func (s *Store) SetTelegramMediaFailed(ctx context.Context, messageID uuid.UUID) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
 		UPDATE tg_message_media
-		SET download_status = 'failed', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE message_id = $1 AND download_status <> 'ready'`, messageID)
+		SET download_status = 'failed', updated_at = $2
+		WHERE message_id = $1 AND download_status <> 'ready'`, messageID, now)
 	return err
 }
 
@@ -607,14 +628,16 @@ func (s *Store) TelegramPollOffset(ctx context.Context, accountID uuid.UUID) (in
 // stored is a silent no-op, so an out-of-order or duplicate advance can
 // never move the offset backwards.
 func (s *Store) AdvanceTelegramPollOffset(ctx context.Context, accountID uuid.UUID, updateID int64) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO tg_poll_state (account_id, last_update_id)
-		VALUES ($1, $2)
+		INSERT INTO tg_poll_state (account_id, last_update_id, updated_at)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (account_id) DO UPDATE SET
 			last_update_id = excluded.last_update_id,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = EXCLUDED.updated_at
 		WHERE excluded.last_update_id > tg_poll_state.last_update_id`,
-		accountID, updateID)
+		accountID, updateID, now)
 	return err
 }
 

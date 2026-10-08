@@ -12,20 +12,16 @@ import (
 )
 
 // TestInitAdminMigration pins the "Seeding & bootstrap" decision: required
-// initial state comes 100% from migrations 0006_init_admin +
-// 0011_restore_default_admin_password + 0014_force_default_admin_password_change,
-// never from Go code. A fresh, freshly-migrated database — nothing else —
-// must already have the default organization, the default admin user, and
-// their membership link.
+// initial state comes 100% from the migrations (the seed at the end of
+// 20261006000001_identity_access.sql), never from Go code. A fresh,
+// freshly-migrated database — nothing else — must already have the default
+// organization, the default admin user, and their membership link.
 //
 // The admin's password_hash must be the documented default's precomputed
-// hash, and must_change_password must be SET — 0011 restores 0006's
-// committed default-password hash (0008 had briefly blanked it and forced a
-// change; see that migration's own comment for why this repo reversed
-// course on blanking it), and 0014 puts the forced-change screen back in
-// front of it: a fresh install is immediately loginnable with the
-// documented default password, but must set a real one before reaching the
-// rest of the app (the public default password must never be usable indefinitely).
+// hash, and must_change_password must be SET: a fresh install is
+// immediately loginnable with the documented default password, but must set
+// a real one before reaching the rest of the app (the public default
+// password must never be usable indefinitely).
 func TestInitAdminMigration(t *testing.T) {
 	db := OpenRaw(t)
 	ctx := context.Background()
@@ -35,7 +31,7 @@ func TestInitAdminMigration(t *testing.T) {
 		adminID = "00000000-0000-0000-0000-000000000002"
 		email   = "admin@xchat.kz"
 		// The documented default password, restored by
-		// 0011_restore_default_admin_password.up.sql.
+		// 20261006000001_identity_access.sql.
 		defaultPassword = "xchat-admin-change-me"
 		defaultHash     = "$argon2id$v=19$m=65536,t=1,p=4$eZE9z7aFgeOEeYVAUCJTxg$3x3PW6uhMxX+nhuXZZZ79JQOKAoImKMB/ACkGsqq9io"
 	)
@@ -61,7 +57,7 @@ func TestInitAdminMigration(t *testing.T) {
 		t.Errorf("sentinel admin's password_hash = %q, want the restored default hash %q", hash, defaultHash)
 	}
 	if !mustChangePassword {
-		t.Error("sentinel admin's must_change_password = false, want true (0014 forces the change screen)")
+		t.Error("sentinel admin's must_change_password = false, want true (the seed forces the change screen)")
 	}
 	if !verifyArgon2id(defaultPassword, hash) {
 		t.Error("the documented default password does not verify against the restored hash")

@@ -24,10 +24,10 @@ type Row struct {
 }
 
 // Scan copies the columns from the matched row into dest, exactly like
-// sql.Row.Scan, except a *time.Time or **time.Time destination is parsed
-// from the column's canonical on-disk text form (see TimeLayout) instead of
+// sql.Row.Scan, except a *time.Time or **time.Time destination is read from
+// the column's BIGINT Unix-millisecond value (see dbtime.go) instead of
 // requiring a driver-level time.Time conversion — the corresponding write
-// path (bindArgs) is what put that text there in the first place.
+// path (bindArgs) is what put that integer there in the first place.
 func (row *Row) Scan(dest ...any) error {
 	targets := findTimeTargets(dest)
 	if len(targets) == 0 {
@@ -62,7 +62,7 @@ func (rows *Rows) Scan(dest ...any) error {
 	return applyTimeTargets(targets, placeholders)
 }
 
-// timeTarget records one Scan destination that needs canonical-text ->
+// timeTarget records one Scan destination that needs Unix-milliseconds ->
 // time.Time conversion after the underlying driver Scan runs. Exactly one
 // of direct/nullable is set, matching which of the two shapes ported call
 // sites use: `CreatedAt time.Time` scanned via &x.CreatedAt (*time.Time), or
@@ -88,19 +88,19 @@ func findTimeTargets(dest []any) []timeTarget {
 }
 
 // substituteTimeTargets returns a copy of dest with every timeTarget index
-// replaced by a fresh *sql.NullString placeholder (in the same order as
-// targets), so the driver scans canonical text rather than failing to
+// replaced by a fresh *sql.NullInt64 placeholder (in the same order as
+// targets), so the driver scans the stored integer rather than failing to
 // convert it to a time.Time itself.
-func substituteTimeTargets(dest []any, targets []timeTarget) ([]any, []sql.NullString) {
+func substituteTimeTargets(dest []any, targets []timeTarget) ([]any, []sql.NullInt64) {
 	scanDest := append([]any(nil), dest...)
-	placeholders := make([]sql.NullString, len(targets))
+	placeholders := make([]sql.NullInt64, len(targets))
 	for i, t := range targets {
 		scanDest[t.idx] = &placeholders[i]
 	}
 	return scanDest, placeholders
 }
 
-func applyTimeTargets(targets []timeTarget, placeholders []sql.NullString) error {
+func applyTimeTargets(targets []timeTarget, placeholders []sql.NullInt64) error {
 	for i, t := range targets {
 		p := placeholders[i]
 		if !p.Valid {
@@ -110,10 +110,7 @@ func applyTimeTargets(targets []timeTarget, placeholders []sql.NullString) error
 			}
 			return fmt.Errorf("dbx: scanning NULL into non-nullable time.Time (column index %d)", t.idx)
 		}
-		parsed, err := ParseTime(p.String)
-		if err != nil {
-			return fmt.Errorf("dbx: parse time %q (column index %d): %w", p.String, t.idx, err)
-		}
+		parsed := time.UnixMilli(p.Int64).UTC()
 		if t.direct != nil {
 			*t.direct = parsed
 		} else {

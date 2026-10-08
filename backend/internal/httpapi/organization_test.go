@@ -12,6 +12,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -28,6 +29,8 @@ type meResponse struct {
 }
 
 func TestSetActiveOrganization_SwitchesAndPersists(t *testing.T) {
+	now := time.Now()
+
 	h := newHarness(t)
 	ctx := context.Background()
 
@@ -40,8 +43,8 @@ func TestSetActiveOrganization_SwitchesAndPersists(t *testing.T) {
 		t.Fatalf("seed second org: %v", err)
 	}
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, org2.ID, u.ID); err != nil {
+		INSERT INTO organization_users (organization_id, user_id, joined_at)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, org2.ID, u.ID, now); err != nil {
 		t.Fatalf("add membership: %v", err)
 	}
 

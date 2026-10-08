@@ -99,15 +99,17 @@ func (s *Store) DeleteLiveZone(ctx context.Context, orgID uuid.UUID, actor uuid.
 }
 
 func upsertZoneRow(ctx context.Context, db dbtx, orgID uuid.UUID, in ZoneInput) error {
+	now := time.Now()
+
 	if _, err := db.Exec(ctx, `INSERT INTO ai_delivery_zones
-		(organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, notes, sales_status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		(organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, notes, sales_status, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, $11, $12, $12)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, zone_level=EXCLUDED.zone_level, parent_ref=EXCLUDED.parent_ref,
 			delivery_available=EXCLUDED.delivery_available, delivery_cost=EXCLUDED.delivery_cost,
-			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			delivery_in_days=EXCLUDED.delivery_in_days, notes=EXCLUDED.notes, sales_status=EXCLUDED.sales_status, updated_at = EXCLUDED.updated_at`,
 		orgID, in.Ref, in.Name, in.ZoneLevel, in.ParentRef, in.DeliveryAvailable, in.DeliveryCost, in.DeliveryInDays,
-		in.Notes, orDefault(in.SalesStatus, "active")); err != nil {
+		in.Notes, orDefault(in.SalesStatus, "active"), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert zone %s: %w", in.Ref, err)
 	}
 	return nil

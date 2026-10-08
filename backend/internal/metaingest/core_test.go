@@ -271,11 +271,7 @@ func TestProcessErrIngestOnIngestFailureEmitsNothing(t *testing.T) {
 	q, hub := newFakeQueue(), &fakeHub{}
 	p := newProcessor(st, q, hub)
 
-	if _, err := db.Exec(context.Background(),
-		`CREATE TRIGGER channel_messages_force_fail BEFORE INSERT ON channel_messages
-		 BEGIN SELECT RAISE(ABORT, 'forced ingest failure'); END`); err != nil {
-		t.Fatalf("install failing trigger: %v", err)
-	}
+	dbtest.FailInserts(t, db, "channel_messages", "forced ingest failure")
 
 	outcome, err := p.Process(context.Background(), acct, inboundText("77011234567", "wamid.5", "hi"))
 	if !errors.Is(err, metaingest.ErrIngest) {

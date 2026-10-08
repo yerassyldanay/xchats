@@ -14,7 +14,7 @@ import (
 // ---------------------------------------------------------------------------
 // Follow-ups — "what needs to happen next"
 // ---------------------------------------------------------------------------
-// Time is stored twice on purpose (see 0013_crm.up.sql). DueAt is a UTC
+// Time is stored twice on purpose (see 20261006000004_crm.sql). DueAt is a UTC
 // instant and is the only thing ordering, overdue and bucketing read; DueDate
 // and DueMinute preserve the wall clock the manager typed so the edit form
 // round-trips exactly instead of drifting by a timezone offset.
@@ -158,7 +158,7 @@ func (s *Store) ListFollowups(ctx context.Context, f FollowupFilter) ([]Followup
 	args = append(args, limit, offset)
 	rows, err := s.db.Query(ctx, `SELECT `+followupCols+` FROM `+followupFrom+`
 		WHERE `+clause+`
-		ORDER BY f.due_at ASC
+		ORDER BY f.due_at ASC, f.id
 		LIMIT $`+itoa(len(args)-1)+` OFFSET $`+itoa(len(args)), args...)
 	if err != nil {
 		return nil, 0, wrap("list followups", err)
@@ -269,6 +269,8 @@ func (s *Store) NextOpenFollowup(ctx context.Context, orgID, customerID uuid.UUI
 
 // CreateFollowup schedules a next action and records it on the timeline.
 func (s *Store) CreateFollowup(ctx context.Context, orgID uuid.UUID, in FollowupInput, actor uuid.NullUUID) (Followup, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Followup{}, err
@@ -281,10 +283,10 @@ func (s *Store) CreateFollowup(ctx context.Context, orgID uuid.UUID, in Followup
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO crm_followups (organization_id, customer_id, conversation_id, channel,
-			due_at, due_date, due_minute, action, note, assignee_user_id, created_by_user_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+			due_at, due_date, due_minute, action, note, assignee_user_id, created_by_user_id, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13) RETURNING id`,
 		orgID, in.CustomerID, in.ConversationID, in.Channel, in.DueAt, in.DueDate,
-		in.DueMinute, in.Action, in.Note, in.AssigneeUserID, actor).Scan(&id); err != nil {
+		in.DueMinute, in.Action, in.Note, in.AssigneeUserID, actor, uuid.New(), now).Scan(&id); err != nil {
 		return Followup{}, wrap("create followup", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, in.CustomerID, timelineEvent{
@@ -316,6 +318,8 @@ func (s *Store) FollowupByID(ctx context.Context, orgID, id uuid.UUID) (Followup
 // rescheduled overdue item leaves the overdue bucket — that is the whole point
 // of the action, and the timeline keeps the record that it slipped.
 func (s *Store) RescheduleFollowup(ctx context.Context, orgID, id uuid.UUID, in FollowupInput, actor uuid.NullUUID) (Followup, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Followup{}, err
@@ -337,9 +341,9 @@ func (s *Store) RescheduleFollowup(ctx context.Context, orgID, id uuid.UUID, in 
 	if _, err := tx.Exec(ctx, `
 		UPDATE crm_followups SET due_at = $3, due_date = $4, due_minute = $5, action = $6,
 			note = $7, assignee_user_id = $8, state = 'open', completed_at = NULL,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = $9
 		WHERE organization_id = $1 AND id = $2`,
-		orgID, id, in.DueAt, in.DueDate, in.DueMinute, in.Action, in.Note, in.AssigneeUserID); err != nil {
+		orgID, id, in.DueAt, in.DueDate, in.DueMinute, in.Action, in.Note, in.AssigneeUserID, now); err != nil {
 		return Followup{}, wrap("reschedule followup", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, customerID, timelineEvent{
@@ -356,6 +360,8 @@ func (s *Store) RescheduleFollowup(ctx context.Context, orgID, id uuid.UUID, in 
 
 // SetFollowupState completes or cancels a follow-up.
 func (s *Store) SetFollowupState(ctx context.Context, orgID, id uuid.UUID, state string, actor uuid.NullUUID) (Followup, error) {
+	now := time.Now()
+
 	kind := TimelineFollowupCompleted
 	if state == FollowupCancelled {
 		kind = TimelineFollowupCancelled
@@ -376,14 +382,14 @@ func (s *Store) SetFollowupState(ctx context.Context, orgID, id uuid.UUID, state
 		}
 		return Followup{}, wrap("load followup", err)
 	}
-	completedAt := "NULL"
+	var completedAt *time.Time // NULL unless the follow-up is being completed
 	if state == FollowupCompleted {
-		completedAt = "strftime('%Y-%m-%d %H:%M:%f','now')"
+		completedAt = &now
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE crm_followups SET state = $3, completed_at = `+completedAt+`,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE organization_id = $1 AND id = $2`, orgID, id, state); err != nil {
+		UPDATE crm_followups SET state = $3, completed_at = $5,
+			updated_at = $4
+		WHERE organization_id = $1 AND id = $2`, orgID, id, state, now, completedAt); err != nil {
 		return Followup{}, wrap("set followup state", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, customerID, timelineEvent{

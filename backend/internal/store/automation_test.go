@@ -594,21 +594,12 @@ func TestClaimDueDispatchJobsRollsBackIfDispatchCreationFails(t *testing.T) {
 		t.Fatalf("ArmDebounce: %v", err)
 	}
 
-	if _, err := db.Exec(ctx, `
-		CREATE TRIGGER fail_dispatch_insert
-		BEFORE INSERT ON automation_dispatch_jobs
-		BEGIN
-			SELECT RAISE(ABORT, 'forced dispatch insert failure');
-		END`); err != nil {
-		t.Fatalf("create failure trigger: %v", err)
-	}
+	removeTrigger := dbtest.FailInserts(t, db, "automation_dispatch_jobs", "forced dispatch insert failure")
 
 	if jobs, err := st.ClaimDueDispatchJobs(ctx, time.Now(), 10); err == nil {
 		t.Fatalf("ClaimDueDispatchJobs = %+v, nil; want forced insert error", jobs)
 	}
-	if _, err := db.Exec(ctx, `DROP TRIGGER fail_dispatch_insert`); err != nil {
-		t.Fatalf("drop failure trigger: %v", err)
-	}
+	removeTrigger()
 
 	jobs, err := st.ClaimDueDispatchJobs(ctx, time.Now().Add(time.Hour), 10)
 	if err != nil {

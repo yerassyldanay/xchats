@@ -1,11 +1,4 @@
-// Package dbtest is the persistence layer's test-fixture package: it sits
-// inside the persistence boundary (alongside internal/store,
-// internal/kbstore, internal/responsestore, internal/mcpauth) and may use
-// their internal APIs freely. It replaces the ten copy-pasted
-// DATABASE_URL-gated harnesses the pgx era had — every test using it gets
-// its own migrated SQLite database at t.TempDir(), so the suite needs zero
-// external services and is parallel-safe (see New/Seed, added alongside
-// the internal/store port in Phase 2).
+// Package dbtest provides isolated SQLite files or PostgreSQL schemas for tests.
 package dbtest
 
 import (
@@ -16,18 +9,18 @@ import (
 	"testing"
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // OpenRaw opens a fresh, migrated database at t.TempDir() and returns the
 // bare *dbx.DB — for tests that verify the schema/migration machinery
-// itself (the architecture and contract tests in this package) rather than
+// itself (the architecture and migration tests in this package) rather than
 // exercising a repository package. Repository package tests want New (added
 // in Phase 2 alongside internal/store), not this.
 func OpenRaw(t testing.TB) *dbx.DB {
 	t.Helper()
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "xchats.db")
+	path := Target(t)
 	db, err := dbx.Open(ctx, path)
 	if err != nil {
 		t.Fatalf("dbtest: open: %v", err)
@@ -37,7 +30,7 @@ func OpenRaw(t testing.TB) *dbx.DB {
 			t.Errorf("dbtest: close: %v", err)
 		}
 	})
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		t.Fatalf("dbtest: migrate: %v", err)
 	}
 	return db
@@ -48,12 +41,12 @@ func OpenRaw(t testing.TB) *dbx.DB {
 // a no-op, not an error and not a duplicate insert).
 func reapplyMigrations(t testing.TB, db *dbx.DB) error {
 	t.Helper()
-	return dbx.RunMigrations(context.Background(), db, sqlitemigrations.FS)
+	return dbx.RunMigrations(context.Background(), db, migrations.FS)
 }
 
 // moduleRoot returns the directory containing the backend module's go.mod —
 // used by tests in this package that need a stable filesystem anchor
-// (schema_contract.json, `go list` for the architecture check) independent
+// (`go list` for the architecture check) independent
 // of the working directory `go test` happens to run from.
 func moduleRoot(t testing.TB) string {
 	t.Helper()

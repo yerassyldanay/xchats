@@ -80,6 +80,8 @@ func (s *Store) LatestCustomerNote(ctx context.Context, orgID, customerID uuid.U
 // a note that is not on the timeline would be invisible in the very place the
 // product asks for it.
 func (s *Store) AddCustomerNote(ctx context.Context, orgID, customerID uuid.UUID, author uuid.NullUUID, body string) (CustomerNote, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return CustomerNote{}, err
@@ -91,8 +93,8 @@ func (s *Store) AddCustomerNote(ctx context.Context, orgID, customerID uuid.UUID
 	}
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO crm_customer_notes (organization_id, customer_id, author_user_id, body)
-		VALUES ($1, $2, $3, $4) RETURNING id`, orgID, customerID, author, body).Scan(&id); err != nil {
+		INSERT INTO crm_customer_notes (organization_id, customer_id, author_user_id, body, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id`, orgID, customerID, author, body, uuid.New(), now).Scan(&id); err != nil {
 		return CustomerNote{}, wrap("add note", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, customerID, timelineEvent{
@@ -111,9 +113,11 @@ func (s *Store) AddCustomerNote(ctx context.Context, orgID, customerID uuid.UUID
 // original wording: the timeline is a record of what happened, not a mirror of
 // current state.
 func (s *Store) UpdateCustomerNote(ctx context.Context, orgID, noteID uuid.UUID, body string) (CustomerNote, error) {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `
-		UPDATE crm_customer_notes SET body = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE organization_id = $1 AND id = $2`, orgID, noteID, body)
+		UPDATE crm_customer_notes SET body = $3, updated_at = $4
+		WHERE organization_id = $1 AND id = $2`, orgID, noteID, body, now)
 	if err != nil {
 		return CustomerNote{}, wrap("update note", err)
 	}

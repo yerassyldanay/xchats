@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -88,6 +89,47 @@ func TestWriteDraftSet_EscalateTrueWithStructuredKBGap(t *testing.T) {
 	wantFields := map[string]bool{"price": true, "warranty_terms": true}
 	if len(e.MissingFields) != 2 || !wantFields[e.MissingFields[0]] || !wantFields[e.MissingFields[1]] {
 		t.Errorf("MissingFields = %v, want [price warranty_terms] in some order", e.MissingFields)
+	}
+}
+
+// The missing fields of a gap are shown in the order the model named them. That order is the
+// created_at of each row, so each field needs its own millisecond rather than the one the whole
+// draft write shares: equal timestamps would be returned in no particular order.
+func TestWriteDraftSet_MissingFieldsKeepTheirOrder(t *testing.T) {
+	st, db := dbtest.Open(t)
+	ctx := context.Background()
+	_, _, chatID := seedOneChat(t, st)
+
+	want := []string{"warranty_terms", "price", "delivery_time", "color", "size", "material"}
+	_, err := st.WriteDraftSet(ctx, "whatsapp", chatID, uuid.NullUUID{}, []store.DraftOption{
+		{
+			Ordinal: 1, Text: "Секунду, уточню.", ReplyLanguage: "ru", Escalate: true,
+			EscalationReason: "нет данных", KBGapReasonCode: "missing_field",
+			KBGapTargetEntityType: "product", KBGapTargetEntityRef: "coffee-machine",
+			KBGapMissingFields: want,
+		},
+	})
+	if err != nil {
+		t.Fatalf("WriteDraftSet: %v", err)
+	}
+	events, err := st.GapEventsForChat(ctx, chatID)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("GapEventsForChat: %d events, err %v", len(events), err)
+	}
+	if got := events[0].MissingFields; !slices.Equal(got, want) {
+		t.Errorf("MissingFields = %v, want %v (the order they were given in)", got, want)
+	}
+
+	var prev time.Time
+	for _, field := range want {
+		var created time.Time
+		if err := db.QueryRow(ctx, `SELECT created_at FROM ai_kb_gap_missing_fields WHERE field_name = $1`, field).Scan(&created); err != nil {
+			t.Fatalf("created_at of %s: %v", field, err)
+		}
+		if !created.After(prev) {
+			t.Fatalf("%s was stamped %v, not after the previous field's %v: the order is not recorded in the data", field, created, prev)
+		}
+		prev = created
 	}
 }
 

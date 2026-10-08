@@ -44,10 +44,12 @@ func (h *mcpHarness) browserClient(t *testing.T) *http.Client {
 // reaches the table directly, exactly mirroring CreateUser's own membership
 // insert.
 func (h *mcpHarness) addUserToOrg(t *testing.T, userID, orgID uuid.UUID) {
+	now := time.Now()
+
 	t.Helper()
 	_, err := h.db.Exec(context.Background(), `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgID, userID)
+		INSERT INTO organization_users (organization_id, user_id, joined_at)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, orgID, userID, now)
 	if err != nil {
 		t.Fatalf("addUserToOrg: %v", err)
 	}

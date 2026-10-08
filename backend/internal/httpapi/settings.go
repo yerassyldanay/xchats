@@ -48,8 +48,9 @@ func (s *Server) storageLocations() storageLocations {
 		DataDir:    s.resolvedDataDir,
 	}
 	if s.cfg != nil {
-		loc.DBPath = s.cfg.Storage.DBPath
-		loc.WADeviceDBPath = s.cfg.Storage.WADeviceDBPath
+		// Show both independent database targets without PostgreSQL credentials.
+		loc.DBPath = s.cfg.Storage.DatabaseLocation()
+		loc.WADeviceDBPath = s.cfg.Storage.DeviceDatabaseLocation()
 		loc.BlobDir = s.cfg.Storage.BlobDir
 	}
 	return loc
@@ -584,6 +585,10 @@ func (s *Server) handleUpdateNgrokSettings(c *gin.Context) {
 func (s *Server) handleDownloadBackup(c *gin.Context) {
 	if s.store == nil {
 		fail(c, http.StatusServiceUnavailable, ErrInternal, "the database is unavailable")
+		return
+	}
+	if !s.store.SupportsFileBackup() {
+		fail(c, http.StatusNotImplemented, ErrBackupUnavailable, "PostgreSQL backups require pg_dump; the downloadable file backup is available for SQLite")
 		return
 	}
 	var settingsJSON []byte

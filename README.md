@@ -43,7 +43,8 @@ demo and is safe to run again.
   the exact stored value, or the draft fails closed and escalates to a human.
 - **Human-in-the-loop, always** — every draft is a suggestion. Nothing
   reaches a customer until a teammate clicks Send.
-- **One binary, one file** — Go + embedded SQLite. No Postgres, no Redis,
+- **Choose SQLite or PostgreSQL** — Go + embedded SQLite by default, with
+  PostgreSQL available through `storage.database_target`. See [Database architecture and migrations](docs/database.md). No Redis,
   no managed cloud service required to run this.
 - **Model-agnostic** — OpenAI, Claude, Gemini, OpenRouter or a local
   Ollama model; swap providers from Settings, not code.

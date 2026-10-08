@@ -211,3 +211,41 @@ func TestTelegramResolvedModeFollowsTheTunnelOrigin(t *testing.T) {
 		})
 	}
 }
+
+// unsetEnv removes key for the duration of the test (t.Setenv registers the
+// restore of the original value), so a variable exported in the developer's
+// shell cannot override the yaml under test.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+}
+
+func TestDatabaseEngineConfiguration(t *testing.T) {
+	unsetEnv(t, "DATABASE_TARGET")
+	unsetEnv(t, "WA_DEVICE_DATABASE_TARGET")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("storage:\n  database_target: ./local.db\n  wa_device_database_target: ./devices.db\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Database() != "./local.db" || cfg.Storage.DeviceDatabase() != "./devices.db" {
+		t.Fatal("SQLite paths not selected")
+	}
+	const target = "postgres://test@localhost/test"
+	const deviceTarget = "postgres://test@localhost/whatsmeow"
+	t.Setenv("DATABASE_TARGET", target)
+	t.Setenv("WA_DEVICE_DATABASE_TARGET", deviceTarget)
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Database() != target || cfg.Storage.DeviceDatabase() != deviceTarget {
+		t.Fatal("xchats and whatsmeow database targets must remain independent")
+	}
+}

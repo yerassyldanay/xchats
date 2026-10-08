@@ -25,7 +25,7 @@ import (
 // crm_customer_identities.account_id/contact_id carry no foreign key: each can
 // reference a wa_* or a tg_* row and a single FK cannot express an either/or
 // reference — the same constraint ai_drafts.chat_id lives with (see
-// 0003_ai_engine.up.sql's file header). Ownership is enforced here instead:
+// 20261006000004_crm.sql's file header). Ownership is enforced here instead:
 // every read and write below takes an organization id and puts it in the WHERE
 // clause, so a cross-org id resolves to no row rather than to someone else's
 // customer.
@@ -117,7 +117,7 @@ type CustomFieldDef struct {
 }
 
 // defaultStatuses is the lifecycle every organization starts with. It is the
-// exact set 0013_crm.up.sql seeds for organizations that predate the
+// exact set 20261006000004_crm.sql seeds for the default organization;
 // migration; EnsureDefaultStatuses applies it to every organization created
 // after. Both are idempotent via UNIQUE (organization_id, slug), so running
 // one after the other is a no-op rather than a duplicate.
@@ -133,6 +133,8 @@ var defaultStatuses = []CustomerStatus{
 // from the CRM handlers' org guard so an organization created after migration
 // 0011 gets the same starting lifecycle, without a backfill job.
 func (s *Store) EnsureDefaultStatuses(ctx context.Context, orgID uuid.UUID) error {
+	now := time.Now()
+
 	var n int
 	if err := s.db.QueryRow(ctx,
 		`SELECT count(*) FROM crm_statuses WHERE organization_id = $1`, orgID).Scan(&n); err != nil {
@@ -143,10 +145,10 @@ func (s *Store) EnsureDefaultStatuses(ctx context.Context, orgID uuid.UUID) erro
 	}
 	for _, d := range defaultStatuses {
 		if _, err := s.db.Exec(ctx, `
-			INSERT INTO crm_statuses (organization_id, slug, name, color, position, is_default)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO crm_statuses (organization_id, slug, name, color, position, is_default, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 			ON CONFLICT (organization_id, slug) DO NOTHING`,
-			orgID, d.Slug, d.Name, d.Color, d.Position, d.IsDefault); err != nil {
+			orgID, d.Slug, d.Name, d.Color, d.Position, d.IsDefault, uuid.New(), now); err != nil {
 			return wrap("seed status", err)
 		}
 	}
@@ -184,25 +186,29 @@ func (s *Store) ListStatuses(ctx context.Context, orgID uuid.UUID) ([]CustomerSt
 // CreateStatus adds one lifecycle entry. A duplicate slug is a conflict, not a
 // silent upsert — the caller surfaces it as 409.
 func (s *Store) CreateStatus(ctx context.Context, orgID uuid.UUID, in CustomerStatus) (CustomerStatus, error) {
+	now := time.Now()
+
 	var st CustomerStatus
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO crm_statuses (organization_id, slug, name, color, position)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO crm_statuses (organization_id, slug, name, color, position, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		RETURNING `+statusCols,
-		orgID, in.Slug, in.Name, in.Color, in.Position).Scan(scanStatusDst(&st)...)
+		orgID, in.Slug, in.Name, in.Color, in.Position, uuid.New(), now).Scan(scanStatusDst(&st)...)
 	return st, wrapDup("create status", err)
 }
 
 // UpdateStatus renames/recolors/reorders one entry. The slug is immutable:
 // it is the natural key customers were seeded against.
 func (s *Store) UpdateStatus(ctx context.Context, orgID, id uuid.UUID, in CustomerStatus) (CustomerStatus, error) {
+	now := time.Now()
+
 	var st CustomerStatus
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_statuses SET name = $3, color = $4, position = $5,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = $6
 		WHERE organization_id = $1 AND id = $2
 		RETURNING `+statusCols,
-		orgID, id, in.Name, in.Color, in.Position).Scan(scanStatusDst(&st)...)
+		orgID, id, in.Name, in.Color, in.Position, now).Scan(scanStatusDst(&st)...)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return st, ErrNotFound
 	}
@@ -255,21 +261,25 @@ func (s *Store) ListTags(ctx context.Context, orgID uuid.UUID) ([]CustomerTag, e
 }
 
 func (s *Store) CreateTag(ctx context.Context, orgID uuid.UUID, in CustomerTag) (CustomerTag, error) {
+	now := time.Now()
+
 	var t CustomerTag
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO crm_tags (organization_id, slug, name, color)
-		VALUES ($1, $2, $3, $4)
-		RETURNING `+tagCols, orgID, in.Slug, in.Name, in.Color).Scan(scanTagDst(&t)...)
+		INSERT INTO crm_tags (organization_id, slug, name, color, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
+		RETURNING `+tagCols, orgID, in.Slug, in.Name, in.Color, uuid.New(), now).Scan(scanTagDst(&t)...)
 	return t, wrapDup("create tag", err)
 }
 
 func (s *Store) UpdateTag(ctx context.Context, orgID, id uuid.UUID, in CustomerTag) (CustomerTag, error) {
+	now := time.Now()
+
 	var t CustomerTag
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_tags SET name = $3, color = $4,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = $5
 		WHERE organization_id = $1 AND id = $2
-		RETURNING `+tagCols, orgID, id, in.Name, in.Color).Scan(scanTagDst(&t)...)
+		RETURNING `+tagCols, orgID, id, in.Name, in.Color, now).Scan(scanTagDst(&t)...)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return t, ErrNotFound
 	}
@@ -293,6 +303,8 @@ func (s *Store) DeleteTag(ctx context.Context, orgID, id uuid.UUID) error {
 // same statement, so a tag from another organization silently matches nothing
 // rather than crossing the tenant boundary.
 func (s *Store) AddCustomerTag(ctx context.Context, orgID, customerID, tagID uuid.UUID, actor uuid.NullUUID) error {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -310,8 +322,8 @@ func (s *Store) AddCustomerTag(ctx context.Context, orgID, customerID, tagID uui
 		return wrap("resolve tag", err)
 	}
 	res, err := tx.Exec(ctx, `
-		INSERT INTO crm_customer_tags (customer_id, tag_id) VALUES ($1, $2)
-		ON CONFLICT (customer_id, tag_id) DO NOTHING`, customerID, tagID)
+		INSERT INTO crm_customer_tags (customer_id, tag_id, created_at) VALUES ($1, $2, $3)
+		ON CONFLICT (customer_id, tag_id) DO NOTHING`, customerID, tagID, now)
 	if err != nil {
 		return wrap("add customer tag", err)
 	}
@@ -389,24 +401,28 @@ func (s *Store) ListCustomFieldDefs(ctx context.Context, orgID uuid.UUID) ([]Cus
 }
 
 func (s *Store) CreateCustomFieldDef(ctx context.Context, orgID uuid.UUID, in CustomFieldDef) (CustomFieldDef, error) {
+	now := time.Now()
+
 	var f CustomFieldDef
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO crm_custom_field_defs (organization_id, key, label, field_type, options, position)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO crm_custom_field_defs (organization_id, key, label, field_type, options, position, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 		RETURNING `+customFieldCols,
-		orgID, in.Key, in.Label, in.FieldType, jsonOrDefault(in.Options, "[]"), in.Position).
+		orgID, in.Key, in.Label, in.FieldType, jsonOrDefault(in.Options, "[]"), in.Position, uuid.New(), now).
 		Scan(scanCustomFieldDst(&f)...)
 	return f, wrapDup("create custom field", err)
 }
 
 func (s *Store) UpdateCustomFieldDef(ctx context.Context, orgID, id uuid.UUID, in CustomFieldDef) (CustomFieldDef, error) {
+	now := time.Now()
+
 	var f CustomFieldDef
 	err := s.db.QueryRow(ctx, `
 		UPDATE crm_custom_field_defs SET label = $3, field_type = $4, options = $5, position = $6,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = $7
 		WHERE organization_id = $1 AND id = $2
 		RETURNING `+customFieldCols,
-		orgID, id, in.Label, in.FieldType, jsonOrDefault(in.Options, "[]"), in.Position).
+		orgID, id, in.Label, in.FieldType, jsonOrDefault(in.Options, "[]"), in.Position, now).
 		Scan(scanCustomFieldDst(&f)...)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return f, ErrNotFound
@@ -479,20 +495,21 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	if f.Query != "" {
 		args = append(args, "%"+strings.ToLower(f.Query)+"%")
 		i := itoa(len(args))
-		// unicode_lower, not SQLite's ASCII-only lower(): this product's names
-		// are mostly Cyrillic, and lower() would leave «Алия» unchanged so a
-		// search for "али" could never match it (see internal/dbx's
-		// unicodelower.go).
+		// Plain lower() on both engines: this product's names are mostly
+		// Cyrillic, and SQLite's built-in lower() would leave «Алия» unchanged so
+		// a search for "али" could never match it — internal/dbx replaces it with
+		// a Unicode-aware one (lower.go), and PostgreSQL's own lower() already
+		// folds Unicode on a UTF-8 database.
 		//
 		// Identity handles are searchable too, so pasting a phone number or an
 		// @username from another tool finds the customer even when the profile's
 		// own phone/email fields were never filled in.
-		where = append(where, `(unicode_lower(c.display_name) LIKE $`+i+
-			` OR unicode_lower(c.phone) LIKE $`+i+
-			` OR unicode_lower(c.email) LIKE $`+i+
+		where = append(where, `(lower(c.display_name) LIKE $`+i+
+			` OR lower(c.phone) LIKE $`+i+
+			` OR lower(c.email) LIKE $`+i+
 			` OR EXISTS (SELECT 1 FROM crm_customer_identities ci WHERE ci.customer_id = c.id
-				AND (unicode_lower(ci.username) LIKE $`+i+` OR unicode_lower(ci.phone) LIKE $`+i+
-			` OR unicode_lower(ci.display_name) LIKE $`+i+` OR unicode_lower(ci.external_id) LIKE $`+i+`)))`)
+				AND (lower(ci.username) LIKE $`+i+` OR lower(ci.phone) LIKE $`+i+
+			` OR lower(ci.display_name) LIKE $`+i+` OR lower(ci.external_id) LIKE $`+i+`)))`)
 	}
 	if f.StatusID.Valid {
 		args = append(args, f.StatusID.UUID)
@@ -535,7 +552,7 @@ func (s *Store) ListCustomers(ctx context.Context, f CustomerFilter) ([]Customer
 	args = append(args, f.Limit, f.Offset)
 	q := `SELECT ` + customerCols + ` FROM crm_customers c
 		WHERE ` + clause + `
-		ORDER BY c.updated_at DESC
+		ORDER BY c.updated_at DESC, c.id
 		LIMIT $` + itoa(len(args)-1) + ` OFFSET $` + itoa(len(args))
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
@@ -685,6 +702,8 @@ type CustomerPatch struct {
 // button — inbound messages go through ResolveCustomerForContact instead) and
 // records the creation on its timeline.
 func (s *Store) CreateCustomer(ctx context.Context, orgID uuid.UUID, in CustomerPatch, actor uuid.NullUUID) (Customer, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Customer{}, err
@@ -701,12 +720,12 @@ func (s *Store) CreateCustomer(ctx context.Context, orgID uuid.UUID, in Customer
 	var c Customer
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO crm_customers (organization_id, display_name, phone, email, avatar_url,
-			status_id, assignee_user_id, custom_fields)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			status_id, assignee_user_id, custom_fields, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
 		RETURNING `+customerColsBare,
 		orgID, derefString(in.DisplayName), derefString(in.Phone), derefString(in.Email),
 		derefString(in.AvatarURL), statusID, derefNullUUID(in.AssigneeUserID),
-		jsonOrDefault(in.CustomFields, "{}")).Scan(scanCustomerDst(&c)...); err != nil {
+		jsonOrDefault(in.CustomFields, "{}"), uuid.New(), now).Scan(scanCustomerDst(&c)...); err != nil {
 		return Customer{}, wrapDup("create customer", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, c.ID, timelineEvent{
@@ -724,6 +743,8 @@ func (s *Store) CreateCustomer(ctx context.Context, orgID uuid.UUID, in Customer
 // field the product treats as an event (status, assignee) — plain profile
 // edits (name/phone/email) are not events, they are corrections.
 func (s *Store) UpdateCustomer(ctx context.Context, orgID, id uuid.UUID, p CustomerPatch, actor uuid.NullUUID) (Customer, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Customer{}, err
@@ -740,8 +761,8 @@ func (s *Store) UpdateCustomer(ctx context.Context, orgID, id uuid.UUID, p Custo
 		return Customer{}, wrap("load customer", err)
 	}
 
-	sets := []string{"updated_at = strftime('%Y-%m-%d %H:%M:%f','now')"}
-	args := []any{orgID, id}
+	sets := []string{"updated_at = $3"}
+	args := []any{orgID, id, now}
 	add := func(col string, v any) {
 		args = append(args, v)
 		sets = append(sets, col+" = $"+itoa(len(args)))
@@ -842,6 +863,8 @@ type IdentityInput struct {
 // organization; that is not an error, it is a no-op — such chats are already
 // invisible to every org's inbox, so there is no customer to own them.
 func ResolveCustomerForContact(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID, in IdentityInput) (uuid.UUID, error) {
+	now := time.Now()
+
 	if orgID == uuid.Nil {
 		return uuid.Nil, nil
 	}
@@ -861,10 +884,10 @@ func ResolveCustomerForContact(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID,
 				phone = CASE WHEN $2 <> '' THEN $2 ELSE phone END,
 				display_name = CASE WHEN $3 <> '' THEN $3 ELSE display_name END,
 				contact_id = $4,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+				updated_at = $9
 			WHERE organization_id = $5 AND channel = $6 AND account_id = $7 AND external_id = $8`,
 			in.Username, in.Phone, in.DisplayName, in.ContactID,
-			orgID, in.Channel, in.AccountID, in.ExternalID); err != nil {
+			orgID, in.Channel, in.AccountID, in.ExternalID, now); err != nil {
 			return uuid.Nil, wrap("refresh identity", err)
 		}
 		return customerID, nil
@@ -884,18 +907,18 @@ func ResolveCustomerForContact(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID,
 		name = in.Phone
 	}
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO crm_customers (organization_id, display_name, phone, status_id)
-		VALUES ($1, $2, $3, $4) RETURNING id`,
-		orgID, name, in.Phone, statusID).Scan(&customerID); err != nil {
+		INSERT INTO crm_customers (organization_id, display_name, phone, status_id, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id`,
+		orgID, name, in.Phone, statusID, uuid.New(), now).Scan(&customerID); err != nil {
 		return uuid.Nil, wrap("create customer", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO crm_customer_identities (organization_id, customer_id, channel, account_id,
-			contact_id, external_id, username, phone, display_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			contact_id, external_id, username, phone, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
 		ON CONFLICT (channel, contact_id) DO NOTHING`,
 		orgID, customerID, in.Channel, in.AccountID, in.ContactID, in.ExternalID,
-		in.Username, in.Phone, in.DisplayName); err != nil {
+		in.Username, in.Phone, in.DisplayName, uuid.New(), now); err != nil {
 		return uuid.Nil, wrap("create identity", err)
 	}
 	if err := appendTimeline(ctx, tx, orgID, customerID, timelineEvent{
@@ -1042,6 +1065,8 @@ func (s *Store) CustomerContextForChat(ctx context.Context, chatID uuid.UUID) (C
 // 0011 ran). uuid.NullUUID{} when the org has statuses but none is marked
 // default — a customer with no status is a valid state.
 func defaultStatusID(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (uuid.NullUUID, error) {
+	now := time.Now()
+
 	var id uuid.NullUUID
 	err := tx.QueryRow(ctx,
 		`SELECT id FROM crm_statuses WHERE organization_id = $1 AND is_default = TRUE`, orgID).Scan(&id)
@@ -1061,10 +1086,10 @@ func defaultStatusID(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (uuid.Nul
 	}
 	for _, d := range defaultStatuses {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO crm_statuses (organization_id, slug, name, color, position, is_default)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			INSERT INTO crm_statuses (organization_id, slug, name, color, position, is_default, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
 			ON CONFLICT (organization_id, slug) DO NOTHING`,
-			orgID, d.Slug, d.Name, d.Color, d.Position, d.IsDefault); err != nil {
+			orgID, d.Slug, d.Name, d.Color, d.Position, d.IsDefault, uuid.New(), now); err != nil {
 			return id, wrap("seed status", err)
 		}
 	}

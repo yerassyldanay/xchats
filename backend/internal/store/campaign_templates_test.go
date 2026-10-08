@@ -158,7 +158,7 @@ func TestListCampaignTemplatesForOrg_ArchivedFilterAndSearch(t *testing.T) {
 		t.Errorf("archived list = %+v (total %d), want just %q", archivedList, archivedTotal, toArchive.Name)
 	}
 
-	// Search is case- and script-insensitive (unicode_lower) — "летн" (lowercase,
+	// Search is case- and script-insensitive (lower()) — "летн" (lowercase,
 	// partial) must still find "Летняя акция" (capitalized Cyrillic).
 	found, foundTotal, err := st.ListCampaignTemplatesForOrg(ctx, orgID, false, "летн", 50, 0)
 	if err != nil {

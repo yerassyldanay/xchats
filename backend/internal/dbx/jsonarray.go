@@ -8,12 +8,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// UUIDArray adapts a []uuid.UUID for a uuid[] column ported to a SQLite TEXT
-// column holding a JSON array (with a json_valid CHECK — see the schema
-// type-mapping table). A nil slice both scans from and is written as "[]",
-// never SQL NULL: every uuid[] column in this schema is NOT NULL DEFAULT
-// '{}'. It is also what the `= ANY($n)` -> `IN (SELECT value FROM
-// json_each(?))` translation binds its right-hand side as.
+// UUIDArray adapts a []uuid.UUID for a column that holds a JSON array in TEXT
+// (every list-valued column is TEXT NOT NULL DEFAULT '[]' on both engines, with
+// no database-side JSON type or CHECK). A nil slice both scans from and is
+// written as "[]", never SQL NULL. It is for storing and loading such a column
+// whole; "x IN a list of ids" is dbx.InList, not a JSON function.
 //
 // Used as a type conversion at the exact Scan/bind call site for one of
 // these columns — rows.Scan((*dbx.UUIDArray)(&t.GalleryImages)) and

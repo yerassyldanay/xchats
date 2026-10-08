@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1574,5 +1575,62 @@ func TestSimulatorMessagesAwaitingReceipt(t *testing.T) {
 	}
 	if len(candidates) != 0 {
 		t.Fatalf("candidates = %+v, want none before their own update time", candidates)
+	}
+}
+
+// Recipients written by one call are listed, paged and sent in the order they were given. Their
+// created_at is what orders them, so each needs its own millisecond: one shared timestamp would
+// tie, and PostgreSQL returns ties in no particular order.
+func TestCampaignRecipientsKeepInputOrder(t *testing.T) {
+	ctx := context.Background()
+	st := dbtest.New(t)
+	orgID, userID, acctID := seedCampaignFixture(t, st, ctx)
+	c := mustCreateCampaign(t, st, ctx, orgID, acctID, userID, "Campaign", "Hi {{name}}!")
+
+	const n = 130
+	in := make([]store.CampaignRecipientInput, n)
+	for i := range in {
+		in[i] = store.CampaignRecipientInput{NormalizedIdentity: fmt.Sprintf("7701%07d", i), Name: fmt.Sprintf("R%d", i)}
+	}
+	if err := st.ReplaceCampaignRecipients(ctx, c.ID, in); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients: %v", err)
+	}
+
+	var got []store.CampaignRecipient
+	for offset := 0; offset < n; offset += 50 {
+		page, total, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, offset)
+		if err != nil {
+			t.Fatalf("ListCampaignRecipients(offset %d): %v", offset, err)
+		}
+		if total != n {
+			t.Fatalf("total = %d, want %d", total, n)
+		}
+		got = append(got, page...)
+	}
+	if len(got) != n {
+		t.Fatalf("paging returned %d recipients, want %d", len(got), n)
+	}
+	for i, r := range got {
+		if r.NormalizedIdentity != in[i].NormalizedIdentity {
+			t.Fatalf("position %d is %s, want %s: recipients lost their input order across pages", i, r.NormalizedIdentity, in[i].NormalizedIdentity)
+		}
+		if i > 0 && !r.CreatedAt.After(got[i-1].CreatedAt) {
+			t.Fatalf("recipient %d created_at %v is not after recipient %d's %v: the order is not recorded in the data", i, r.CreatedAt, i-1, got[i-1].CreatedAt)
+		}
+	}
+
+	// A re-import keeps the rows already present where they were and appends the new one.
+	in = append(in[:3:3], store.CampaignRecipientInput{NormalizedIdentity: "77019999999", Name: "New"})
+	if err := st.ReplaceCampaignRecipients(ctx, c.ID, in); err != nil {
+		t.Fatalf("ReplaceCampaignRecipients (re-import): %v", err)
+	}
+	again, total, err := st.ListCampaignRecipients(ctx, c.ID, "whatsapp", "", 50, 0)
+	if err != nil || total != 4 {
+		t.Fatalf("after the re-import: total = %d, err = %v, want 4", total, err)
+	}
+	for i, want := range []string{got[0].NormalizedIdentity, got[1].NormalizedIdentity, got[2].NormalizedIdentity, "77019999999"} {
+		if again[i].NormalizedIdentity != want {
+			t.Errorf("after the re-import position %d is %s, want %s", i, again[i].NormalizedIdentity, want)
+		}
 	}
 }

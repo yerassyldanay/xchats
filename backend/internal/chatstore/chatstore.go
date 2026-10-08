@@ -27,7 +27,7 @@ import (
 
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrNotFound is returned when a conversation lookup matches no row within
@@ -58,7 +58,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -108,12 +108,14 @@ var emptyMetadata = json.RawMessage(`{}`)
 // title is normal: the first message names the thread (see SetTitle), and
 // the UI renders an untitled conversation as "New chat" until then.
 func (s *Store) CreateConversation(ctx context.Context, scope Scope, title string) (Conversation, error) {
+	now := time.Now()
+
 	var c Conversation
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO chat_conversations (organization_id, user_id, title)
-		VALUES ($1, $2, $3)
+		INSERT INTO chat_conversations (organization_id, user_id, title, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
 		RETURNING id, title, created_at, updated_at`,
-		scope.OrgID, scope.UserID, title).
+		scope.OrgID, scope.UserID, title, uuid.New(), now).
 		Scan(&c.ID, &c.Title, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("chatstore: create conversation: %w", err)
@@ -177,11 +179,13 @@ func (s *Store) Conversation(ctx context.Context, scope Scope, id uuid.UUID) (Co
 // SetTitle renames a thread (the auto-title after the first message, or an
 // explicit rename from the UI).
 func (s *Store) SetTitle(ctx context.Context, scope Scope, id uuid.UUID, title string) (Conversation, error) {
+	now := time.Now()
+
 	tag, err := s.db.Exec(ctx, `
 		UPDATE chat_conversations
-		SET title = $1, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET title = $1, updated_at = $5
 		WHERE id = $2 AND organization_id = $3 AND user_id = $4`,
-		title, id, scope.OrgID, scope.UserID)
+		title, id, scope.OrgID, scope.UserID, now)
 	if err != nil {
 		return Conversation{}, fmt.Errorf("chatstore: rename conversation: %w", err)
 	}
@@ -227,6 +231,8 @@ type AppendInput struct {
 // appending to another user's thread fails with ErrNotFound rather than
 // writing a row.
 func (s *Store) AppendMessage(ctx context.Context, scope Scope, conversationID uuid.UUID, in AppendInput) (Message, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return Message{}, fmt.Errorf("chatstore: begin append: %w", err)
@@ -235,9 +241,9 @@ func (s *Store) AppendMessage(ctx context.Context, scope Scope, conversationID u
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE chat_conversations
-		SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		SET updated_at = $4
 		WHERE id = $1 AND organization_id = $2 AND user_id = $3`,
-		conversationID, scope.OrgID, scope.UserID)
+		conversationID, scope.OrgID, scope.UserID, now)
 	if err != nil {
 		return Message{}, fmt.Errorf("chatstore: touch conversation: %w", err)
 	}
@@ -270,10 +276,10 @@ func (s *Store) AppendMessage(ctx context.Context, scope Scope, conversationID u
 	// driver will not convert a TEXT column into on its own.
 	var storedMetadata string
 	err = tx.QueryRow(ctx, `
-		INSERT INTO chat_messages (id, conversation_id, seq, role, content, metadata)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO chat_messages (id, conversation_id, seq, role, content, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, seq, role, content, metadata, created_at`,
-		id, conversationID, seq, in.Role, in.Content, string(metadata)).
+		id, conversationID, seq, in.Role, in.Content, string(metadata), now).
 		Scan(&m.ID, &m.Seq, &m.Role, &m.Content, &storedMetadata, &m.CreatedAt)
 	if err != nil {
 		return Message{}, fmt.Errorf("chatstore: append message: %w", err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -298,6 +299,8 @@ func TestMCPUpsertService_OmittedSalesStatusDefaultsToActive(t *testing.T) {
 // LATER operation happens to compare literal strings correctly (at worst,
 // never — approval must not be the first place this is detected).
 func TestMCPUpsertService_OmittedStatusParentChildComparison(t *testing.T) {
+	now := time.Now()
+
 	t.Run("omitted-status base + explicit active child succeeds", func(t *testing.T) {
 		kb, orgID, _, _ := newTestKB(t)
 		ctx := context.Background()
@@ -358,8 +361,8 @@ func TestMCPUpsertService_OmittedStatusParentChildComparison(t *testing.T) {
 		kb, orgID, _, db := newTestKB(t)
 		ctx := context.Background()
 		if _, err := db.Exec(ctx, `INSERT INTO ai_services
-			(organization_id, ref, parent_ref, service_type, category, name, price, specialist_refs, sales_status)
-			VALUES ($1, 'haircut-women', '', 'base', '', 'Женская стрижка', '', '[]', '')`, orgID); err != nil {
+			(organization_id, ref, parent_ref, service_type, category, name, price, specialist_refs, sales_status, id, created_at, updated_at)
+			VALUES ($1, 'haircut-women', '', 'base', '', 'Женская стрижка', '', '[]', '', $2, $3, $3)`, orgID, uuid.New(), now); err != nil {
 			t.Fatalf("seed legacy blank-status parent: %v", err)
 		}
 

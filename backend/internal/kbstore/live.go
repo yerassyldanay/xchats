@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -322,6 +323,8 @@ func (s *Store) DeleteLiveSpecialist(ctx context.Context, orgID uuid.UUID, actor
 // since a staged entry is still under human review (see ApproveVersioned's
 // own comment on this same point).
 func (s *Store) PutLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, in ServiceInput) error {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -346,8 +349,8 @@ func (s *Store) PutLiveService(ctx context.Context, orgID uuid.UUID, actor uuid.
 		return err
 	}
 	if cur.ServiceType == "base" && wasActive && cur.SalesStatus == "inactive" {
-		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, cur.Ref); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=$3
+			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, cur.Ref, now); err != nil {
 			return err
 		}
 	}
@@ -421,6 +424,8 @@ func (s *Store) DeleteLiveService(ctx context.Context, orgID uuid.UUID, actor uu
 // and updated_at only, so it can never clobber a concurrent edit to
 // anything else.
 func (s *Store) SetLiveSpecialistSalesStatus(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string, status string) (SpecialistRow, error) {
+	now := time.Now()
+
 	if err := validateEnum("sales_status", status, "active", "inactive"); err != nil {
 		return SpecialistRow{}, err
 	}
@@ -431,10 +436,10 @@ func (s *Store) SetLiveSpecialistSalesStatus(ctx context.Context, orgID uuid.UUI
 	}
 	defer tx.Rollback(ctx)
 	var row SpecialistRow
-	err = tx.QueryRow(ctx, `UPDATE ai_specialists SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+	err = tx.QueryRow(ctx, `UPDATE ai_specialists SET sales_status=$1, updated_at=$4
 		WHERE organization_id=$2 AND ref=$3
 		RETURNING ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, updated_at`,
-		status, orgID, ref).
+		status, orgID, ref, now).
 		Scan(&row.Ref, &row.FullName, &row.Title, &row.Experience, (*aiprompt.ScheduleColumn)(&row.Schedule),
 			&row.BookingURL, (*dbx.UUIDArray)(&row.PortfolioImages), &row.SalesStatus, &row.UpdatedAt)
 	if errors.Is(err, dbx.ErrNoRows) {
@@ -466,6 +471,8 @@ func (s *Store) SetLiveSpecialistSalesStatus(ctx context.Context, orgID uuid.UUI
 // variant/addon never touches its base — only a base's own archive cascades
 // downward.
 func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, actor uuid.UUID, ref string, status string) (ServiceRow, error) {
+	now := time.Now()
+
 	if err := validateEnum("sales_status", status, "active", "inactive"); err != nil {
 		return ServiceRow{}, err
 	}
@@ -494,10 +501,10 @@ func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, 
 	}
 
 	var row ServiceRow
-	err = tx.QueryRow(ctx, `UPDATE ai_services SET sales_status=$1, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
+	err = tx.QueryRow(ctx, `UPDATE ai_services SET sales_status=$1, updated_at=$4
 		WHERE organization_id=$2 AND ref=$3
 		RETURNING ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, updated_at`,
-		status, orgID, ref).
+		status, orgID, ref, now).
 		Scan(&row.Ref, &row.ParentRef, &row.ServiceType, &row.Category, &row.Name, &row.Price, &row.Duration,
 			&row.Description, (*dbx.StringArray)(&row.SpecialistRefs), &row.SalesStatus, &row.UpdatedAt)
 	if errors.Is(err, dbx.ErrNoRows) {
@@ -509,8 +516,8 @@ func (s *Store) SetLiveServiceSalesStatus(ctx context.Context, orgID uuid.UUID, 
 	row.ID = row.Ref
 
 	if row.ServiceType == "base" && cur.SalesStatus == "active" && status == "inactive" {
-		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, ref); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE ai_services SET sales_status='inactive', updated_at=$3
+			WHERE organization_id=$1 AND parent_ref=$2 AND sales_status='active'`, orgID, ref, now); err != nil {
 			return ServiceRow{}, err
 		}
 	}

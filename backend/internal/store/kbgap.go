@@ -80,15 +80,11 @@ func attachMissingFields(ctx context.Context, db *dbx.DB, events []KBGapEvent) e
 		ids[i] = events[i].ID
 		idx[events[i].ID] = i
 	}
-	rows, err := db.Query(ctx, `
-		SELECT event_id, field_name FROM ai_kb_gap_missing_fields
-		WHERE event_id IN (SELECT value FROM json_each($1))
-		ORDER BY created_at`, dbx.StringArray(ids))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
+	return dbx.QueryInChunks(ctx, db, nil, ids, func(list string) string {
+		return `SELECT event_id, field_name FROM ai_kb_gap_missing_fields
+			WHERE event_id IN ` + list + `
+			ORDER BY created_at`
+	}, func(rows *dbx.Rows) error {
 		var eventID, field string
 		if err := rows.Scan(&eventID, &field); err != nil {
 			return err
@@ -96,8 +92,8 @@ func attachMissingFields(ctx context.Context, db *dbx.DB, events []KBGapEvent) e
 		if i, ok := idx[eventID]; ok {
 			events[i].MissingFields = append(events[i].MissingFields, field)
 		}
-	}
-	return rows.Err()
+		return nil
+	})
 }
 
 // defaultKBGapRecentLimit bounds GET /kb/gaps' "recent representative
@@ -307,7 +303,7 @@ func topTargetEntitiesFor(ctx context.Context, db *dbx.DB, clause string, args [
 // KBGapReportFor — field names live in ai_kb_gap_missing_fields, so this is
 // the one query here that joins back to ai_kb_gap_events for the filter and
 // for target_entity_type (a field's own row has no entity-type column of
-// its own; see 0018_kb_gap_telemetry.up.sql). kbGapFilterClause(f, "e.")
+// its own; see 20261006000003_ai_knowledge_base.sql). kbGapFilterClause(f, "e.")
 // yields the same filter values as the caller's own args, qualified for the
 // "e" alias — a fresh call rather than string-editing the caller's clause.
 func topMissingFieldsFor(ctx context.Context, db *dbx.DB, f KBGapFilter, args []any) ([]KBGapMissingFieldCount, error) {
@@ -362,11 +358,11 @@ func kbGapFilterClause(f KBGapFilter, prefix string) ([]string, []any) {
 	// shows its own gap history when opened directly.
 	where := []string{prefix + "organization_id = $1", prefix + "channel != 'simulator'"}
 	if f.From != nil {
-		args = append(args, f.From.UTC().Format("2006-01-02 15:04:05.000"))
+		args = append(args, f.From.UTC())
 		where = append(where, prefix+"created_at >= $"+itoa(len(args)))
 	}
 	if f.To != nil {
-		args = append(args, f.To.UTC().Format("2006-01-02 15:04:05.000"))
+		args = append(args, f.To.UTC())
 		where = append(where, prefix+"created_at <= $"+itoa(len(args)))
 	}
 	if f.ReasonCode != "" {
@@ -396,12 +392,14 @@ func kbGapFilterClause(f KBGapFilter, prefix string) ([]string, []any) {
 // check and rollback already guard everything this function does, exactly
 // as they already guarded the draft insert alone before this existed.
 func writeDraftOptionsTx(ctx context.Context, tx *dbx.Tx, channel string, chatID uuid.UUID, trigger uuid.NullUUID, opts []DraftOption) ([]Draft, error) {
+	now := time.Now()
+
 	if channel == "" {
 		channel = "whatsapp"
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE ai_drafts SET draft_state='superseded', updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE chat_id = $1 AND draft_state='suggested'`, chatID); err != nil {
+		UPDATE ai_drafts SET draft_state='superseded', updated_at=$2
+		WHERE chat_id = $1 AND draft_state='suggested'`, chatID, now); err != nil {
 		return nil, err
 	}
 
@@ -411,10 +409,10 @@ func writeDraftOptionsTx(ctx context.Context, tx *dbx.Tx, channel string, chatID
 	for _, o := range opts {
 		var d Draft
 		if err := tx.QueryRow(ctx, `
-			INSERT INTO ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested')
+			INSERT INTO ai_drafts (chat_id, channel, trigger_message_id, option_ordinal, draft_text, reply_language, confidence, escalate, escalation_reason, draft_state, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'suggested', $10, $11, $11)
 			RETURNING `+draftCols,
-			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason).
+			chatID, channel, trigger, o.Ordinal, o.Text, o.ReplyLanguage, o.Confidence, o.Escalate, o.EscalationReason, uuid.New(), now).
 			Scan(scanDraftDst(&d)...); err != nil {
 			return nil, err
 		}
@@ -460,8 +458,8 @@ func chatOrganizationIDTx(ctx context.Context, tx *dbx.Tx, chatID uuid.UUID) (st
 // allKBGapReasonCodes/allKBGapEntityTypes are this package's own copies of
 // aiprompt's closed vocabularies (built once, not per insert), checked
 // again in insertKBGapEventTx — the final gate before a row exists in the
-// DB at all (migration 0018 deliberately carries no CHECK constraint of its
-// own; see 0018_kb_gap_telemetry.up.sql). DraftOption is exported, so
+// DB at all (the schema deliberately carries no CHECK constraint on them; see
+// 20261006000003_ai_knowledge_base.sql). DraftOption is exported, so
 // aiprompt.sanitizeKBGap having already validated a MODEL-authored
 // diagnostic is not a guarantee every caller went through it — a value
 // outside the closed set here is normalized to the same default an absent
@@ -500,6 +498,8 @@ func stringSet(items []string) map[string]bool {
 // AllKBGapEntityTypes — the same "both valid or neither" invariant
 // aiprompt.sanitizeKBGap enforces for a model-authored diagnostic.
 func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, chatID uuid.UUID, trigger uuid.NullUUID, draftID uuid.UUID, o DraftOption) error {
+	now := time.Now()
+
 	reasonCode := o.KBGapReasonCode
 	if !allKBGapReasonCodes[reasonCode] {
 		reasonCode = aiprompt.KBGapReasonOther
@@ -515,14 +515,14 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 	var eventID uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO ai_kb_gap_events
-			(organization_id, draft_id, channel, chat_id, trigger_message_id, reason_code, target_entity_type, target_entity_ref, escalation_reason, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			(organization_id, draft_id, channel, chat_id, trigger_message_id, reason_code, target_entity_type, target_entity_ref, escalation_reason, source, id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id`,
-		orgID, draftID, channel, chatID, trigger, reasonCode, targetEntityType, targetEntityRef, o.EscalationReason, source).
+		orgID, draftID, channel, chatID, trigger, reasonCode, targetEntityType, targetEntityRef, o.EscalationReason, source, uuid.New(), now).
 		Scan(&eventID); err != nil {
 		return err
 	}
-	for _, field := range o.KBGapMissingFields {
+	for i, field := range o.KBGapMissingFields {
 		if field == "" {
 			continue
 		}
@@ -533,9 +533,9 @@ func insertKBGapEventTx(ctx context.Context, tx *dbx.Tx, orgID, channel string, 
 		// the whole draft write over UNIQUE(event_id, field_name) — an
 		// optional diagnostic must never be able to fail a customer draft.
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO ai_kb_gap_missing_fields (event_id, field_name) VALUES ($1, $2)
+			`INSERT INTO ai_kb_gap_missing_fields (event_id, field_name, id, created_at) VALUES ($1, $2, $3, $4)
 				ON CONFLICT (event_id, field_name) DO NOTHING`,
-			eventID, field); err != nil {
+			eventID, field, uuid.New(), rowStamp(now, i)); err != nil {
 			return err
 		}
 	}

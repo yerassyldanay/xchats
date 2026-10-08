@@ -94,6 +94,7 @@ type settingsHarness struct {
 	tun             *fakeTunnelController
 	llmRefreshCalls *int32
 	health          *providerhealth.Tracker
+	cfg             *config.Config // the server's own pointer: a test may change it before a request
 }
 
 // newSettingsHarness builds a harness with a REAL credentials.Chain
@@ -117,8 +118,8 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 		PageSize: 50,
 		Server:   config.ServerConfig{CORSOrigins: []string{"*"}},
 		Storage: config.StorageConfig{
-			DBPath:         filepath.Join(testDataDir, "data", "xchats.db"),
-			WADeviceDBPath: filepath.Join(testDataDir, "data", "whatsmeow.db"),
+			DatabaseTarget:         filepath.Join(testDataDir, "data", "xchats.db"),
+			WADeviceDatabaseTarget: filepath.Join(testDataDir, "data", "whatsmeow.db"),
 			BlobDir:        filepath.Join(testDataDir, "blobdata"),
 		},
 	}
@@ -158,7 +159,7 @@ func newSettingsHarness(t *testing.T) *settingsHarness {
 	h := &settingsHarness{
 		t: t, srv: ts, client: &http.Client{Jar: jar}, store: st, orgID: org.ID,
 		creds: creds, sets: sets, tun: tun, llmRefreshCalls: &llmRefreshCalls,
-		health: health,
+		health: health, cfg: cfg,
 	}
 	t.Cleanup(ts.Close)
 	h.login(h.client, adminEmail, adminPass)

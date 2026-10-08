@@ -2,34 +2,38 @@ package dbx
 
 import (
 	"context"
-	"sort"
+	"strings"
 	"testing"
 	"time"
 )
 
-// TestTimeRoundTrip pins the canonical timestamp contract before any
-// package is ported onto it: a time.Time bound as a query arg is stored as
-// TEXT in TimeLayout, and scanning it back — into both a plain time.Time
-// (NOT NULL columns) and a *time.Time (nullable columns, including the NULL
-// case) — reproduces the same instant.
+// 2026-10-06T00:00:00Z as an independently known literal (the instant the
+// migration seeds use), so these tests do not just re-derive the
+// implementation's own arithmetic.
+const seedInstantMS = int64(1791244800000)
+
+var seedInstant = time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)
+
+// TestTimeRoundTrip pins the timestamp contract: a time.Time bound as a query
+// arg is stored as a BIGINT of UTC Unix milliseconds, and scanning it back, into
+// both a plain time.Time (NOT NULL columns) and a *time.Time (nullable columns,
+// NULL included), reproduces the same instant in UTC.
 func TestTimeRoundTrip(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
 	if _, err := db.Exec(ctx, `CREATE TABLE t (
 		id INTEGER PRIMARY KEY,
-		created_at TEXT NOT NULL,
-		deleted_at TEXT
+		created_at BIGINT NOT NULL,
+		deleted_at BIGINT
 	)`); err != nil {
 		t.Fatal(err)
 	}
 
-	// Sub-millisecond precision must not survive the round trip (canonical
-	// format is fixed 3-digit millis) but millisecond precision must — so
-	// the input is pre-truncated to milliseconds, matching what every
-	// Equal() check below expects back.
-	in := time.Date(2026, 8, 4, 11, 23, 31, 123_456_789, time.FixedZone("MSK", 3*3600)).
-		Truncate(time.Millisecond)
+	// 2026-10-06T00:00:00.123456789Z written in another zone; the sub-millisecond
+	// part must not survive the round trip, the millisecond part must.
+	in := time.Date(2026, 10, 6, 3, 0, 0, 123_456_789, time.FixedZone("MSK", 3*3600))
+	want := seedInstant.Add(123 * time.Millisecond)
 
 	if _, err := db.Exec(ctx, `INSERT INTO t (id, created_at, deleted_at) VALUES (1, $1, $2)`,
 		in, (*time.Time)(nil)); err != nil {
@@ -40,16 +44,12 @@ func TestTimeRoundTrip(t *testing.T) {
 		t.Fatalf("insert with non-nil deleted_at: %v", err)
 	}
 
-	var raw string
+	var raw int64
 	if err := db.QueryRow(ctx, `SELECT created_at FROM t WHERE id = 1`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	wantRaw := in.UTC().Format(TimeLayout)
-	if raw != wantRaw {
-		t.Fatalf("stored text = %q, want %q", raw, wantRaw)
-	}
-	if got := len(raw) - len(raw[:19]); got != 4 { // ".mmm" == 4 bytes after the seconds field
-		t.Fatalf("stored text %q does not have a fixed 3-digit millisecond suffix", raw)
+	if raw != seedInstantMS+123 {
+		t.Fatalf("stored value = %d, want %d (UTC Unix milliseconds)", raw, seedInstantMS+123)
 	}
 
 	var createdAt time.Time
@@ -58,8 +58,8 @@ func TestTimeRoundTrip(t *testing.T) {
 		Scan(&createdAt, &deletedAt); err != nil {
 		t.Fatalf("scan row 1: %v", err)
 	}
-	if !createdAt.Equal(in) {
-		t.Errorf("row 1 created_at = %v, want %v", createdAt, in)
+	if !createdAt.Equal(want) {
+		t.Errorf("row 1 created_at = %v, want %v", createdAt, want)
 	}
 	if createdAt.Location() != time.UTC {
 		t.Errorf("row 1 created_at location = %v, want UTC", createdAt.Location())
@@ -72,24 +72,22 @@ func TestTimeRoundTrip(t *testing.T) {
 		Scan(&createdAt, &deletedAt); err != nil {
 		t.Fatalf("scan row 2: %v", err)
 	}
-	if deletedAt == nil || !deletedAt.Equal(in) {
-		t.Errorf("row 2 deleted_at = %v, want %v", deletedAt, in)
+	if deletedAt == nil || !deletedAt.Equal(want) {
+		t.Errorf("row 2 deleted_at = %v, want %v", deletedAt, want)
 	}
 }
 
-// TestTimeLexicalOrdering pins that two canonical timestamps compare in the
-// same order lexically (as SQLite TEXT, via <, >, ORDER BY, MIN/MAX) as they
-// do chronologically — the whole reason the format is fixed-width.
-func TestTimeLexicalOrdering(t *testing.T) {
+// Integers order the way instants do: ORDER BY, MIN/MAX and < / > on a bound
+// time.Time all agree with chronology, with no fixed-width-text requirement.
+func TestTimeNumericOrdering(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
 
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := seedInstant
 	var times []time.Time
 	for i := 0; i < 20; i++ {
 		times = append(times, base.Add(time.Duration(i)*137*time.Millisecond))
 	}
-	// Also cross a second boundary and a day boundary explicitly.
 	times = append(times,
 		base.Add(999*time.Millisecond),
 		base.Add(1000*time.Millisecond),
@@ -97,11 +95,10 @@ func TestTimeLexicalOrdering(t *testing.T) {
 		base.Add(24*time.Hour),
 	)
 
-	if _, err := db.Exec(ctx, `CREATE TABLE t (v TEXT)`); err != nil {
+	if _, err := db.Exec(ctx, `CREATE TABLE t (v BIGINT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	// Insert in shuffled (reverse) order so ORDER BY is doing real work.
-	for i := len(times) - 1; i >= 0; i-- {
+	for i := len(times) - 1; i >= 0; i-- { // reverse order, so ORDER BY does real work
 		if _, err := db.Exec(ctx, `INSERT INTO t (v) VALUES ($1)`, times[i]); err != nil {
 			t.Fatal(err)
 		}
@@ -123,112 +120,61 @@ func TestTimeLexicalOrdering(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-
-	want := append([]time.Time(nil), times...)
-	sort.Slice(want, func(i, j int) bool { return want[i].Before(want[j]) })
-
-	if len(got) != len(want) {
-		t.Fatalf("got %d rows, want %d", len(got), len(want))
+	if len(got) != len(times) {
+		t.Fatalf("got %d rows, want %d", len(got), len(times))
 	}
-	for i := range want {
-		if !got[i].Equal(want[i]) {
-			t.Errorf("position %d: ORDER BY v gave %v, want %v", i, got[i], want[i])
+	for i := 1; i < len(got); i++ {
+		if !got[i-1].Before(got[i]) {
+			t.Errorf("position %d: %v is not before %v", i, got[i-1], got[i])
 		}
+	}
+
+	var n int
+	cutoff := base.Add(24 * time.Hour)
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM t WHERE v < $1`, cutoff).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != len(times)-1 {
+		t.Errorf("v < cutoff matched %d rows, want %d", n, len(times)-1)
+	}
+
+	var latest time.Time
+	if err := db.QueryRow(ctx, `SELECT MAX(v) FROM t`).Scan(&latest); err != nil || !latest.Equal(cutoff) {
+		t.Errorf("MAX(v) = %v (%v), want %v", latest, err, cutoff)
 	}
 }
 
-// TestTimeComparableWithStrftimeNow pins that a Go-formatted canonical
-// timestamp and strftime('%Y-%m-%d %H:%M:%f','now') (the now() ->
-// translation every SQL-side default/comparison uses) are on the exact same
-// scale: a strftime('now') value inserted after a Go-bound "yesterday"
-// value must sort after it, and vice versa for "tomorrow".
-func TestTimeComparableWithStrftimeNow(t *testing.T) {
+func TestTimeScanNullIntoNonPointerFails(t *testing.T) {
 	db := openTest(t)
-	ctx := context.Background()
-
-	if _, err := db.Exec(ctx, `CREATE TABLE t (
-		id INTEGER PRIMARY KEY,
-		v TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))
-	)`); err != nil {
-		t.Fatal(err)
-	}
-
-	yesterday := time.Now().UTC().Add(-24 * time.Hour)
-	tomorrow := time.Now().UTC().Add(24 * time.Hour)
-
-	if _, err := db.Exec(ctx, `INSERT INTO t (id, v) VALUES (1, $1)`, yesterday); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO t (id) VALUES (2)`); err != nil { // SQL-side default (now)
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(ctx, `INSERT INTO t (id, v) VALUES (3, $1)`, tomorrow); err != nil {
-		t.Fatal(err)
-	}
-
-	rows, err := db.Query(ctx, `SELECT id FROM t ORDER BY v`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var order []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		order = append(order, id)
-	}
-	if want := []int{1, 2, 3}; !equalInts(order, want) {
-		t.Errorf("ORDER BY v gave id order %v, want %v (yesterday < now < tomorrow)", order, want)
-	}
-
-	// The stored strftime('now') text must itself parse with ParseTime and
-	// itself be exactly the fixed-width canonical form (dbtest/domain code
-	// never reads this column via strftime output directly today, but a
-	// future column default might, and the contract test asserts formats
-	// match across every default, not just the ones currently read back).
-	var nowText string
-	if err := db.QueryRow(ctx, `SELECT v FROM t WHERE id = 2`).Scan(&nowText); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ParseTime(nowText); err != nil {
-		t.Errorf("strftime('now') text %q does not parse as TimeLayout: %v", nowText, err)
-	}
-	if len(nowText) != len(TimeLayout) {
-		t.Errorf("strftime('now') text %q has length %d, want %d (same width as TimeLayout)",
-			nowText, len(nowText), len(TimeLayout))
+	var at time.Time
+	err := db.QueryRow(context.Background(), `SELECT NULL`).Scan(&at)
+	if err == nil || !strings.Contains(err.Error(), "NULL") {
+		t.Fatalf("scanning NULL into a time.Time returned %v, want an error naming NULL", err)
 	}
 }
 
-func equalInts(a, b []int) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
+// bindArgs has no dialect switch: the one conversion serves SQLite and
+// PostgreSQL alike, so BIGINT timestamp columns mean the same on both.
+func TestBindArgsConvertsTimesToUnixMillis(t *testing.T) {
+	in := seedInstant.Add(5 * time.Millisecond)
+	var absent *time.Time
 
-func TestFormatParseTimeRoundTrip(t *testing.T) {
-	cases := []time.Time{
-		time.Date(2026, 8, 4, 11, 23, 31, 0, time.UTC),
-		time.Date(2026, 8, 4, 11, 23, 31, 1_000_000, time.UTC),
-		time.Date(2026, 8, 4, 11, 23, 31, 999_000_000, time.UTC),
-		time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
-		time.Unix(0, 0).UTC(),
+	got := bindArgs([]any{in, &in, absent, "x", 7})
+	if len(got) != 5 {
+		t.Fatalf("got %d args, want 5", len(got))
 	}
-	for _, tc := range cases {
-		s := FormatTime(tc)
-		got, err := ParseTime(s)
-		if err != nil {
-			t.Fatalf("ParseTime(%q): %v", s, err)
-		}
-		if !got.Equal(tc) {
-			t.Errorf("round trip %v -> %q -> %v, want %v", tc, s, got, tc)
-		}
+	if got[0] != seedInstantMS+5 || got[1] != seedInstantMS+5 {
+		t.Errorf("times converted to %v and %v, want %d", got[0], got[1], seedInstantMS+5)
+	}
+	if got[2] != nil {
+		t.Errorf("nil *time.Time converted to %v, want nil (SQL NULL)", got[2])
+	}
+	if got[3] != "x" || got[4] != 7 {
+		t.Errorf("non-time args changed: %v, %v", got[3], got[4])
+	}
+
+	plain := []any{"a", 1}
+	if again := bindArgs(plain); &again[0] != &plain[0] {
+		t.Error("bindArgs copied an arg list that holds no time values")
 	}
 }

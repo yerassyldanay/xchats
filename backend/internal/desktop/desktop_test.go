@@ -23,7 +23,7 @@ func loadDefaults(t *testing.T) *config.Config {
 
 func clearStorageEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"DB_PATH", "WA_DEVICE_DB_PATH", "BLOB_DIR", "HTTP_ADDR", "API_BASE_URL"} {
+	for _, k := range []string{"DATABASE_TARGET", "WA_DEVICE_DATABASE_TARGET", "BLOB_DIR", "HTTP_ADDR", "API_BASE_URL"} {
 		t.Setenv(k, "")
 	}
 }
@@ -42,11 +42,11 @@ func TestApplyDefaultsRebasesRelativeStorageOntoTheDataDir(t *testing.T) {
 	// config.yaml's committed defaults are "./data/xchats.db",
 	// "./data/whatsmeow.db" and "./blobdata" — process-relative, and so
 	// meaningless once the launcher picks the working directory.
-	if want := filepath.Join(dataDir, "data", "xchats.db"); cfg.Storage.DBPath != want {
-		t.Errorf("DBPath = %q, want %q", cfg.Storage.DBPath, want)
+	if want := filepath.Join(dataDir, "data", "xchats.db"); cfg.Storage.DatabaseTarget != want {
+		t.Errorf("DatabaseTarget = %q, want %q", cfg.Storage.DatabaseTarget, want)
 	}
-	if want := filepath.Join(dataDir, "data", "whatsmeow.db"); cfg.Storage.WADeviceDBPath != want {
-		t.Errorf("WADeviceDBPath = %q, want %q", cfg.Storage.WADeviceDBPath, want)
+	if want := filepath.Join(dataDir, "data", "whatsmeow.db"); cfg.Storage.WADeviceDatabaseTarget != want {
+		t.Errorf("WADeviceDatabaseTarget = %q, want %q", cfg.Storage.WADeviceDatabaseTarget, want)
 	}
 	if want := filepath.Join(dataDir, "blobdata"); cfg.Storage.BlobDir != want {
 		t.Errorf("BlobDir = %q, want %q", cfg.Storage.BlobDir, want)
@@ -62,13 +62,31 @@ func TestApplyDefaultsLeavesAbsolutePathsAlone(t *testing.T) {
 
 	pinned := filepath.Join(t.TempDir(), "pinned", "xchats.db")
 	cfg := loadDefaults(t)
-	cfg.Storage.DBPath = pinned
+	cfg.Storage.DatabaseTarget = pinned
 	cfg.Server.HTTPAddr = ":0"
 	if err := ApplyDefaults(cfg); err != nil {
 		t.Fatalf("ApplyDefaults: %v", err)
 	}
-	if cfg.Storage.DBPath != pinned {
-		t.Errorf("DBPath = %q, want the configured absolute path %q untouched", cfg.Storage.DBPath, pinned)
+	if cfg.Storage.DatabaseTarget != pinned {
+		t.Errorf("DatabaseTarget = %q, want the configured absolute path %q untouched", cfg.Storage.DatabaseTarget, pinned)
+	}
+}
+
+// A PostgreSQL URL is not a path: joining it onto the data directory would turn the database
+// into a directory name and the desktop app would silently open a file there.
+func TestApplyDefaultsLeavesDatabaseURLAlone(t *testing.T) {
+	clearStorageEnv(t)
+	t.Setenv("XCHATS_DATA_DIR", t.TempDir())
+
+	const url = "postgres://app:pw@db.example:5432/xchats"
+	cfg := loadDefaults(t)
+	cfg.Storage.DatabaseTarget = url
+	cfg.Server.HTTPAddr = ":0"
+	if err := ApplyDefaults(cfg); err != nil {
+		t.Fatalf("ApplyDefaults: %v", err)
+	}
+	if cfg.Storage.DatabaseTarget != url {
+		t.Errorf("DatabaseTarget = %q, want the URL %q untouched", cfg.Storage.DatabaseTarget, url)
 	}
 }
 

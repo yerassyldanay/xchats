@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -73,6 +74,8 @@ type MaterialInput struct {
 // for auto-extraction); everything else is pending until an extraction job fills
 // it in (see MaterialInput.Description for the url/comment-as-fallback case).
 func (s *Store) CreateMaterial(ctx context.Context, orgID uuid.UUID, in MaterialInput) (Material, error) {
+	now := time.Now()
+
 	status := "pending"
 	text := in.Text
 	extraction := "{}"
@@ -91,10 +94,10 @@ func (s *Store) CreateMaterial(ctx context.Context, orgID uuid.UUID, in Material
 	}
 	var m Material
 	err := s.db.QueryRow(ctx, `INSERT INTO kbd_materials
-		(organization_id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		(organization_id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9, $10, $10)
 		RETURNING id, source_type, source_ref, blob_id, extracted_text, media_kind, status, extraction, created_at, updated_at`,
-		orgID, in.SourceType, in.SourceRef, in.BlobID, text, in.MediaKind, status, extraction).
+		orgID, in.SourceType, in.SourceRef, in.BlobID, text, in.MediaKind, status, extraction, uuid.New(), now).
 		Scan(&m.ID, &m.SourceType, &m.SourceRef, &m.BlobID, &m.ExtractedText, &m.MediaKind, &m.Status, &m.Extraction, &m.CreatedAt, &m.UpdatedAt)
 	return m, err
 }
@@ -143,10 +146,12 @@ type MaterialExtraction struct {
 
 // UpdateMaterialExtraction records an adapter's output on a material.
 func (s *Store) UpdateMaterialExtraction(ctx context.Context, id uuid.UUID, ex MaterialExtraction) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `UPDATE kbd_materials SET
 		status = $2, extracted_text = $3, media_kind = COALESCE(NULLIF($4,''), media_kind),
-		extraction = $5, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
-		id, ex.Status, ex.ExtractedText, ex.MediaKind, orDefault(ex.Extraction, "{}"))
+		extraction = $5, updated_at = $6 WHERE id = $1`,
+		id, ex.Status, ex.ExtractedText, ex.MediaKind, orDefault(ex.Extraction, "{}"), now)
 	return err
 }
 
@@ -170,13 +175,17 @@ func (s *Store) ReadyMaterials(ctx context.Context, orgID uuid.UUID) ([]Material
 // is what makes RunTurn idempotent: re-running the same instruction is a no-op once
 // its materials are consumed.
 func (s *Store) MarkMaterialsBuilt(ctx context.Context, ids []uuid.UUID) error {
-	if len(ids) == 0 {
-		return nil
+	now := time.Now()
+
+	for chunk := range slices.Chunk(ids, dbx.MaxInList) {
+		list, args := dbx.InList([]any{now}, chunk)
+		if _, err := s.db.Exec(ctx, `UPDATE kbd_materials
+			SET status = 'built', updated_at = $1
+			WHERE id IN `+list+` AND status = 'ready'`, args...); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.Exec(ctx, `UPDATE kbd_materials
-		SET status = 'built', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id IN (SELECT value FROM json_each($1)) AND status = 'ready'`, dbx.UUIDArray(ids))
-	return err
+	return nil
 }
 
 // ListLiveMaterials returns the org's kbd_materials rows for GET
@@ -299,12 +308,14 @@ type RequestInput struct {
 
 // CreateRequest raises a popup for the org.
 func (s *Store) CreateRequest(ctx context.Context, orgID uuid.UUID, in RequestInput) (Request, error) {
+	now := time.Now()
+
 	var r Request
 	err := s.db.QueryRow(ctx, `INSERT INTO kbd_requests
-		(organization_id, material_id, req_type, prompt, context, target)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		(organization_id, material_id, req_type, prompt, context, target, id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6, $7, $8)
 		RETURNING id, material_id, req_type, prompt, context, target, state, resolution, created_at, resolved_at`,
-		orgID, in.MaterialID, in.ReqType, in.Prompt, orDefault(in.Context, "{}"), orDefault(in.Target, "{}")).
+		orgID, in.MaterialID, in.ReqType, in.Prompt, orDefault(in.Context, "{}"), orDefault(in.Target, "{}"), uuid.New(), now).
 		Scan(&r.ID, &r.MaterialID, &r.ReqType, &r.Prompt, &r.Context, &r.Target, &r.State, &r.Resolution, &r.CreatedAt, &r.ResolvedAt)
 	return r, err
 }
@@ -324,9 +335,11 @@ func (s *Store) GetRequest(ctx context.Context, id uuid.UUID) (Request, error) {
 // ResolveRequest marks a popup resolved (or dismissed) with the operator's answer.
 // The caller applies the resulting draft mutation separately.
 func (s *Store) ResolveRequest(ctx context.Context, id uuid.UUID, state, resolution string) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `UPDATE kbd_requests SET
-		state = $2, resolution = $3, resolved_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`,
-		id, orDefault(state, "resolved"), orDefault(resolution, "{}"))
+		state = $2, resolution = $3, resolved_at = $4 WHERE id = $1`,
+		id, orDefault(state, "resolved"), orDefault(resolution, "{}"), now)
 	return err
 }
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -11,20 +12,18 @@ import (
 
 // GetOrCreateSimulatorAccount returns the organization's simulator channel
 // account, creating one (wa_accounts.channel='simulator') if none exists yet.
-// One per organization — the simulator's stable owner_jid ("simulator:<org
-// id>") makes this call idempotent under concurrent requests. The random id
-// expression matches the one every migrations/sqlite/*.up.sql uuid PRIMARY
-// KEY DEFAULT uses (wa_accounts.id itself has no DB-side default — it's
-// normally the app-derived uuidv5(owner_jid) — so a fresh id is generated
-// inline here exactly as the old uuid_generate_v4() call did).
+// One per organization: the stable owner_jid ("simulator:<org id>") makes
+// this idempotent under concurrency. IDs are generated in Go for both engines.
 func (s *Store) GetOrCreateSimulatorAccount(ctx context.Context, orgID uuid.UUID) (Account, error) {
+	now := time.Now()
+
 	var a Account
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, channel, connection_state)
-		VALUES (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1,1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
-		        $1, 'Simulator', 'simulator:' || $1, 'simulator', 'connected')
-		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		RETURNING `+waAccountCols, orgID).Scan(scanWaAccountDst(&a)...)
+		INSERT INTO wa_accounts (id, organization_id, display_name, owner_jid, channel, connection_state, created_at, updated_at)
+		VALUES ($2,
+		        $1, 'Simulator', 'simulator:' || $1, 'simulator', 'connected', $3, $3)
+		ON CONFLICT (owner_jid) DO UPDATE SET updated_at = EXCLUDED.updated_at
+		RETURNING `+waAccountCols, orgID, uuid.New(), now).Scan(scanWaAccountDst(&a)...)
 	return a, err
 }
 
@@ -69,7 +68,7 @@ func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (Simula
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// ai_drafts.chat_id is polymorphic (no FK — see 0003_ai_engine.up.sql's
+	// ai_drafts.chat_id is polymorphic (no FK — see 20261006000003_ai_knowledge_base.sql's
 	// file header), so this must run BEFORE wa_chats rows disappear below.
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM ai_drafts WHERE channel = 'simulator'
@@ -93,7 +92,7 @@ func (s *Store) PurgeSimulatorData(ctx context.Context, orgID uuid.UUID) (Simula
 
 	// Simulator-only customers: cascades crm_customer_identities/notes/
 	// followups/timeline/tags automatically (all ON DELETE CASCADE from
-	// crm_customers — see 0013_crm.up.sql). A customer with a mix of
+	// crm_customers — see 20261006000004_crm.sql). A customer with a mix of
 	// identities (a manual merge — crm_merge.go) keeps its real identities;
 	// only its simulator identity/chat is gone as an ordinary orphaned
 	// conversation once wa_chats is cleared below.

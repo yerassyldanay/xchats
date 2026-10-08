@@ -179,7 +179,7 @@ func main() {
 	case "serve":
 		runServe(cfg, log, resolvedConfigPath)
 	case "migrate":
-		runMigrate(cfg, log)
+		runMigrate(cfg, log, flag.Args()[1:])
 	case "seed":
 		st := mustStore(cfg, log)
 		defer st.Close()
@@ -417,7 +417,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 	// Opening the same path mustStore already opened is deliberate and cheap:
 	// internal/dbx.Open refcounts one connection per path, so kb shares st's
 	// connection rather than racing a second one against the same file.
-	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.Database())
 	if err != nil {
 		return nil, fmt.Errorf("kbstore: %w", err)
 	}
@@ -460,7 +460,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 	// response engine's hot path (every customer reply) and GET /kb/prompt
 	// (the /knowledge-base "Промпт" tab) both read through it, so the tab is
 	// never a second, possibly-divergent rendering of the same data.
-	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.DBPath)
+	kbRepo, err := responsestore.NewKnowledgeBaseRepo(ctx, cfg.Storage.Database())
 	if err != nil {
 		return nil, fmt.Errorf("kb repo: %w", err)
 	}
@@ -577,7 +577,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 		waSender = fakeWA.ChannelSender()
 	} else {
 		realWA, err := whatsmeow.NewManager(ctx, whatsmeow.ManagerConfig{
-			DeviceDBPath: cfg.Storage.WADeviceDBPath,
+			DeviceDBPath: cfg.Storage.DeviceDatabase(),
 			Store:        st,
 			Blob:         blobStore,
 			Queue:        q,
@@ -732,7 +732,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 	// a key saved in Settings takes effect here too with no extra wiring.
 	// Retrieval goes through chatkb over the existing kbstore — the chat
 	// never reads a KB table itself.
-	chatDB, err := chatstore.New(ctx, cfg.Storage.DBPath)
+	chatDB, err := chatstore.New(ctx, cfg.Storage.Database())
 	if err != nil {
 		return nil, fmt.Errorf("chatstore: %w", err)
 	}
@@ -1241,7 +1241,7 @@ func buildMCPConnector(ctx context.Context, cfg *config.Config, kb *kbstore.Stor
 	}
 	// Shares runServe's connection via dbx.Open's per-path refcounting, same
 	// as kb above — this is not a second pool against the same file.
-	mcpStore, err := mcpauth.NewStore(ctx, cfg.Storage.DBPath)
+	mcpStore, err := mcpauth.NewStore(ctx, cfg.Storage.Database())
 	if err != nil {
 		fatal("mcpauth store", err)
 	}
@@ -1334,7 +1334,7 @@ func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *
 	if err != nil {
 		fatal("seed-demo blob", err)
 	}
-	kb, err := kbstore.New(ctx, cfg.Storage.DBPath)
+	kb, err := kbstore.New(ctx, cfg.Storage.Database())
 	if err != nil {
 		fatal("seed-demo kb", err)
 	}
@@ -1356,16 +1356,28 @@ func runSeedDemo(ctx context.Context, cfg *config.Config, st *store.Store, log *
 // before the first serve, and as a check that the schema is current. It stays
 // a distinct subcommand rather than being removed precisely because callers
 // (the Makefile, deploy scripts) treat "migrate then serve" as two steps.
-func runMigrate(cfg *config.Config, log *slog.Logger) {
-	st := mustStore(cfg, log)
-	defer st.Close()
+func runMigrate(cfg *config.Config, log *slog.Logger, args []string) {
+	flags := flag.NewFlagSet("migrate", flag.ExitOnError)
+	force := flags.String("force", "", "development replay: full identifier or all")
+	if err := flags.Parse(args); err != nil {
+		fatal("migrate", err)
+	}
+	if flags.NArg() != 0 {
+		fatal("migrate", errString("usage: xchats migrate [-force identifier|all]"))
+	}
+	if *force != "" && cfg.IsProduction() {
+		fatal("migrate", errString("forced replay is disabled in production"))
+	}
+	if err := store.Migrate(context.Background(), cfg.Storage.Database(), *force); err != nil {
+		fatal("migrate", err)
+	}
 	log.Info("migrations applied")
 }
 
-// runBackup writes a consistent, compacted snapshot of DB_PATH to the given
+// runBackup writes a consistent, compacted snapshot of DATABASE_TARGET to the given
 // destination path (VACUUM INTO; the destination must not already exist).
 // Opening the store acquires internal/dbx's single-process lock, so this
-// subcommand — like "check" below — cannot run against a DB_PATH that
+// subcommand — like "check" below — cannot run against a PostgreSQL target that
 // "xchats serve" already has open; stop the server first, or use the
 // in-app "Download Backup" action (internal/httpapi's settings surface),
 // which runs inside the already-open server process instead.
@@ -1381,7 +1393,7 @@ func runBackup(cfg *config.Config, log *slog.Logger, args []string) {
 	log.Info("backup complete", "dest", args[0])
 }
 
-// runCheck runs SQLite's own consistency check against DB_PATH and reports
+// runCheck runs SQLite's own consistency check against DATABASE_TARGET and reports
 // every problem found, if any. See runBackup's doc comment for why this
 // needs the server stopped (or run the "Download Backup" flow instead,
 // whose zip manifest records the same check).
@@ -1421,7 +1433,7 @@ func runRestore(log *slog.Logger, args []string) {
 // longer pre-configured or seeded here — they are paired dynamically via the
 // UI (internal/whatsmeow), so the derived account id only ever comes into
 // existence once a phone actually completes pairing. Admin user credentials
-// are created by migration 0006_init_admin — no boot-time user creation is
+// are seeded by migration 20261006000001_identity_access.sql — no boot-time user creation is
 // performed here either.
 func seedBase(ctx context.Context, cfg *config.Config, st *store.Store, log *slog.Logger) {
 	if _, err := st.SeedOrganization(ctx, cfg.OrgName); err != nil {
@@ -1432,10 +1444,10 @@ func seedBase(ctx context.Context, cfg *config.Config, st *store.Store, log *slo
 // --- small helpers --------------------------------------------------------
 
 func mustStore(cfg *config.Config, log *slog.Logger) *store.Store {
-	if cfg.Storage.DBPath == "" {
-		fatal("config", errString("DB_PATH is required"))
+	if cfg.Storage.Database() == "" {
+		fatal("config", errString("DATABASE_TARGET is required"))
 	}
-	st, err := store.New(context.Background(), cfg.Storage.DBPath)
+	st, err := store.New(context.Background(), cfg.Storage.Database())
 	if err != nil {
 		fatal("connect db", err)
 	}

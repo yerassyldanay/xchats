@@ -8,6 +8,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -48,15 +49,11 @@ type ServerConfig struct {
 }
 
 // StorageConfig is where every on-disk file this process owns lives.
-// db_path has a committed default now (./data/xchats.db) — a fresh clone
-// boots without DB_PATH set at all.
+// database_target accepts either a SQLite path or a PostgreSQL URL.
 type StorageConfig struct {
-	DBPath string `yaml:"db_path" env:"DB_PATH"`
-	// WADeviceDBPath is whatsmeow's own device-session SQLite file — kept
-	// separate from DBPath since whatsmeow's sqlstore manages that schema
-	// entirely on its own (see internal/whatsmeow/store.go).
-	WADeviceDBPath string `yaml:"wa_device_db_path" env:"WA_DEVICE_DB_PATH"`
-	BlobDir        string `yaml:"blob_dir" env:"BLOB_DIR"`
+	DatabaseTarget         string `yaml:"database_target" env:"DATABASE_TARGET"`
+	WADeviceDatabaseTarget string `yaml:"wa_device_database_target" env:"WA_DEVICE_DATABASE_TARGET"`
+	BlobDir                string `yaml:"blob_dir" env:"BLOB_DIR"`
 }
 
 // SystemConfig is process-wide operational tunables: logging, the queue's
@@ -296,9 +293,9 @@ func defaults() Config {
 			SecureCookies:   false,
 		},
 		Storage: StorageConfig{
-			DBPath:         "./data/xchats.db",
-			WADeviceDBPath: "./data/whatsmeow.db",
-			BlobDir:        "./blobdata",
+			DatabaseTarget:         "./data/xchats.db",
+			WADeviceDatabaseTarget: "./data/whatsmeow.db",
+			BlobDir:                "./blobdata",
 		},
 		System: SystemConfig{
 			LogFormat:                  "logfmt",
@@ -632,4 +629,42 @@ func PhoneFromJID(jid string) string {
 		return jid
 	}
 	return jid[:at]
+}
+
+// Database returns the configured SQLite path or PostgreSQL URL.
+func (s StorageConfig) Database() string {
+	return s.DatabaseTarget
+}
+
+// IsPostgresURL reports whether a storage target is a PostgreSQL URL rather than a SQLite file path.
+func IsPostgresURL(target string) bool {
+	return strings.HasPrefix(target, "postgres://") || strings.HasPrefix(target, "postgresql://")
+}
+
+// DatabaseLocation is where the application database lives, safe to show in Settings or a bug
+// report: a SQLite path as it is, a PostgreSQL URL as scheme://host/database with the user, the
+// password and every query parameter removed (a password can sit in either). Never show
+// Database() itself.
+func (s StorageConfig) DatabaseLocation() string { return redactDatabaseTarget(s.Database()) }
+
+// DeviceDatabaseLocation is DeviceDatabase, redacted the same way.
+func (s StorageConfig) DeviceDatabaseLocation() string {
+	return redactDatabaseTarget(s.DeviceDatabase())
+}
+
+func redactDatabaseTarget(target string) string {
+	if !IsPostgresURL(target) {
+		return target
+	}
+	u, err := url.Parse(target)
+	if err != nil || u.Host == "" {
+		return "postgres://" // say nothing about a URL that cannot be read
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
+
+// DeviceDatabase is independent from the application database. Configure a
+// separate PostgreSQL URL or SQLite path for whatsmeow's provider-owned schema.
+func (s StorageConfig) DeviceDatabase() string {
+	return s.WADeviceDatabaseTarget
 }

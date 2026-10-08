@@ -2,43 +2,33 @@ package dbx
 
 import "time"
 
-// TimeLayout is the one canonical on-disk representation for every
-// timestamp column: UTC, always exactly 3 fractional digits, so lexical
-// string ordering equals chronological ordering and the stored text is
-// directly comparable to strftime('%Y-%m-%d %H:%M:%f','now') (SQLite's %f
-// is likewise always exactly 3 digits). See dbtime_test.go for the pinned
-// round-trip/ordering/SQL-comparability contract.
-const TimeLayout = "2006-01-02 15:04:05.000"
+// Every timestamp column is a BIGINT holding UTC Unix milliseconds, on both
+// engines: integers compare, order and aggregate identically everywhere, and no
+// column default or SQL clock is involved — the caller binds the instant.
+//
+// Domain code keeps working in time.Time. bindArgs converts a bound time.Time or
+// *time.Time to its millisecond count, and Row.Scan / Rows.Scan turn the stored
+// integer back into a UTC time.Time (see scan.go). Sub-millisecond precision is
+// dropped on the way in, which is also what makes a value written and read back
+// compare equal.
 
-// FormatTime renders t in the canonical on-disk representation.
-func FormatTime(t time.Time) string {
-	return t.UTC().Format(TimeLayout)
-}
-
-// ParseTime parses the canonical on-disk representation back into a Time in
-// UTC.
-func ParseTime(s string) (time.Time, error) {
-	return time.Parse(TimeLayout, s)
-}
-
-// bindArgs rewrites time.Time / *time.Time query arguments to their
-// canonical string form before they reach the driver — centrally, so a
-// ported call site can keep passing time.Time values exactly as it did
-// against pgx (pgx has its own equivalent internal encoding; this is dbx's).
-// Every other argument type passes through unchanged, including types that
-// already implement driver.Valuer (uuid.UUID, the JSON-array helpers).
+// bindArgs rewrites time.Time / *time.Time query arguments to Unix milliseconds
+// before they reach the driver — centrally, so a call site just passes the
+// time.Time it already has. Every other argument type passes through unchanged,
+// including types that already implement driver.Valuer (uuid.UUID, the
+// JSON-array helpers).
 func bindArgs(args []any) []any {
 	var out []any // allocated lazily; the overwhelmingly common case has no time.Time args at all
 	for i, a := range args {
 		var replacement any
 		switch v := a.(type) {
 		case time.Time:
-			replacement = FormatTime(v)
+			replacement = v.UnixMilli()
 		case *time.Time:
 			if v == nil {
 				replacement = nil
 			} else {
-				replacement = FormatTime(*v)
+				replacement = v.UnixMilli()
 			}
 		default:
 			continue

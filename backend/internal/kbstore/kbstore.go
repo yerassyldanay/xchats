@@ -24,7 +24,7 @@ import (
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/brain/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
-	sqlitemigrations "github.com/yerassyldanay/xchats/backend/migrations/sqlite"
+	"github.com/yerassyldanay/xchats/backend/migrations"
 )
 
 // ErrStale is returned when an optimistic-concurrency check (If-Match) fails: the
@@ -48,7 +48,7 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbx.RunMigrations(ctx, db, sqlitemigrations.FS); err != nil {
+	if err := dbx.RunMigrations(ctx, db, migrations.FS); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -209,6 +209,8 @@ func loadLiveContent(ctx context.Context, db dbtx, orgID uuid.UUID, snap *domain
 // topics yet — so the brain keeps answering from the DB on first boot. Idempotent:
 // a no-op once the org has any live topic.
 func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *domain.Snapshot) error {
+	now := time.Now()
+
 	var exists bool
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ai_topics WHERE organization_id = $1)`,
 		orgID).Scan(&exists); err != nil {
@@ -224,13 +226,13 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_assistants
-		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
-		VALUES ($1,$2,$3,$4,$5,$6)
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6, $7, $8, $8)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = EXCLUDED.persona, mission = EXCLUDED.mission, guardrails = EXCLUDED.guardrails,
-			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
+			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = EXCLUDED.updated_at`,
 		orgID, seed.Config.Persona, seed.Config.Mission, seed.Config.Guardrails,
-		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120)); err != nil {
+		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120), uuid.New(), now); err != nil {
 		return err
 	}
 	if err := insertLiveContent(ctx, tx, orgID, seed); err != nil {
@@ -307,39 +309,43 @@ type execer = dbx.DBTX
 // currentProduct for the draft path, currentLive*Tx for the live-write path),
 // so these helpers never need a "leave unchanged" sentinel of their own.
 func upsertTopicRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTopic) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_topics
 		(organization_id, slug, title, body_md, featured_image, illustration_images,
-		 explainer_videos, reference_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		 explainer_videos, reference_documents, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, $9, $10, $10)
 		ON CONFLICT (organization_id, slug) DO UPDATE SET
 			title=EXCLUDED.title, body_md=EXCLUDED.body_md,
 			featured_image=EXCLUDED.featured_image, illustration_images=EXCLUDED.illustration_images,
 			explainer_videos=EXCLUDED.explainer_videos, reference_documents=EXCLUDED.reference_documents,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = EXCLUDED.updated_at`,
 		orgID, t.Slug, t.Title, t.BodyMD, t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.IllustrationImages)),
-		dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.ReferenceDocuments))); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.ReferenceDocuments)), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert topic %s: %w", t.Slug, err)
 	}
 	return nil
 }
 
 func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTariff) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariffs
 		(organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages,
 		 best_for, not_for, additional_facts,
-		 sales_status, featured_image, pricing_images, explainer_videos, terms_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+		 sales_status, featured_image, pricing_images, explainer_videos, terms_documents, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, $19, $20, $20)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, limit_text=EXCLUDED.limit_text, fee=EXCLUDED.fee,
 			summary=EXCLUDED.summary, pricing_type=EXCLUDED.pricing_type, advantages=EXCLUDED.advantages,
 			disadvantages=EXCLUDED.disadvantages, best_for=EXCLUDED.best_for, not_for=EXCLUDED.not_for,
 			additional_facts=EXCLUDED.additional_facts, sales_status=EXCLUDED.sales_status,
 			featured_image=EXCLUDED.featured_image, pricing_images=EXCLUDED.pricing_images,
-			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			explainer_videos=EXCLUDED.explainer_videos, terms_documents=EXCLUDED.terms_documents, updated_at = EXCLUDED.updated_at`,
 		orgID, t.Ref, t.Name, t.Price, t.LimitText, t.Fee, t.Summary,
 		orDefault(t.PricingType, "fixed"), t.Advantages, t.Disadvantages, t.BestFor, t.NotFor,
 		aiprompt.FactsColumn(t.AdditionalFacts), orDefault(t.SalesStatus, "active"),
-		t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.PricingImages)), dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.TermsDocuments))); err != nil {
+		t.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(t.PricingImages)), dbx.UUIDArray(nonNilUUIDs(t.ExplainerVideos)), dbx.UUIDArray(nonNilUUIDs(t.TermsDocuments)), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert tariff %s: %w", t.Ref, err)
 	}
 	return nil
@@ -347,12 +353,14 @@ func upsertTariffRow(ctx context.Context, tx execer, orgID uuid.UUID, t DraftTar
 
 // upsertProductRow writes one ai_products row.
 func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftProduct) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_products
 		(organization_id, ref, name, price, description, category, brand, advantages, disadvantages,
 		 best_for, not_for, availability_status, availability_note, installation_terms, warranty_terms,
 		 additional_facts, sales_status,
-		 featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+		 featured_image, gallery_images, demo_videos, certificate_documents, guarantee_documents, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, $23, $24, $24)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			name=EXCLUDED.name, price=EXCLUDED.price, description=EXCLUDED.description,
 			category=EXCLUDED.category, brand=EXCLUDED.brand, advantages=EXCLUDED.advantages,
@@ -363,12 +371,12 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPr
 			featured_image=EXCLUDED.featured_image, gallery_images=EXCLUDED.gallery_images,
 			demo_videos=EXCLUDED.demo_videos, certificate_documents=EXCLUDED.certificate_documents,
 			guarantee_documents=EXCLUDED.guarantee_documents,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = EXCLUDED.updated_at`,
 		orgID, p.Ref, p.Name, p.Price, p.Description, p.Category, p.Brand, p.Advantages, p.Disadvantages,
 		p.BestFor, p.NotFor, orDefault(p.AvailabilityStatus, "in_stock"), p.AvailabilityNote, p.InstallationTerms, p.WarrantyTerms,
 		aiprompt.FactsColumn(p.AdditionalFacts), orDefault(p.SalesStatus, "active"),
 		p.FeaturedImage, dbx.UUIDArray(nonNilUUIDs(p.GalleryImages)), dbx.UUIDArray(nonNilUUIDs(p.DemoVideos)),
-		dbx.UUIDArray(nonNilUUIDs(p.CertificateDocuments)), dbx.UUIDArray(nonNilUUIDs(p.GuaranteeDocuments))); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(p.CertificateDocuments)), dbx.UUIDArray(nonNilUUIDs(p.GuaranteeDocuments)), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert product %s: %w", p.Ref, err)
 	}
 	return nil
@@ -378,22 +386,26 @@ func upsertProductRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPr
 // smaller clone of upsertContactRow/upsertPolicyRow (ON CONFLICT on
 // organization_id alone, no natural key).
 func upsertTariffInfoRow(ctx context.Context, tx execer, orgID uuid.UUID, ti DraftTariffInfo) error {
-	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariff_info (organization_id, additional_facts)
-		VALUES ($1,$2)
+	now := time.Now()
+
+	if _, err := tx.Exec(ctx, `INSERT INTO ai_tariff_info (organization_id, additional_facts, id, created_at, updated_at)
+		VALUES ($1,$2, $3, $4, $4)
 		ON CONFLICT (organization_id) DO UPDATE SET
-			additional_facts=EXCLUDED.additional_facts, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
-		orgID, aiprompt.FactsColumn(ti.AdditionalFacts)); err != nil {
+			additional_facts=EXCLUDED.additional_facts, updated_at = EXCLUDED.updated_at`,
+		orgID, aiprompt.FactsColumn(ti.AdditionalFacts), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert tariff_info: %w", err)
 	}
 	return nil
 }
 
 func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftContact) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_contacts
 		(organization_id, whatsapp, email, address, legal_information, callback_time,
 		 working_hours, phone, website, instagram, contact_card_image, location_map_image,
-		 company_legal_documents, booking_url, schedule)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		 company_legal_documents, booking_url, schedule, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, $16, $17, $17)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			whatsapp=EXCLUDED.whatsapp, email=EXCLUDED.email, address=EXCLUDED.address,
 			legal_information=EXCLUDED.legal_information, callback_time=EXCLUDED.callback_time,
@@ -401,10 +413,10 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 			website=EXCLUDED.website, instagram=EXCLUDED.instagram,
 			contact_card_image=EXCLUDED.contact_card_image, location_map_image=EXCLUDED.location_map_image,
 			company_legal_documents=EXCLUDED.company_legal_documents,
-			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			booking_url=EXCLUDED.booking_url, schedule=EXCLUDED.schedule, updated_at = EXCLUDED.updated_at`,
 		orgID, c.WhatsApp, c.Email, c.Address, c.LegalInformation, c.CallbackTime,
 		c.WorkingHours, c.Phone, c.Website, c.Instagram, c.ContactCardImage, c.LocationMapImage,
-		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments)), c.BookingURL, aiprompt.ScheduleColumn(c.Schedule)); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(c.CompanyLegalDocuments)), c.BookingURL, aiprompt.ScheduleColumn(c.Schedule), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert contact: %w", err)
 	}
 	return nil
@@ -413,16 +425,18 @@ func upsertContactRow(ctx context.Context, tx execer, orgID uuid.UUID, c DraftCo
 // upsertSpecialistRow writes one ai_specialists row — upsertProductRow's own
 // shape (salon vertical, PLAN.md).
 func upsertSpecialistRow(ctx context.Context, tx execer, orgID uuid.UUID, sp DraftSpecialist) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_specialists
-		(organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		(organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, $10, $11, $11)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			full_name=EXCLUDED.full_name, title=EXCLUDED.title, experience=EXCLUDED.experience,
 			schedule=EXCLUDED.schedule, booking_url=EXCLUDED.booking_url,
 			portfolio_images=EXCLUDED.portfolio_images, sales_status=EXCLUDED.sales_status,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = EXCLUDED.updated_at`,
 		orgID, sp.Ref, sp.FullName, sp.Title, sp.Experience, aiprompt.ScheduleColumn(sp.Schedule), sp.BookingURL,
-		dbx.UUIDArray(nonNilUUIDs(sp.PortfolioImages)), orDefault(sp.SalesStatus, "active")); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(sp.PortfolioImages)), orDefault(sp.SalesStatus, "active"), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert specialist %s: %w", sp.Ref, err)
 	}
 	return nil
@@ -434,17 +448,19 @@ func upsertSpecialistRow(ctx context.Context, tx execer, orgID uuid.UUID, sp Dra
 // directions confirmed against modernc.org/sqlite's database/sql support
 // for a **T scan/bind target).
 func upsertServiceRow(ctx context.Context, tx execer, orgID uuid.UUID, sv DraftService) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_services
 		(organization_id, ref, parent_ref, service_type, category, name, price, duration, description,
-		 specialist_refs, sales_status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 specialist_refs, sales_status, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, $12, $13, $13)
 		ON CONFLICT (organization_id, ref) DO UPDATE SET
 			parent_ref=EXCLUDED.parent_ref, service_type=EXCLUDED.service_type, category=EXCLUDED.category,
 			name=EXCLUDED.name, price=EXCLUDED.price, duration=EXCLUDED.duration, description=EXCLUDED.description,
 			specialist_refs=EXCLUDED.specialist_refs, sales_status=EXCLUDED.sales_status,
-			updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			updated_at = EXCLUDED.updated_at`,
 		orgID, sv.Ref, sv.ParentRef, orDefault(sv.ServiceType, "base"), sv.Category, sv.Name, sv.Price, sv.Duration,
-		sv.Description, dbx.StringArray(nonNilStrings(sv.SpecialistRefs)), orDefault(sv.SalesStatus, "active")); err != nil {
+		sv.Description, dbx.StringArray(nonNilStrings(sv.SpecialistRefs)), orDefault(sv.SalesStatus, "active"), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert service %s: %w", sv.Ref, err)
 	}
 	return nil
@@ -668,21 +684,23 @@ func serviceSpecialistGateReasons(approving []DraftService, resulting []Speciali
 
 // upsertPolicyRow writes one ai_policies row — an exact clone of upsertContactRow.
 func upsertPolicyRow(ctx context.Context, tx execer, orgID uuid.UUID, p DraftPolicy) error {
+	now := time.Now()
+
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_policies
 		(organization_id, delivery_cost, delivery_in_days, free_delivery_from, min_order,
 		 prepayment, installment, return_period_in_days, warranty, outside_zones_note,
-		 commerce_policy_documents)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 commerce_policy_documents, id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, $12, $13, $13)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			delivery_cost=EXCLUDED.delivery_cost, delivery_in_days=EXCLUDED.delivery_in_days,
 			free_delivery_from=EXCLUDED.free_delivery_from, min_order=EXCLUDED.min_order,
 			prepayment=EXCLUDED.prepayment, installment=EXCLUDED.installment,
 			return_period_in_days=EXCLUDED.return_period_in_days, warranty=EXCLUDED.warranty,
 			outside_zones_note=EXCLUDED.outside_zones_note,
-			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')`,
+			commerce_policy_documents=EXCLUDED.commerce_policy_documents, updated_at = EXCLUDED.updated_at`,
 		orgID, p.DeliveryCost, p.DeliveryInDays, p.FreeDeliveryFrom, p.MinOrder,
 		p.Prepayment, p.Installment, p.ReturnPeriodInDays, p.Warranty, p.OutsideZonesNote,
-		dbx.UUIDArray(nonNilUUIDs(p.CommercePolicyDocuments))); err != nil {
+		dbx.UUIDArray(nonNilUUIDs(p.CommercePolicyDocuments)), uuid.New(), now); err != nil {
 		return fmt.Errorf("insert policy: %w", err)
 	}
 	return nil
@@ -715,17 +733,19 @@ func nonNilStrings(v []string) []string {
 // "only non-nil fields change" contract on the insert path too, using each
 // column's own schema default when the row is being created for the first time.
 func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPatch) error {
+	now := time.Now()
+
 	_, err := tx.Exec(ctx, `INSERT INTO ai_assistants
-		(organization_id, persona, mission, guardrails, language_policy, reply_max_words)
-		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120))
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at)
+		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120), $7, $8, $8)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = COALESCE($2, ai_assistants.persona),
 			mission = COALESCE($3, ai_assistants.mission),
 			guardrails = COALESCE($4, ai_assistants.guardrails),
 			language_policy = COALESCE($5, ai_assistants.language_policy),
 			reply_max_words = COALESCE($6, ai_assistants.reply_max_words),
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
-		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords)
+			updated_at = EXCLUDED.updated_at`,
+		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords, uuid.New(), now)
 	return err
 }
 
@@ -735,9 +755,11 @@ func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPa
 // uuid.UUID (no authenticated user in context) is stored as SQL NULL rather
 // than a literal zero UUID, since actor_user_id's FK would otherwise reject it.
 func auditRow(ctx context.Context, tx execer, orgID uuid.UUID, actor uuid.UUID, action, note string) error {
-	_, err := tx.Exec(ctx, `INSERT INTO ai_audit_log (organization_id, action, actor_user_id, note)
-		VALUES ($1,$2,$3,$4)`,
-		orgID, action, uuid.NullUUID{UUID: actor, Valid: actor != uuid.Nil}, note)
+	now := time.Now()
+
+	_, err := tx.Exec(ctx, `INSERT INTO ai_audit_log (organization_id, action, actor_user_id, note, id, created_at)
+		VALUES ($1,$2,$3,$4, $5, $6)`,
+		orgID, action, uuid.NullUUID{UUID: actor, Valid: actor != uuid.Nil}, note, uuid.New(), now)
 	return err
 }
 

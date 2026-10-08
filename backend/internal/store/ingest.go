@@ -118,6 +118,8 @@ type InboundResult struct {
 // chat aggregates, all in one transaction. Re-delivery (same external_message_id)
 // is a no-op upsert (MessageInserted=false).
 func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundResult, error) {
+	now := time.Now()
+
 	var res InboundResult
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -131,14 +133,14 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 		lid = in.LidJID
 	}
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO wa_contacts (account_id, phone_jid, lid_jid, phone_number, push_name, display_name)
-		VALUES ($1, $2, $3, $4, $5, $5)
+		INSERT INTO wa_contacts (account_id, phone_jid, lid_jid, phone_number, push_name, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $7)
 		ON CONFLICT (account_id, phone_jid) DO UPDATE SET
 			lid_jid = COALESCE(EXCLUDED.lid_jid, wa_contacts.lid_jid),
 			push_name = CASE WHEN EXCLUDED.push_name <> '' THEN EXCLUDED.push_name ELSE wa_contacts.push_name END,
-			updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			updated_at = EXCLUDED.updated_at
 		RETURNING id`,
-		in.AccountID, in.PhoneJID, lid, in.PhoneNumber, in.PushName).Scan(&res.ContactID); err != nil {
+		in.AccountID, in.PhoneJID, lid, in.PhoneNumber, in.PushName, uuid.New(), now).Scan(&res.ContactID); err != nil {
 		return res, wrap("upsert contact", err)
 	}
 
@@ -180,14 +182,19 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 	if !in.MessageTS.IsZero() {
 		ts = in.MessageTS
 	}
+	// The chat's last-message time is the message's own timestamp when it has one, else now.
+	lastAt := now
+	if !in.MessageTS.IsZero() {
+		lastAt = in.MessageTS
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO wa_messages
-			(account_id, chat_id, direction, sender_kind, external_message_id, message_kind, body, delivery_state, source, raw, message_ts)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			(account_id, chat_id, direction, sender_kind, external_message_id, message_kind, body, delivery_state, source, raw, message_ts, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13)
 		ON CONFLICT (account_id, external_message_id) DO NOTHING
 		RETURNING id`,
 		in.AccountID, res.ChatID, in.Direction, in.SenderKind, extID, in.MessageKind, in.Body,
-		deliveryStateFor(in.Direction), in.Source, jsonbOrNil(in.Raw), ts).Scan(&res.MessageID)
+		deliveryStateFor(in.Direction), in.Source, jsonbOrNil(in.Raw), ts, uuid.New(), now).Scan(&res.MessageID)
 	switch {
 	case err == nil:
 		res.MessageInserted = true
@@ -197,10 +204,10 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 		if err := tx.QueryRow(ctx, `
 			UPDATE wa_messages SET
 				body = CASE WHEN body = '' THEN $3 ELSE body END,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+				updated_at = $4
 			WHERE account_id = $1 AND external_message_id = $2
 			RETURNING id`,
-			in.AccountID, extID, in.Body).Scan(&res.MessageID); err != nil {
+			in.AccountID, extID, in.Body, now).Scan(&res.MessageID); err != nil {
 			return res, wrap("update duplicate message", err)
 		}
 	default:
@@ -215,11 +222,11 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE wa_chats SET
-				last_message_at = COALESCE($2, strftime('%Y-%m-%d %H:%M:%f','now')),
+				last_message_at = $2,
 				last_message_preview = $3,
 				`+unreadDelta+`,
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE id = $1`, res.ChatID, ts, in.Preview); err != nil {
+				updated_at = $4
+			WHERE id = $1`, res.ChatID, lastAt, in.Preview, now); err != nil {
 			return res, wrap("update aggregates", err)
 		}
 
@@ -232,8 +239,8 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 		// inbox. A no-op UPDATE (WHERE chat_state = 'campaign' matches
 		// nothing) for every chat that was never campaign-only to begin with.
 		if _, err := tx.Exec(ctx, `
-			UPDATE wa_chats SET chat_state = 'open', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE id = $1 AND chat_state = 'campaign'`, res.ChatID); err != nil {
+			UPDATE wa_chats SET chat_state = 'open', updated_at = $2
+			WHERE id = $1 AND chat_state = 'campaign'`, res.ChatID, now); err != nil {
 			return res, wrap("graduate campaign chat", err)
 		}
 
@@ -264,21 +271,23 @@ func (s *Store) UpsertInbound(ctx context.Context, in InboundUpsert) (InboundRes
 // upsertChatTwoStep is UpsertInbound and FindOrCreateChat's shared wa_chats
 // upsert-with-insert-detection — see the two-step comment on the call above.
 func upsertChatTwoStep(ctx context.Context, tx *dbx.Tx, accountID, contactID uuid.UUID, remoteJID string) (uuid.UUID, bool, error) {
+	now := time.Now()
+
 	var chatID uuid.UUID
 	err := tx.QueryRow(ctx, `
-		INSERT INTO wa_chats (account_id, contact_id, remote_jid)
-		VALUES ($1, $2, $3)
+		INSERT INTO wa_chats (account_id, contact_id, remote_jid, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $5)
 		ON CONFLICT (account_id, remote_jid) DO NOTHING
 		RETURNING id`,
-		accountID, contactID, remoteJID).Scan(&chatID)
+		accountID, contactID, remoteJID, uuid.New(), now).Scan(&chatID)
 	switch {
 	case err == nil:
 		return chatID, true, nil
 	case errors.Is(err, dbx.ErrNoRows):
 		err := tx.QueryRow(ctx, `
-			UPDATE wa_chats SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			UPDATE wa_chats SET updated_at = $3
 			WHERE account_id = $1 AND remote_jid = $2
-			RETURNING id`, accountID, remoteJID).Scan(&chatID)
+			RETURNING id`, accountID, remoteJID, now).Scan(&chatID)
 		return chatID, false, err
 	default:
 		return chatID, false, err
@@ -299,19 +308,21 @@ func deliveryStateFor(direction string) string {
 // next caller this dispatch is for — Telegram bots get no delivery receipts
 // at all, and Instagram/Messenger DMs have no delivery-status webhook either.
 func (s *Store) AdvanceDeliveryState(ctx context.Context, channel string, accountID uuid.UUID, externalMessageID, newState string, newRank int) (uuid.UUID, uuid.UUID, error) {
+	now := time.Now()
+
 	table, err := messagesTableFor(channel)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
 	var msgID, chatID uuid.UUID
 	err = s.db.QueryRow(ctx, `
-		UPDATE `+table+` SET delivery_state = $3, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		UPDATE `+table+` SET delivery_state = $3, updated_at = $5
 		WHERE account_id = $1 AND external_message_id = $2
 		  AND (CASE delivery_state
 				WHEN 'queued' THEN 0 WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2
 				WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0 END) < $4
 		RETURNING id, chat_id`,
-		accountID, externalMessageID, newState, newRank).Scan(&msgID, &chatID)
+		accountID, externalMessageID, newState, newRank, now).Scan(&msgID, &chatID)
 	if errors.Is(err, dbx.ErrNoRows) {
 		return msgID, chatID, ErrNotFound
 	}
@@ -327,16 +338,18 @@ func (s *Store) AdvanceDeliveryState(ctx context.Context, channel string, accoun
 // (a blob we already hold), not something Telegram hosts, and the download
 // sweeper explicitly skips rows without a file_id.
 func (s *Store) UpsertOutboundMedia(ctx context.Context, channel string, messageID uuid.UUID, m MediaRef, storageKey string) error {
+	now := time.Now()
+
 	if channel == string(chanTelegram) {
 		_, err := s.db.Exec(ctx, `
 			INSERT INTO tg_message_media
-				(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, storage_key, download_status)
-			VALUES ($1, '', '', $2, $3, $4, $5, $6, 'ready')
+				(message_id, file_id, file_unique_id, media_type, mimetype, filename, size, storage_key, download_status, id, created_at, updated_at)
+			VALUES ($1, '', '', $2, $3, $4, $5, $6, 'ready', $7, $8, $8)
 			ON CONFLICT (message_id) DO UPDATE SET
 				storage_key = EXCLUDED.storage_key,
 				download_status = 'ready',
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
-			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey)
+				updated_at = EXCLUDED.updated_at`,
+			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey, uuid.New(), now)
 		return err
 	}
 	if isChannelCoreChannel(channel) {
@@ -345,13 +358,13 @@ func (s *Store) UpsertOutboundMedia(ctx context.Context, channel string, message
 		// an outbound attachment is always bytes we already hold.
 		_, err := s.db.Exec(ctx, `
 			INSERT INTO channel_message_media
-				(message_id, media_type, mimetype, filename, size, storage_key, download_status)
-			VALUES ($1, $2, $3, $4, $5, $6, 'ready')
+				(message_id, media_type, mimetype, filename, size, storage_key, download_status, id, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'ready', $7, $8, $8)
 			ON CONFLICT (message_id) DO UPDATE SET
 				storage_key = EXCLUDED.storage_key,
 				download_status = 'ready',
-				updated_at = strftime('%Y-%m-%d %H:%M:%f','now')`,
-			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey)
+				updated_at = EXCLUDED.updated_at`,
+			messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageKey, uuid.New(), now)
 		return err
 	}
 	_, _, err := s.UpsertMessageMedia(ctx, messageID, m, storageKey, "ready")
@@ -360,31 +373,35 @@ func (s *Store) UpsertOutboundMedia(ctx context.Context, channel string, message
 
 // UpsertMessageMedia inserts a media row for a message (idempotent on UNIQUE(message_id)).
 func (s *Store) UpsertMessageMedia(ctx context.Context, messageID uuid.UUID, m MediaRef, storageURL, downloadStatus string) (uuid.UUID, bool, error) {
+	now := time.Now()
+
 	var id uuid.UUID
 	var inserted bool
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO message_media (message_id, media_type, mimetype, file_name, file_size, storage_url, download_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO message_media (message_id, media_type, mimetype, file_name, file_size, storage_url, download_status, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
 		ON CONFLICT (message_id) DO NOTHING
 		RETURNING id`,
-		messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageURL, downloadStatus).Scan(&id)
+		messageID, m.MediaType, m.Mimetype, m.FileName, m.FileSize, storageURL, downloadStatus, uuid.New(), now).Scan(&id)
 	switch {
 	case err == nil:
 		inserted = true
 	case errors.Is(err, dbx.ErrNoRows):
 		err = s.db.QueryRow(ctx, `
-			UPDATE message_media SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+			UPDATE message_media SET updated_at = $2
 			WHERE message_id = $1
-			RETURNING id`, messageID).Scan(&id)
+			RETURNING id`, messageID, now).Scan(&id)
 	}
 	return id, inserted, err
 }
 
 // SetMediaReady marks a media row downloaded and records its byte size.
 func (s *Store) SetMediaReady(ctx context.Context, messageID uuid.UUID, fileSize int) error {
+	now := time.Now()
+
 	_, err := s.db.Exec(ctx, `
-		UPDATE message_media SET download_status='ready', file_size=$2, updated_at=strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE message_id = $1`, messageID, fileSize)
+		UPDATE message_media SET download_status='ready', file_size=$2, updated_at=$3
+		WHERE message_id = $1`, messageID, fileSize, now)
 	return err
 }
 
@@ -397,6 +414,8 @@ func (s *Store) SetMediaReady(ctx context.Context, messageID uuid.UUID, fileSize
 // re-runs the STT call: the transcript column is the durable "already done"
 // marker, not a queue state.
 func (s *Store) UpdateMediaTranscript(ctx context.Context, channel string, messageID uuid.UUID, transcript string) error {
+	now := time.Now()
+
 	table := "message_media"
 	switch {
 	case channel == string(chanTelegram):
@@ -405,8 +424,8 @@ func (s *Store) UpdateMediaTranscript(ctx context.Context, channel string, messa
 		table = "channel_message_media"
 	}
 	_, err := s.db.Exec(ctx, `
-		UPDATE `+table+` SET transcript = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE message_id = $1 AND media_type = 'audio'`, messageID, transcript)
+		UPDATE `+table+` SET transcript = $2, updated_at = $3
+		WHERE message_id = $1 AND media_type = 'audio'`, messageID, transcript, now)
 	return err
 }
 
@@ -449,6 +468,8 @@ func (s *Store) MediaStorageURL(ctx context.Context, orgID, id uuid.UUID) (stora
 // stays NULL until stamped) in the channel's transport table and bumps the chat
 // aggregates. Used by the send pipeline for every channel.
 func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, accountID uuid.UUID, senderKind string, senderUserID uuid.NullUUID, messageKind, body, preview string) (uuid.UUID, error) {
+	now := time.Now()
+
 	msgTable, err := messagesTableFor(channel)
 	if err != nil {
 		return uuid.Nil, err
@@ -465,15 +486,15 @@ func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, acco
 	var id uuid.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO `+msgTable+`
-			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts)
-		VALUES ($1, $2, 'out', $3, $4, $5, $6, 'queued', 'app', strftime('%Y-%m-%d %H:%M:%f','now'))
+			(account_id, chat_id, direction, sender_kind, sender_user_id, message_kind, body, delivery_state, source, message_ts, id, created_at, updated_at)
+		VALUES ($1, $2, 'out', $3, $4, $5, $6, 'queued', 'app', $7, $8, $7, $7)
 		RETURNING id`,
-		accountID, chatID, senderKind, senderUserID, messageKind, body).Scan(&id); err != nil {
+		accountID, chatID, senderKind, senderUserID, messageKind, body, now, uuid.New()).Scan(&id); err != nil {
 		return uuid.Nil, wrap("insert outbound", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE `+chatTable+` SET last_message_at = strftime('%Y-%m-%d %H:%M:%f','now'), last_message_preview = $2, unread_count = 0, updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1`, chatID, preview); err != nil {
+		UPDATE `+chatTable+` SET last_message_at = $3, last_message_preview = $2, unread_count = 0, updated_at = $3
+		WHERE id = $1`, chatID, preview, now); err != nil {
 		return uuid.Nil, wrap("update aggregates", err)
 	}
 	return id, tx.Commit(ctx)
@@ -485,6 +506,8 @@ func (s *Store) InsertOutbound(ctx context.Context, channel string, chatID, acco
 // plus whether the chat row was freshly created. The contact's display_name seeds
 // to the phone number so a brand-new chat shows something until a pushName arrives.
 func (s *Store) FindOrCreateChat(ctx context.Context, accountID uuid.UUID, phoneJID, phoneNumber string) (uuid.UUID, bool, error) {
+	now := time.Now()
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, false, err
@@ -493,11 +516,11 @@ func (s *Store) FindOrCreateChat(ctx context.Context, accountID uuid.UUID, phone
 
 	var contactID uuid.UUID
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO wa_contacts (account_id, phone_jid, phone_number, display_name)
-		VALUES ($1, $2, $3, $3)
-		ON CONFLICT (account_id, phone_jid) DO UPDATE SET updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
+		INSERT INTO wa_contacts (account_id, phone_jid, phone_number, display_name, id, created_at, updated_at)
+		VALUES ($1, $2, $3, $3, $4, $5, $5)
+		ON CONFLICT (account_id, phone_jid) DO UPDATE SET updated_at = EXCLUDED.updated_at
 		RETURNING id`,
-		accountID, phoneJID, phoneNumber).Scan(&contactID); err != nil {
+		accountID, phoneJID, phoneNumber, uuid.New(), now).Scan(&contactID); err != nil {
 		return uuid.Nil, false, wrap("upsert contact", err)
 	}
 
@@ -514,6 +537,8 @@ func (s *Store) FindOrCreateChat(ctx context.Context, accountID uuid.UUID, phone
 // sendMessage response's message_id (bots get no echo, and no delivery
 // receipts either, so 'sent' is the terminal success state there).
 func (s *Store) StampOutboundSent(ctx context.Context, channel string, messageID uuid.UUID, externalID string) error {
+	now := time.Now()
+
 	table, err := messagesTableFor(channel)
 	if err != nil {
 		return err
@@ -529,25 +554,27 @@ func (s *Store) StampOutboundSent(ctx context.Context, channel string, messageID
 			msgIDArg = externalID
 		}
 		_, err := s.db.Exec(ctx, `
-			UPDATE `+table+` SET telegram_message_id = $2, delivery_state = 'sent', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-			WHERE id = $1`, messageID, msgIDArg)
+			UPDATE `+table+` SET telegram_message_id = $2, delivery_state = 'sent', updated_at = $3
+			WHERE id = $1`, messageID, msgIDArg, now)
 		return err
 	}
 	_, err = s.db.Exec(ctx, `
-		UPDATE `+table+` SET external_message_id = $2, delivery_state = 'sent', updated_at = strftime('%Y-%m-%d %H:%M:%f','now')
-		WHERE id = $1`, messageID, externalID)
+		UPDATE `+table+` SET external_message_id = $2, delivery_state = 'sent', updated_at = $3
+		WHERE id = $1`, messageID, externalID, now)
 	return err
 }
 
 // SetDeliveryStateFor forces a delivery state (e.g. 'failed' when a send errors)
 // on the channel's own transport table.
 func (s *Store) SetDeliveryStateFor(ctx context.Context, channel string, messageID uuid.UUID, state string) error {
+	now := time.Now()
+
 	table, err := messagesTableFor(channel)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(ctx,
-		`UPDATE `+table+` SET delivery_state = $2, updated_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = $1`, messageID, state)
+		`UPDATE `+table+` SET delivery_state = $2, updated_at = $3 WHERE id = $1`, messageID, state, now)
 	return err
 }
 

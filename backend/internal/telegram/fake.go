@@ -38,6 +38,11 @@ type Fake struct {
 	seq  int64
 	Call []Call
 
+	// MessageIDBase offsets the message ids SendMessage and SendMedia return:
+	// the nth send answers MessageIDBase+n. Zero keeps the deterministic 9000
+	// base (first id 9001) that component tests rely on.
+	MessageIDBase int64
+
 	// Bot is what GetMe returns for any token not in BadTokens.
 	Bot User
 	// BadTokens make GetMe (and every other call) fail with a 401, the way a
@@ -163,6 +168,16 @@ func (f *Fake) GetWebhookInfo(ctx context.Context, token string) (WebhookInfo, e
 	return f.Info, nil
 }
 
+// nextMessageIDLocked returns the next message id; the caller holds f.mu.
+func (f *Fake) nextMessageIDLocked() int64 {
+	f.seq++
+	base := f.MessageIDBase
+	if base == 0 {
+		base = 9000
+	}
+	return base + f.seq
+}
+
 func (f *Fake) SendMedia(ctx context.Context, token string, chatID int64, up Upload) (SentMessage, error) {
 	method, _ := MediaMethod(up.Kind)
 	f.record(Call{Method: method, Token: token, ChatID: chatID, Text: up.Caption, Upload: up})
@@ -172,8 +187,7 @@ func (f *Fake) SendMedia(ctx context.Context, token string, chatID int64, up Upl
 	f.mu.Lock()
 	err := f.FailSend
 	f.FailSend = nil
-	f.seq++
-	id := 9000 + f.seq
+	id := f.nextMessageIDLocked()
 	f.mu.Unlock()
 	if err != nil {
 		return SentMessage{}, err
@@ -226,8 +240,7 @@ func (f *Fake) SendMessage(ctx context.Context, token string, chatID int64, text
 	f.mu.Lock()
 	err := f.FailSend
 	f.FailSend = nil
-	f.seq++
-	id := 9000 + f.seq
+	id := f.nextMessageIDLocked()
 	f.mu.Unlock()
 	if err != nil {
 		return SentMessage{}, err

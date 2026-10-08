@@ -115,7 +115,7 @@ func seedMustChangeUser(t *testing.T, h *harness, email, plaintext string) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := h.db.Exec(context.Background(), `UPDATE users SET must_change_password = 1 WHERE id = $1`, u.ID); err != nil {
+	if _, err := h.db.Exec(context.Background(), `UPDATE users SET must_change_password = TRUE WHERE id = $1`, u.ID); err != nil {
 		t.Fatalf("flag must_change_password: %v", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestRequirePasswordChanged_OAuthAuthorizeGated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := h.db.Exec(context.Background(), `UPDATE users SET must_change_password = 1 WHERE id = $1`, u.ID); err != nil {
+	if _, err := h.db.Exec(context.Background(), `UPDATE users SET must_change_password = TRUE WHERE id = $1`, u.ID); err != nil {
 		t.Fatalf("flag must_change_password: %v", err)
 	}
 

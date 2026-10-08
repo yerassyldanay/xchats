@@ -171,7 +171,7 @@ func TestSetMembershipRoleRefusesToDemoteLastAdmin(t *testing.T) {
 	h := newHarness(t)
 	adminID := h.adminUserID(t)
 
-	// newHarness's org IS migration 0006's own sentinel org: SeedOrganization
+	// newHarness's org IS the identity migration's own sentinel org: SeedOrganization
 	// matches "xchats" by name and reuses that row rather than creating a
 	// second one, so the org starts with TWO admins — the migration's own
 	// sentinel (admin@xchat.kz) alongside the harness's freshly seeded one.

@@ -27,6 +27,7 @@ const (
 	ErrCredentialInvalid    = "CREDENTIAL_INVALID"    // the provider's own API rejected it (bad key)
 	ErrCredentialUnverified = "CREDENTIAL_UNVERIFIED" // could not be checked; caller must resubmit with force=true to save anyway
 	ErrCredentialStore      = "CREDENTIAL_STORE"      // no credential store available, or a store read/write failed
+	ErrBackupUnavailable    = "BACKUP_UNAVAILABLE"    // selected database requires external backup tooling
 	ErrTunnelUnavailable    = "TUNNEL_UNAVAILABLE"    // the tunnel feature is not configured, or Start/Stop itself failed
 
 	// Meta channels surface (internal/meta, internal/whatsappcloud, internal/metaingest).

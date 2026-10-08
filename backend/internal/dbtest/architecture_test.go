@@ -102,7 +102,7 @@ type goListPackage struct {
 // is the same shape of check that, had it existed earlier, would have flagged
 // the stray backend/force-user.go — a root package main holding its own pgx
 // pool and a hardcoded local DSN, outside the persistence layer of its era.
-// That file is now deleted; migration 0006_init_admin does its job.
+// That file is now deleted; the identity migration's seed does its job.
 func TestArchitectureBoundary(t *testing.T) {
 	root := moduleRoot(t)
 
@@ -173,6 +173,10 @@ func checkDriverImports(t *testing.T, pkgPath, imp, where string) {
 		t.Errorf("%s%s imports database/sql directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
 	case "modernc.org/sqlite":
 		t.Errorf("%s%s imports modernc.org/sqlite directly — only internal/dbx may; route through the dbx facade instead", pkgPath, where)
+	default:
+		if strings.HasPrefix(imp, "github.com/jackc/pgx/") {
+			t.Errorf("%s%s imports PostgreSQL driver %s outside the driver boundary", pkgPath, where, imp)
+		}
 	}
 }
 

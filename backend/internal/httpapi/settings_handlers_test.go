@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -72,13 +73,44 @@ func TestGetSettingsExposesStorageLocations(t *testing.T) {
 		t.Error("storage_locations.data_dir is empty, want the resolved data directory")
 	}
 	if got.StorageLocations.DBPath == "" {
-		t.Error("storage_locations.db_path is empty, want cfg.Storage.DBPath")
+		t.Error("storage_locations.db_path is empty, want cfg.Storage.DatabaseTarget")
 	}
 	if got.StorageLocations.WADeviceDBPath == "" {
-		t.Error("storage_locations.wa_device_db_path is empty, want cfg.Storage.WADeviceDBPath")
+		t.Error("storage_locations.wa_device_db_path is empty, want cfg.Storage.WADeviceDatabaseTarget")
 	}
 	if got.StorageLocations.BlobDir == "" {
 		t.Error("storage_locations.blob_dir is empty, want cfg.Storage.BlobDir")
+	}
+}
+
+// The storage locations reach the browser (and bug reports). PostgreSQL URLs carry credentials,
+// and the application and whatsmeow targets are independent.
+func TestGetSettingsHidesDatabaseCredentials(t *testing.T) {
+	const secret = "s3cr3t-Pa55"
+	h := newSettingsHarness(t)
+	h.cfg.Storage.DatabaseTarget = "postgres://app:" + secret + "@db.example:5432/xchats?sslmode=require&password=" + secret
+	h.cfg.Storage.WADeviceDatabaseTarget = "postgres://wa:" + secret + "@db.example:5432/whatsmeow?sslmode=require"
+
+	resp, env := h.get("/xchats/api/v1/settings")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /settings: status=%d body=%s", resp.StatusCode, env["message"])
+	}
+	var got struct {
+		StorageLocations struct {
+			DBPath         string `json:"db_path"`
+			WADeviceDBPath string `json:"wa_device_db_path"`
+		} `json:"storage_locations"`
+	}
+	mustDecode(t, env, &got)
+	raw, _ := json.Marshal(env)
+	if strings.Contains(string(raw), secret) {
+		t.Fatalf("GET /settings leaks the database password: %s", raw)
+	}
+	if want := "postgres://db.example:5432/xchats"; got.StorageLocations.DBPath != want {
+		t.Errorf("db_path = %q, want %q", got.StorageLocations.DBPath, want)
+	}
+	if want := "postgres://db.example:5432/whatsmeow"; got.StorageLocations.WADeviceDBPath != want {
+		t.Errorf("wa_device_db_path = %q, want %q", got.StorageLocations.WADeviceDBPath, want)
 	}
 }
 
@@ -530,6 +562,15 @@ func TestDownloadBackup(t *testing.T) {
 		t.Fatalf("GET backup/download: %v", err)
 	}
 	defer resp.Body.Close()
+	if !h.store.SupportsFileBackup() {
+		if resp.StatusCode != http.StatusNotImplemented {
+			t.Fatalf("PostgreSQL backup status=%d, want 501", resp.StatusCode)
+		}
+		if strings.Contains(resp.Header.Get("Content-Type"), "zip") {
+			t.Fatal("unsupported backup must not start a zip stream")
+		}
+		return
+	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}

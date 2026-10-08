@@ -23,6 +23,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestMCPAuthFlow_EndToEnd(t *testing.T) {
@@ -207,6 +208,8 @@ func TestMCPAuthFlow_EndToEnd(t *testing.T) {
 // reads the session at all). Proven here by writing through the token and
 // checking directly which organization's draft actually received it.
 func TestMCPAccessToken_ScopedToMintOrgRegardlessOfActiveSession(t *testing.T) {
+	now := time.Now()
+
 	h := newMCPHarness(t)
 	ctx := context.Background()
 
@@ -215,8 +218,8 @@ func TestMCPAccessToken_ScopedToMintOrgRegardlessOfActiveSession(t *testing.T) {
 		t.Fatalf("seed org B: %v", err)
 	}
 	if _, err := h.db.Exec(ctx, `
-		INSERT INTO organization_users (organization_id, user_id)
-		VALUES ($1, $2) ON CONFLICT DO NOTHING`, orgB.ID, h.userID); err != nil {
+		INSERT INTO organization_users (organization_id, user_id, joined_at)
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, orgB.ID, h.userID, now); err != nil {
 		t.Fatalf("add membership to org B: %v", err)
 	}
 

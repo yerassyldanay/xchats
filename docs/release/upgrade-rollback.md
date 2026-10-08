@@ -2,18 +2,19 @@
 
 ## How migrations work
 
-Every schema change ships as a numbered, embedded SQL file under
-`backend/migrations/sqlite/` (`0001_core.up.sql`, `0002_channels.up.sql`,
-...). They're compiled into the binary (`go:embed`) and applied
+Every schema change ships as a timestamp-named, embedded SQL file under
+`backend/migrations/` (`20261006000001_identity_access.sql`,
+`20261006000002_channels_inbox.sql`, ...), one file shared by SQLite and
+PostgreSQL. They're compiled into the binary (`go:embed`) and applied
 automatically: `internal/store.New` — called on every boot, `xchats serve`
-included — applies every migration newer than the database's current
-version before the app does anything else. There is no separate `migrate`
+included — applies every migration the database has not recorded yet before the
+app does anything else. There is no separate `migrate`
 step to remember; `xchats migrate` exists for driving migrations without
 also starting the server (a deploy step that wants schema-ready-but-not-yet-
 serving-traffic).
 
 **There are no down-migrations.** Every migration file is forward-only
-(`*.up.sql`, no `*.down.sql` counterpart). This is a deliberate simplicity
+(a single `.sql` file per change, no down counterpart). This is a deliberate simplicity
 choice, not a gap to fill later — it means rollback is never "run the schema
 backward," it's always **restore the pre-upgrade backup** (see below).
 

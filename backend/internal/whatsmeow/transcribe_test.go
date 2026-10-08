@@ -182,6 +182,7 @@ func TestDownloadAndAttachMedia_TranscriptionSurvivesExhaustedDownloadContext(t 
 	// the time Transcribe is called) but comfortably inside
 	// postMediaReadyTimeout (3 minutes) — the exact gap the bug fell into.
 	transcriber := &fakeTranscriber{text: "привет", delay: 200 * time.Millisecond}
+	auto := &fakeAutomation{}
 
 	mgr, err := NewManager(ctx, ManagerConfig{
 		DeviceDBPath: filepath.Join(t.TempDir(), "wa-device.db"),
@@ -189,6 +190,7 @@ func TestDownloadAndAttachMedia_TranscriptionSurvivesExhaustedDownloadContext(t 
 		Blob:         blobStore,
 		Queue:        q,
 		Hub:          realtime.NewHub(),
+		Automation:   auto,
 		STT:          func(ctx context.Context) stt.Params { return stt.Params{Transcriber: transcriber} },
 		Log:          testLogger(),
 	})
@@ -225,7 +227,9 @@ func TestDownloadAndAttachMedia_TranscriptionSurvivesExhaustedDownloadContext(t 
 			t.Fatalf("MessagesForChat: %v", err)
 		}
 		if len(msgs) == 1 && len(msgs[0].Media) == 1 && msgs[0].Media[0].Transcript != "" {
-			return // the fix: transcription completed despite the tiny mediaDownloadTimeout
+			// Wait for the background tail before cleanup closes its dependencies.
+			waitForAutomationCalls(t, auto, 2)
+			return // transcription completed despite the tiny mediaDownloadTimeout
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("transcript never appeared — TranscribeAudio is still sharing the download-scoped context; last seen messages: %+v", msgs)

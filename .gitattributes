@@ -1,0 +1,2 @@
+# Migrations are hashed (CRLF read as LF) and run verbatim on SQLite and PostgreSQL: keep LF in every checkout.
+backend/migrations/*.sql text eol=lf

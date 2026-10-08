@@ -3,7 +3,9 @@ package responsestore_test
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/dbtest"
 	"github.com/yerassyldanay/xchats/backend/internal/responsestore"
@@ -24,6 +26,8 @@ func TestKnowledgeBaseRepo_NotConfigured(t *testing.T) {
 }
 
 func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
+	now := time.Now()
+
 	repo, st, db := dbtest.NewKBRepo(t)
 	ctx := context.Background()
 	org, err := st.SeedOrganization(ctx, "xchats-test")
@@ -32,18 +36,18 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 	}
 	orgID := org.ID
 
-	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words)
-		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100)`, orgID)
-	mustExec(t, db, `INSERT INTO ai_topics (organization_id, slug, title, body_md)
-		VALUES ($1, 'delivery', 'Доставка', 'Доставляем по городу.')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, availability_status)
-		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', 'in_stock')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages)
-		VALUES ($1, 'basic', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, working_hours)
-		VALUES ($1, '+7 700 000 00 00', '9:00-18:00')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_policies (organization_id, delivery_cost, delivery_in_days, outside_zones_note)
-		VALUES ($1, '1 000 ₸', '1-2', '')`, orgID)
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at)
+		VALUES ($1, 'Персона', 'Миссия', 'Правила', 'Языковая политика', 100, $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_topics (organization_id, slug, title, body_md, id, created_at, updated_at)
+		VALUES ($1, 'delivery', 'Доставка', 'Доставляем по городу.', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_products (organization_id, ref, name, price, description, category, availability_status, id, created_at, updated_at)
+		VALUES ($1, 'widget', 'Виджет', '1 000 ₸', 'Описание', '', 'in_stock', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_tariffs (organization_id, ref, name, price, limit_text, fee, summary, pricing_type, advantages, disadvantages, id, created_at, updated_at)
+		VALUES ($1, 'basic', 'Базовый', '5 000 ₸', '', '', '', 'fixed', '', '', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, working_hours, id, created_at, updated_at)
+		VALUES ($1, '+7 700 000 00 00', '9:00-18:00', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_policies (organization_id, delivery_cost, delivery_in_days, outside_zones_note, id, created_at, updated_at)
+		VALUES ($1, '1 000 ₸', '1-2', '', $2, $3, $3)`, orgID, uuid.New(), now)
 
 	kb, err := repo.Load(ctx, orgID.String())
 	if err != nil {
@@ -78,6 +82,8 @@ func TestKnowledgeBaseRepo_LoadsFullKB(t *testing.T) {
 }
 
 func TestKnowledgeBaseRepo_LoadsDeliveryZones(t *testing.T) {
+	now := time.Now()
+
 	repo, st, db := dbtest.NewKBRepo(t)
 	ctx := context.Background()
 	org, err := st.SeedOrganization(ctx, "xchats-test")
@@ -86,10 +92,10 @@ func TestKnowledgeBaseRepo_LoadsDeliveryZones(t *testing.T) {
 	}
 	orgID := org.ID
 
-	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona) VALUES ($1, 'p')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_policies (organization_id, outside_zones_note) VALUES ($1, 'Вне зон не доставляем.')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, sales_status)
-		VALUES ($1, 'kz', 'Казахстан', 'country', '', true, '10 000 ₸', '3-4', 'active')`, orgID)
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, id, created_at, updated_at) VALUES ($1, 'p', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_policies (organization_id, outside_zones_note, id, created_at, updated_at) VALUES ($1, 'Вне зон не доставляем.', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_delivery_zones (organization_id, ref, name, zone_level, parent_ref, delivery_available, delivery_cost, delivery_in_days, sales_status, id, created_at, updated_at)
+		VALUES ($1, 'kz', 'Казахстан', 'country', '', true, '10 000 ₸', '3-4', 'active', $2, $3, $3)`, orgID, uuid.New(), now)
 
 	kb, err := repo.Load(ctx, orgID.String())
 	if err != nil {
@@ -111,6 +117,8 @@ func TestKnowledgeBaseRepo_LoadsDeliveryZones(t *testing.T) {
 // them, must come back out with every field intact, build a valid catalog,
 // and cause salon-kb@v1 (not shop-kb@v7) to be selected.
 func TestKnowledgeBaseRepo_LoadsSalonKB(t *testing.T) {
+	now := time.Now()
+
 	repo, st, db := dbtest.NewKBRepo(t)
 	ctx := context.Background()
 	org, err := st.SeedOrganization(ctx, "xchats-test")
@@ -119,18 +127,18 @@ func TestKnowledgeBaseRepo_LoadsSalonKB(t *testing.T) {
 	}
 	orgID := org.ID
 
-	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona) VALUES ($1, 'Ассистент салона')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, booking_url, schedule)
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, id, created_at, updated_at) VALUES ($1, 'Ассистент салона', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_contacts (organization_id, phone, booking_url, schedule, id, created_at, updated_at)
 		VALUES ($1, '+7 707 000 00 00', 'https://xpayment.kz/book/salon',
-		        '[{"ref":"mon","day":"Понедельник","start":"10:00","end":"21:00","breaks":[]}]')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_specialists (organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status)
+		        '[{"ref":"mon","day":"Понедельник","start":"10:00","end":"21:00","breaks":[]}]', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_specialists (organization_id, ref, full_name, title, experience, schedule, booking_url, portfolio_images, sales_status, id, created_at, updated_at)
 		VALUES ($1, 'alina-kim', 'Алина Ким', 'Топ-стилист', '7 лет',
 		        '[{"ref":"tue","day":"Вторник","start":"10:00","end":"19:00","breaks":[{"start":"13:00","end":"14:00"}]}]',
-		        'https://xpayment.kz/book/aura-alina', '[]', 'active')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status)
-		VALUES ($1, 'haircut-women', '', 'base', 'Волосы', 'Женская стрижка', '10 000 ₸', 60, '', '["alina-kim"]', 'active')`, orgID)
-	mustExec(t, db, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status)
-		VALUES ($1, 'hair-spa-mask', 'haircut-women', 'addon', 'Волосы', 'Спа-уход', '5 000 ₸', 30, '', '[]', 'active')`, orgID)
+		        'https://xpayment.kz/book/aura-alina', '[]', 'active', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, id, created_at, updated_at)
+		VALUES ($1, 'haircut-women', '', 'base', 'Волосы', 'Женская стрижка', '10 000 ₸', 60, '', '["alina-kim"]', 'active', $2, $3, $3)`, orgID, uuid.New(), now)
+	mustExec(t, db, `INSERT INTO ai_services (organization_id, ref, parent_ref, service_type, category, name, price, duration, description, specialist_refs, sales_status, id, created_at, updated_at)
+		VALUES ($1, 'hair-spa-mask', 'haircut-women', 'addon', 'Волосы', 'Спа-уход', '5 000 ₸', 30, '', '[]', 'active', $2, $3, $3)`, orgID, uuid.New(), now)
 
 	kb, err := repo.Load(ctx, orgID.String())
 	if err != nil {
