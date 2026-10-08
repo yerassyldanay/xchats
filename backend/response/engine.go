@@ -1,6 +1,6 @@
 // Package response is the channel-neutral response engine and service: given
 // an organization's knowledge base and a conversation, it renders the
-// evaluated shop-kb-v4 prompt, calls the configured LLM, and returns a
+// system prompt from the business's active editable template, calls the configured LLM, and returns a
 // grounded, validated draft reply. It depends only on backend/aiprompt,
 // backend/llm's contracts, backend/messaging's contracts, and its own
 // repository interfaces — never on a specific channel provider, PostgreSQL,
@@ -10,6 +10,7 @@ package response
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -121,20 +122,11 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("response: GenerateRequest.KB is required")
 	}
 
-	cat, err := aiprompt.BuildCatalog(req.KB)
+	sys, cat, err := RenderSystemPrompt(req.KB, req.Channel)
 	if err != nil {
-		return nil, fmt.Errorf("response: build catalog: %w", err)
+		return nil, err
 	}
-	rendered, err := aiprompt.RenderPromptV7(FrameFor(req.KB, req.Channel), req.KB.PromptInput(), cat)
-	if err != nil {
-		return nil, fmt.Errorf("response: render prompt: %w", err)
-	}
-	if err := aiprompt.ValidateNoMaterialLeak(rendered, req.KB.Materials); err != nil {
-		return nil, fmt.Errorf("response: %w", err)
-	}
-	if err := aiprompt.ValidateNoStorageLocatorLeak(rendered); err != nil {
-		return nil, fmt.Errorf("response: %w", err)
-	}
+	rendered := sys.Text
 	incomingText := req.IncomingText
 	if suffix := attachmentTailSuffix(req.Attachments, incomingText); suffix != "" {
 		if incomingText != "" {
@@ -214,66 +206,102 @@ func (e *Engine) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	}, nil
 }
 
-// salonFrameSelected reports whether kb carries any structured salon data
-// (PLAN.md "Beauty Salon Knowledge Base Extension") — the trigger FrameFor/
-// PromptRefFor use to pick salon-kb@v1 over the shop-kb family, regardless
-// of channel. A nil kb (a caller that predates GenerateRequest.KB being
-// required, or handleKBPrompt's pre-load default) never selects it.
-func salonFrameSelected(kb *aiprompt.KB) bool {
-	return kb != nil && (len(kb.Specialists) > 0 || len(kb.Services) > 0)
+// ErrNoPromptTemplate means the knowledge base reached the prompt builder
+// without its active template: the repository (responsestore.Load) always
+// attaches one, so this is a wiring bug, not a user-facing condition.
+var ErrNoPromptTemplate = errors.New("response: knowledge base has no prompt template loaded")
+
+// SystemPrompt is a fully rendered system prompt and how it was produced.
+type SystemPrompt struct {
+	// Text is the prompt sent to the model (before the customer/conversation tail).
+	Text string
+	// Frame is the composed frame it was rendered from — the operator's
+	// template instructions plus the protected structure, slot markers intact.
+	Frame string
+	// Ref identifies the template revision that produced it (PromptRefFor).
+	Ref string
+	// TemplateID is the active template profile.
+	TemplateID string
 }
 
-// FrameFor picks the prompt frame for an organization's KB and channel.
-// Structured salon data always wins, on every channel — PLAN.md: "Select it
-// when structured salon data exists; organizations without salon data
-// continue using the existing shop frame unchanged." There is no Telegram
-// variant of salon-kb@v1 yet (PLAN.md's scope is silent on Telegram for the
-// salon vertical — see aiprompt.PromptRefSalonKBV1's doc comment); a
-// Telegram-channel salon organization still gets the WhatsApp-worded salon
-// frame rather than falling back to shop-kb, which would leave its
-// %%SERVICES%%/%%SPECIALISTS%% markers unfilled.
-//
-// Absent salon data, WhatsApp and the simulator keep the byte-identical
-// shop-kb@v7 base frame (the simulator exists to rehearse the WhatsApp
-// path, so it must not diverge from it); Telegram gets the variant whose
-// only difference is a persona line that does not call the assistant a
-// WhatsApp one. An unset channel — a caller that predates GenerateRequest
-// carrying it — keeps the base frame rather than guessing.
-//
-// v7 (not v6) since 2026-09 (0018_kb_gap_telemetry): v6 had no way for an
-// escalation to report WHY in any queryable shape — every gap in the
-// knowledge base (an unpriced product, a request outside the supported
-// scope, an unknown item) landed as the same free-text escalation_reason
-// prose, unreportable except by reading chat transcripts one at a time. v7
-// is v6 plus the optional "kb_gap" structured diagnostic (rule 9) — see
-// aiprompt.PromptRefShopKBV7, which also records that the eval pipeline has
-// not been run against it yet. salon-kb@v1 shares the same v7 response
-// contract (aiprompt.PromptRefSalonKBV1's doc comment), so Generate always
-// calls ValidateResponseV7 (not ValidateResponse) regardless of which frame
-// FrameFor returns — FrameFor and PromptRefFor must move in lockstep with
-// each other, a draft stamped with a ref whose frame did not produce it
-// being unreproducible.
+// RenderSystemPrompt is THE prompt builder: Engine.Generate (every customer
+// reply) and the Final Template preview (GET /kb/prompt) both call it, so what
+// an operator previews is exactly what the model receives. It builds the
+// catalog, composes the frame from the KB's active template (aiprompt.ComposeFrame,
+// which includes a data section for every kind of data the KB holds, regardless
+// of profile), renders it, and runs the material and storage-locator leak
+// gates. The prompt is rebuilt from the latest KB on each call — it is never
+// stored.
+func RenderSystemPrompt(kb *aiprompt.KB, channel messaging.Channel) (*SystemPrompt, *aiprompt.Catalog, error) {
+	if kb == nil {
+		return nil, nil, fmt.Errorf("response: knowledge base is required")
+	}
+	if kb.PromptTemplate == nil {
+		return nil, nil, ErrNoPromptTemplate
+	}
+	cat, err := aiprompt.BuildCatalog(kb)
+	if err != nil {
+		return nil, nil, fmt.Errorf("response: build catalog: %w", err)
+	}
+	frame := FrameFor(kb, channel)
+	rendered, err := aiprompt.RenderPromptV7(frame, kb.PromptInput(), cat)
+	if err != nil {
+		return nil, nil, fmt.Errorf("response: render prompt: %w", err)
+	}
+	if err := aiprompt.ValidateNoMaterialLeak(rendered, kb.Materials); err != nil {
+		return nil, nil, fmt.Errorf("response: %w", err)
+	}
+	if err := aiprompt.ValidateNoStorageLocatorLeak(rendered); err != nil {
+		return nil, nil, fmt.Errorf("response: %w", err)
+	}
+	return &SystemPrompt{Text: rendered, Frame: frame, Ref: PromptRefFor(kb), TemplateID: kb.PromptTemplate.ID}, cat, nil
+}
+
+// FrameFor composes the frame for an organization's KB and channel from the
+// KB's active template: the operator-editable instructions, then the protected
+// structure (channel line, strict-JSON contract, schema, assistant block and a
+// bare-labelled data section for each kind of data the KB actually holds).
+// There is no per-channel or per-vertical frame choice any more — channels are
+// handled automatically by the channel line, and products, tariffs, services,
+// specialists and zones appear together whenever present. A KB without a
+// template yields "".
 func FrameFor(kb *aiprompt.KB, channel messaging.Channel) string {
-	if salonFrameSelected(kb) {
-		return aiprompt.FrameSalonKBV1RU()
+	if kb == nil || kb.PromptTemplate == nil {
+		return ""
 	}
-	if channel == messaging.ChannelTelegram {
-		return aiprompt.FrameShopKBV7TGRU()
-	}
-	return aiprompt.FrameShopKBV7RU()
+	return aiprompt.ComposeFrame(kb.PromptTemplate.Instructions, kb, channelLabel(channel))
 }
 
-// PromptRefFor names the frame FrameFor would pick, for logs and draft
-// records. It must move in lockstep with FrameFor: a draft stamped with a
-// ref whose frame did not produce it is unreproducible.
-func PromptRefFor(kb *aiprompt.KB, channel messaging.Channel) string {
-	if salonFrameSelected(kb) {
-		return aiprompt.PromptRefSalonKBV1
+// PromptRefFor names the template revision FrameFor would use, for logs and
+// draft provenance: "template:<id>@<updated_at ms>". A template served from the
+// shipped default (never saved) reads "@default".
+func PromptRefFor(kb *aiprompt.KB) string {
+	if kb == nil || kb.PromptTemplate == nil {
+		return "template:none"
 	}
-	if channel == messaging.ChannelTelegram {
-		return aiprompt.PromptRefShopKBV7TG
+	t := kb.PromptTemplate
+	if t.UpdatedAt.IsZero() {
+		return "template:" + t.ID + "@default"
 	}
-	return aiprompt.PromptRefShopKBV7
+	return fmt.Sprintf("template:%s@%d", t.ID, t.UpdatedAt.UnixMilli())
+}
+
+// channelLabel is the human name of the conversation channel, told to the model
+// as a fact. The simulator rehearses the WhatsApp path. An unset or unknown
+// channel adds no channel line.
+func channelLabel(ch messaging.Channel) string {
+	switch ch {
+	case messaging.ChannelWhatsApp, messaging.ChannelWhatsAppCloud, messaging.ChannelSimulator:
+		return "WhatsApp"
+	case messaging.ChannelTelegram:
+		return "Telegram"
+	case messaging.ChannelInstagram:
+		return "Instagram"
+	case messaging.ChannelMessenger:
+		return "Facebook Messenger"
+	default:
+		return ""
+	}
 }
 
 func (e *Engine) complete(ctx context.Context, client llm.ChatClient, modelRef llm.ModelRef, prompt string, attachments []IncomingAttachment, params LLMParams) (string, error) {

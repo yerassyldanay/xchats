@@ -2,6 +2,7 @@ package responsestore_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,12 +186,100 @@ func TestKnowledgeBaseRepo_LoadsSalonKB(t *testing.T) {
 		t.Error("want a schedule_tue token for the loaded specialist")
 	}
 
-	// The whole point: loading this KB through the real repository must
-	// cause the response engine to select salon-kb@v1, on every channel.
-	if got := response.FrameFor(kb, messaging.ChannelWhatsApp); got != aiprompt.FrameSalonKBV1RU() {
-		t.Error("want salon-kb@v1 selected for a KB loaded with real specialist/service rows")
+	// The whole point: the KB loaded through the real repository carries the
+	// org's active template (general, seeded by SeedOrganization), and the frame
+	// composed from it includes the salon data sections on every channel — there
+	// is no longer a separate salon frame to select.
+	if kb.PromptTemplate == nil || kb.PromptTemplate.ID != aiprompt.TemplateGeneral || kb.PromptTemplate.Instructions == "" {
+		t.Fatalf("loaded KB must carry the seeded general template, got %+v", kb.PromptTemplate)
 	}
-	if got := response.PromptRefFor(kb, messaging.ChannelTelegram); got != aiprompt.PromptRefSalonKBV1 {
-		t.Errorf("PromptRefFor = %q, want %q (salon selection must not depend on channel)", got, aiprompt.PromptRefSalonKBV1)
+	for _, ch := range []messaging.Channel{messaging.ChannelWhatsApp, messaging.ChannelTelegram} {
+		frame := response.FrameFor(kb, ch)
+		for _, want := range []string{aiprompt.LabelServices, aiprompt.LabelSpecialists, aiprompt.SlotServiceCatalog, aiprompt.SlotSpecialists} {
+			if !strings.Contains(frame, want) {
+				t.Errorf("%s frame lacks %q for a KB with real specialist/service rows", ch, want)
+			}
+		}
+	}
+	if got := response.PromptRefFor(kb); !strings.HasPrefix(got, "template:general@") {
+		t.Errorf("PromptRefFor = %q, want template:general@<revision>", got)
+	}
+}
+
+// The loader attaches the org's SELECTED template, read from the database, so
+// the cached KB the reply path and the preview share carries operator edits.
+func TestKnowledgeBaseRepo_LoadsSelectedTemplate(t *testing.T) {
+	now := time.Now()
+	repo, st, db := dbtest.NewKBRepo(t)
+	ctx := context.Background()
+	org, err := st.SeedOrganization(ctx, "xchats-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, persona, prompt_template_id, id, created_at, updated_at) VALUES ($1, 'p', 'service-business', $2, $3, $3)`, org.ID, uuid.New(), now)
+	mustExec(t, db, `UPDATE ai_prompt_templates SET instructions = 'ПРАВКА-ОПЕРАТОРА', updated_at = 1791417612345 WHERE organization_id = $1 AND id = 'service-business'`, org.ID)
+
+	kb, err := repo.Load(ctx, org.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kb.PromptTemplate == nil || kb.PromptTemplate.ID != "service-business" || kb.PromptTemplate.Instructions != "ПРАВКА-ОПЕРАТОРА" ||
+		kb.PromptTemplate.UpdatedAt.UnixMilli() != 1791417612345 {
+		t.Fatalf("template = %+v", kb.PromptTemplate)
+	}
+	if got := response.PromptRefFor(kb); got != "template:service-business@1791417612345" {
+		t.Errorf("PromptRefFor = %q", got)
+	}
+}
+
+// A profile-selection stub (configured = FALSE) is not a configured assistant.
+func TestKnowledgeBaseRepo_ProfileStubIsStillNotConfigured(t *testing.T) {
+	now := time.Now()
+	repo, st, db := dbtest.NewKBRepo(t)
+	ctx := context.Background()
+	org, _ := st.SeedOrganization(ctx, "xchats-test")
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, prompt_template_id, configured, id, created_at, updated_at) VALUES ($1, 'online-shop', FALSE, $2, $3, $3)`, org.ID, uuid.New(), now)
+	if _, err := repo.Load(ctx, org.ID.String()); err != responsestore.ErrKBNotConfigured {
+		t.Fatalf("Load() = %v, want ErrKBNotConfigured for a stub row", err)
+	}
+}
+
+// Missing/unknown selections fall back: selected row -> the org's general row ->
+// the shipped default in memory (never written back).
+func TestKnowledgeBaseRepo_TemplateFallbacks(t *testing.T) {
+	now := time.Now()
+	repo, st, db := dbtest.NewKBRepo(t)
+	ctx := context.Background()
+	org, _ := st.SeedOrganization(ctx, "xchats-test")
+	mustExec(t, db, `INSERT INTO ai_assistants (organization_id, prompt_template_id, id, created_at, updated_at) VALUES ($1, 'online-shop', $2, $3, $3)`, org.ID, uuid.New(), now)
+	mustExec(t, db, `UPDATE ai_prompt_templates SET instructions = 'ПРАВКА-GENERAL' WHERE organization_id = $1 AND id = 'general'`, org.ID)
+
+	load := func() *aiprompt.PromptTemplate {
+		t.Helper()
+		kb, err := repo.Load(ctx, org.ID.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return kb.PromptTemplate
+	}
+	// selected row missing -> the org's general row
+	mustExec(t, db, `DELETE FROM ai_prompt_templates WHERE organization_id = $1 AND id = 'online-shop'`, org.ID)
+	if tpl := load(); tpl.ID != "general" || tpl.Instructions != "ПРАВКА-GENERAL" {
+		t.Errorf("fallback to general row: %+v", tpl)
+	}
+	// an unknown ID in the column behaves the same
+	mustExec(t, db, `UPDATE ai_assistants SET prompt_template_id = 'bogus' WHERE organization_id = $1`, org.ID)
+	if tpl := load(); tpl.ID != "general" || tpl.Instructions != "ПРАВКА-GENERAL" {
+		t.Errorf("unknown ID: %+v", tpl)
+	}
+	// no rows at all -> shipped default, in memory only
+	mustExec(t, db, `DELETE FROM ai_prompt_templates WHERE organization_id = $1`, org.ID)
+	want, _ := aiprompt.DefaultTemplateInstructions(aiprompt.TemplateGeneral)
+	if tpl := load(); tpl.ID != "general" || tpl.Instructions != want || !tpl.UpdatedAt.IsZero() {
+		t.Errorf("shipped default fallback: id=%s zeroTime=%v", tpl.ID, tpl.UpdatedAt.IsZero())
+	}
+	var n int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM ai_prompt_templates WHERE organization_id = $1`, org.ID).Scan(&n); err != nil || n != 0 {
+		t.Errorf("the read path must never write: %d rows (%v)", n, err)
 	}
 }

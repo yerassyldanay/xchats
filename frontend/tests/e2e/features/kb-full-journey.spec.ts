@@ -729,10 +729,10 @@ test('20. Знаний база: published records appear; the deleted product d
   })
 })
 
-test('21. Знаний база → Промпт: assembled prompt has imported data + persona, excludes the deleted product', async ({}, testInfo) => {
-  await step(testInfo, page, '21. Open the Промпт tab', async () => {
+test('21. Знаний база → Итоговый шаблон: assembled prompt has imported data + persona, excludes the deleted product', async ({}, testInfo) => {
+  await step(testInfo, page, '21. Open the Итоговый шаблон tab', async () => {
     await page.goto('/knowledge-base')
-    await page.getByRole('button', { name: 'Промпт' }).click()
+    await page.getByRole('button', { name: 'Итоговый шаблон', exact: true }).click()
     await expect(page.getByText('Собран успешно')).toBeVisible()
   })
 

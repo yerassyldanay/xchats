@@ -68,7 +68,7 @@ func (r *KnowledgeBaseRepo) Load(ctx context.Context, organizationID string) (*a
 	}
 	defer tx.Rollback(ctx)
 
-	assistant, err := loadAssistant(ctx, tx, orgID)
+	assistant, templateID, err := loadAssistant(ctx, tx, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,6 +77,9 @@ func (r *KnowledgeBaseRepo) Load(ctx context.Context, organizationID string) (*a
 	}
 
 	kb := &aiprompt.KB{OrganizationID: organizationID, Assistant: assistant}
+	if kb.PromptTemplate, err = loadPromptTemplate(ctx, tx, orgID, templateID); err != nil {
+		return nil, err
+	}
 	if kb.Topics, err = loadTopics(ctx, tx, orgID); err != nil {
 		return nil, err
 	}
@@ -114,19 +117,59 @@ func (r *KnowledgeBaseRepo) Load(ctx context.Context, organizationID string) (*a
 	return kb, nil
 }
 
-func loadAssistant(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.Assistant, error) {
+// loadAssistant returns the org's assistant settings and its selected prompt
+// template ID. "Configured" means settings were actually saved
+// (ai_assistants.configured): choosing a template profile before that inserts
+// a stub row, which must NOT make the assistant look set up — so a stub reads
+// exactly like a missing row here.
+func loadAssistant(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID) (*aiprompt.Assistant, string, error) {
 	var a aiprompt.Assistant
+	var templateID string
 	err := tx.QueryRow(ctx, `
-		SELECT persona, mission, guardrails, language_policy, reply_max_words
-		FROM ai_assistants WHERE organization_id = $1`, orgID).
-		Scan(&a.Persona, &a.Mission, &a.Guardrails, &a.LanguagePolicy, &a.ReplyMaxWords)
+		SELECT persona, mission, guardrails, language_policy, reply_max_words, prompt_template_id
+		FROM ai_assistants WHERE organization_id = $1 AND configured`, orgID).
+		Scan(&a.Persona, &a.Mission, &a.Guardrails, &a.LanguagePolicy, &a.ReplyMaxWords, &templateID)
 	if errors.Is(err, dbx.ErrNoRows) {
-		return nil, nil
+		return nil, "", nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("responsestore: load assistant: %w", err)
+		return nil, "", fmt.Errorf("responsestore: load assistant: %w", err)
 	}
-	return &a, nil
+	return &a, templateID, nil
+}
+
+// loadPromptTemplate reads the org's selected template from
+// ai_prompt_templates. A selected ID that is unknown or has no row falls back
+// to the org's general row, and a missing general row (an organization created
+// by raw SQL, bypassing SeedOrganization) falls back to the shipped default
+// text in memory — never written back, so a later seed or edit is unaffected.
+// Edited text is therefore always what the database holds.
+func loadPromptTemplate(ctx context.Context, tx *dbx.Tx, orgID uuid.UUID, id string) (*aiprompt.PromptTemplate, error) {
+	candidates := []string{id}
+	if id != aiprompt.DefaultTemplateID {
+		candidates = append(candidates, aiprompt.DefaultTemplateID)
+	}
+	for _, cand := range candidates {
+		if !aiprompt.IsPromptTemplateID(cand) {
+			continue
+		}
+		t := aiprompt.PromptTemplate{ID: cand}
+		err := tx.QueryRow(ctx, `
+			SELECT instructions, updated_at FROM ai_prompt_templates
+			WHERE organization_id = $1 AND id = $2`, orgID, cand).Scan(&t.Instructions, &t.UpdatedAt)
+		if errors.Is(err, dbx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("responsestore: load prompt template: %w", err)
+		}
+		return &t, nil
+	}
+	t := aiprompt.DefaultPromptTemplate(aiprompt.DefaultTemplateID)
+	if t == nil {
+		return nil, fmt.Errorf("responsestore: no prompt template available for organization")
+	}
+	return t, nil
 }
 
 // mediaArray converts a scanned uuid[] media column ([]uuid.UUID, via

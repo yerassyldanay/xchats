@@ -868,17 +868,42 @@ export interface PromptSectionCounts {
   zones: number
   contacts: number
   policies: number
+  specialists: number
+  services: number
 }
+// status: "ok" — rendered from the saved settings; "not_configured" — the
+// assistant settings were never saved, so the text is the active template's
+// instructions over an empty KB (the assistant will not reply yet); "error" —
+// the exact reason is in `error` and no text is shown.
 export interface PromptView {
   prompt_ref: string
+  template_id: string
   rendered_text: string
   frame_text: string
   char_count: number
   approx_tokens: number
   built_at: string
-  status: 'ok' | 'error'
+  status: 'ok' | 'not_configured' | 'error'
   error?: string
   section_counts: PromptSectionCounts
+}
+
+// PromptTemplate* mirror GET /kb/templates (backend/internal/httpapi/
+// kb_templates.go): the four editable instruction templates of ai_prompt_templates
+// and which one is active. `kb_configured` is independent of the profile — it is
+// whether the assistant settings were ever saved.
+export type PromptTemplateId = 'general' | 'online-shop' | 'service-business' | 'online-service'
+export const PROMPT_TEMPLATE_IDS: PromptTemplateId[] = ['general', 'online-shop', 'service-business', 'online-service']
+export interface PromptTemplate {
+  id: PromptTemplateId
+  instructions: string
+  updated_at?: string
+  is_default_text: boolean
+}
+export interface PromptTemplatesView {
+  active_template_id: PromptTemplateId
+  kb_configured: boolean
+  templates: PromptTemplate[]
 }
 
 // KbGapReasonCode/KbGapEntityType mirror aiprompt's closed vocabularies

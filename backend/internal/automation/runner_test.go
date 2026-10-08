@@ -64,6 +64,7 @@ func (fakeKBRepo) Load(ctx context.Context, organizationID string) (*aiprompt.KB
 	return &aiprompt.KB{
 		OrganizationID: organizationID,
 		Assistant:      &aiprompt.Assistant{Persona: "Тестовый ассистент.", ReplyMaxWords: 120},
+		PromptTemplate: aiprompt.DefaultPromptTemplate(aiprompt.TemplateGeneral),
 		Contacts:       &aiprompt.Contacts{Phone: "+7 700 000 00 00"},
 	}, nil
 }

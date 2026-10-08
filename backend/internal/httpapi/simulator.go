@@ -130,6 +130,14 @@ func (s *Server) handleSimulatorMessage(c *gin.Context) {
 			return
 		}
 		opts.KBOverride = responsestore.BuildKBFromDraftView(org.ID.String(), dv)
+		// Templates are live-only (never staged in the draft blob): the draft
+		// simulation runs on the same active template as real replies.
+		tpl, err := s.kb.ActivePromptTemplate(ctx(c), org.ID)
+		if err != nil {
+			s.kbFail(c, err)
+			return
+		}
+		opts.KBOverride.PromptTemplate = &tpl
 	}
 
 	persisted, err := s.response.Respond(ctx(c), messaging.ChannelSimulator, res.ChatID.String(), opts)

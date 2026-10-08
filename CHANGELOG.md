@@ -7,6 +7,14 @@ All notable changes to this project are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- Editable assistant instructions. A new **General Template** tab (before the renamed
+  **Final Template** preview) lets you pick an optional profile — General, Online shop,
+  Service business or Online service — and edit its natural-language instructions. Edits
+  are stored per business, survive restarts, deployments and migrations, and switching
+  profiles keeps every other profile's edits. The Final Template shows exactly what the
+  assistant receives: the active instructions plus the current knowledge base, rebuilt
+  whenever either changes. Products, tariffs, services and specialists now work together
+  under any profile, and the conversation channel is handled automatically.
 - Campaigns: bulk outbound messaging to a pasted or uploaded recipient
   list, rate-limited per sending account with a scheduled send window,
   automatic retry on transient failures, and auto-pause when the sending

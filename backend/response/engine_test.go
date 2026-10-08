@@ -36,6 +36,7 @@ func testKB() *aiprompt.KB {
 	return &aiprompt.KB{
 		OrganizationID: "org-1",
 		Assistant:      &aiprompt.Assistant{Persona: "Тестовый ассистент.", ReplyMaxWords: 120},
+		PromptTemplate: aiprompt.DefaultPromptTemplate(aiprompt.TemplateGeneral),
 		Products: []aiprompt.Product{
 			{Ref: "widget", Name: "Виджет", Price: "1 000 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"},
 		},

@@ -231,6 +231,11 @@ type Service struct {
 type KB struct {
 	OrganizationID string
 	Assistant      *Assistant
+	// PromptTemplate is the business's active editable instruction template
+	// (ai_prompt_templates), loaded alongside the rest of the KB so the cached
+	// build the reply path and the preview share also carries it — one cache
+	// invalidation covers a template edit, a profile switch and a KB edit.
+	PromptTemplate *PromptTemplate
 	Topics         []Topic
 	Products       []Product
 	Tariffs        []Tariff

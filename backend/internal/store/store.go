@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/dbx"
 	"github.com/yerassyldanay/xchats/backend/internal/domain"
 	"github.com/yerassyldanay/xchats/backend/internal/secretbox"
@@ -255,7 +256,33 @@ func (s *Store) SeedOrganization(ctx context.Context, name string) (Organization
 			INSERT INTO organizations (name, id, created_at, updated_at) VALUES ($1, $2, $3, $3)
 			RETURNING id, name, respond_mode, timezone`, name, uuid.New(), now).Scan(&o.ID, &o.Name, &o.RespondMode, &o.Timezone)
 	}
-	return o, err
+	if err != nil {
+		return o, err
+	}
+	return o, s.EnsurePromptTemplates(ctx, o.ID)
+}
+
+// EnsurePromptTemplates makes sure organization orgID has its four editable
+// prompt-template rows (ai_prompt_templates), seeded from the shipped defaults.
+// ON CONFLICT DO NOTHING makes it safe to call on every boot and for an
+// existing business: it never duplicates a row and never overwrites an
+// operator's edit. The migration seeds the organizations that already exist;
+// this is the same protection for one created later.
+func (s *Store) EnsurePromptTemplates(ctx context.Context, orgID uuid.UUID) error {
+	now := time.Now()
+	for _, id := range aiprompt.PromptTemplateIDs() {
+		text, ok := aiprompt.DefaultTemplateInstructions(id)
+		if !ok {
+			return fmt.Errorf("store: no default text for prompt template %q", id)
+		}
+		if _, err := s.db.Exec(ctx, `
+			INSERT INTO ai_prompt_templates (organization_id, id, instructions, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $4)
+			ON CONFLICT (organization_id, id) DO NOTHING`, orgID, id, text, now); err != nil {
+			return fmt.Errorf("store: seed prompt template %q: %w", id, err)
+		}
+	}
+	return nil
 }
 
 // SeedUser upserts a user by (case-insensitive) email and joins them to the

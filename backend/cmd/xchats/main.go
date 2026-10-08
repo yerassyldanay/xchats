@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yerassyldanay/xchats/backend/aiprompt"
 	"github.com/yerassyldanay/xchats/backend/internal/appdirs"
 	"github.com/yerassyldanay/xchats/backend/internal/automation"
 	"github.com/yerassyldanay/xchats/backend/internal/blob"
@@ -472,7 +471,7 @@ func buildServer(ctx context.Context, cfg *config.Config, log *slog.Logger, reso
 		Engine:        engine,
 	}
 	log.Info("response service active",
-		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_ref", aiprompt.PromptRefShopKBV7)
+		"provider", startupParams.DefaultModel.Provider, "model", startupParams.DefaultModel.Model, "prompt_source", "ai_prompt_templates")
 
 	q := queue.NewInMem(2048, cfg.System.QueueWorkers, log)
 	hub := realtime.NewHub()

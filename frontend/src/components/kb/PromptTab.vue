@@ -1,18 +1,22 @@
 <script setup lang="ts">
-// Prompt tab — plan/ui/ui_knowledge_base_001.png. Shows the EXACT prompt the
-// response engine renders right now (GET /kb/prompt, backed by the same
-// CachedKBRepo the production reply path reads — see playground.ts's
-// loadPrompt doc comment), never a locally-reconstructed approximation.
-// Read-only by design: editing happens only through the other tabs: this
-// panel just proves what they add up to.
+// Final Template tab (formerly "Prompt") — plan/ui/ui_knowledge_base_001.png.
+// Shows the EXACT prompt the response engine renders right now (GET /kb/prompt,
+// backed by the same CachedKBRepo and the same builder the production reply path
+// uses — see playground.ts's loadPrompt doc comment), never a locally-reconstructed
+// approximation: the active template's instructions plus the current knowledge
+// base. Read-only by design: instructions are edited in General Template and facts
+// in the other knowledge-base tabs; this panel just proves what they add up to.
+// An organization whose assistant settings were never saved shows the active
+// template's instructions with a "not configured" notice instead of an error.
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  BadgeCheck, BookOpen, CircleAlert, Copy, Download, Hash, Info,
-  MapPin, Package, Phone, Receipt, RefreshCw, Ruler, Sparkles, Truck,
+  BadgeCheck, BookOpen, CircleAlert, ConciergeBell, Copy, Download, Hash, Info,
+  MapPin, Package, Phone, Receipt, RefreshCw, Ruler, Sparkles, TriangleAlert, Truck, UserRound,
 } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { intlLocale } from '@/lib/format'
+import { profileKey } from '@/lib/promptTemplates'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 
@@ -94,7 +98,16 @@ const sectionRows = computed(() => {
     { icon: MapPin, label: t('kb.entities.delivery_zones.plural'), value: c.zones },
     { icon: Phone, label: t('kb.entities.contacts.plural'), value: c.contacts },
     { icon: Truck, label: t('kb.entities.policies.plural'), value: c.policies },
+    { icon: ConciergeBell, label: t('kb.entities.services.plural'), value: c.services ?? 0 },
+    { icon: UserRound, label: t('kb.entities.specialists.plural'), value: c.specialists ?? 0 },
   ]
+})
+
+const profileLabel = computed(() => {
+  const id = pg.promptView?.template_id
+  if (!id) return '—'
+  const k = profileKey(id)
+  return k ? t(`kb.template.profiles.${k}.name`) : id
 })
 </script>
 
@@ -136,6 +149,16 @@ const sectionRows = computed(() => {
         </button>
       </div>
 
+      <p
+        v-if="pg.promptView?.status === 'not_configured'"
+        class="mx-5 mt-4 flex items-start gap-2 text-sm rounded-lg border border-amber-300/60 bg-amber-50 text-amber-900 px-3 py-2.5"
+        role="status"
+        data-testid="prompt-not-configured"
+      >
+        <TriangleAlert class="w-4 h-4 shrink-0 mt-0.5" />
+        <span><span class="font-medium">{{ t('kb.prompt.notConfiguredTitle') }}.</span> {{ t('kb.prompt.notConfiguredBody') }}</span>
+      </p>
+
       <div v-if="pg.promptLoading && !pg.promptView" class="p-10 text-center text-sm text-muted-foreground">{{ t('kb.prompt.loading') }}</div>
       <div v-else-if="pg.promptLoadError && !pg.promptView" class="p-5">
         <p class="flex items-start gap-2 text-sm text-destructive rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
@@ -148,7 +171,7 @@ const sectionRows = computed(() => {
           <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> <span>{{ pg.promptView.error || t('kb.prompt.errBuild') }}</span>
         </p>
       </div>
-      <div v-else class="overflow-x-auto max-h-[70vh] overflow-y-auto">
+      <div v-else class="overflow-x-auto max-h-[70vh] overflow-y-auto" data-testid="prompt-text">
         <table class="w-full font-mono text-[12.5px] leading-relaxed">
           <tbody>
             <tr v-for="(line, i) in lines" :key="i">
@@ -174,6 +197,10 @@ const sectionRows = computed(() => {
           <dd><Badge variant="secondary" class="font-mono">{{ pg.promptView?.prompt_ref || '—' }}</Badge></dd>
         </div>
         <div class="flex items-center justify-between">
+          <dt class="text-muted-foreground">{{ t('kb.prompt.profile') }}</dt>
+          <dd class="font-medium" data-testid="prompt-profile">{{ profileLabel }}</dd>
+        </div>
+        <div class="flex items-center justify-between">
           <dt class="text-muted-foreground flex items-center gap-1.5"><Ruler class="w-3.5 h-3.5" /> {{ t('kb.prompt.size') }}</dt>
           <dd class="font-medium">{{ pg.promptView ? t('kb.prompt.chars', { n: fmtNumber(pg.promptView.char_count) }) : '—' }}</dd>
         </div>
@@ -186,6 +213,9 @@ const sectionRows = computed(() => {
           <dd>
             <Badge v-if="pg.promptView?.status === 'ok'" class="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
               <BadgeCheck class="w-3.5 h-3.5" /> {{ t('kb.prompt.statusOk') }}
+            </Badge>
+            <Badge v-else-if="pg.promptView?.status === 'not_configured'" class="bg-amber-100 text-amber-800 hover:bg-amber-100">
+              <TriangleAlert class="w-3.5 h-3.5" /> {{ t('kb.prompt.statusNotConfigured') }}
             </Badge>
             <Badge v-else-if="pg.promptView" variant="destructive">
               <CircleAlert class="w-3.5 h-3.5" /> {{ t('common.error') }}

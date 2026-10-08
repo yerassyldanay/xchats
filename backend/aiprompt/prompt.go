@@ -61,6 +61,18 @@ import (
 // contain the markers, so renderServices/renderSpecialists never run for a
 // non-salon organization (strings.ReplaceAll is a no-op on a frame that
 // doesn't carry the marker at all).
+//
+// SlotServiceCatalog/SlotBusinessTerms are the editable-template addition
+// (template.go ComposeFrame): purely structural renderings that carry DATA
+// only, never behavior. SlotServiceCatalog is renderServices' twin whose add-on
+// block states "standalone: forbidden" as a bare attribute — the sentence about
+// declining a standalone add-on now lives in the operator-editable template
+// text, not in renderer output. SlotBusinessTerms exposes the contact/policy
+// prose (address, legal details, callback time, prepayment, installment,
+// warranty) that only the legacy SlotDescriptions slot ever rendered, so a
+// customer's payment-terms question can be answered from the KB. Neither marker
+// appears in any pinned shop-kb@v*/salon-kb@v1 frame, so their renders are
+// unchanged byte for byte.
 const (
 	SlotAssistant           = "%%ASSISTANT%%"
 	SlotKnowledgeBase       = "%%KNOWLEDGE_BASE%%"
@@ -81,6 +93,8 @@ const (
 	SlotResponseSchema      = "%%RESPONSE_SCHEMA%%"
 	SlotServices            = "%%SERVICES%%"
 	SlotSpecialists         = "%%SPECIALISTS%%"
+	SlotServiceCatalog      = "%%SERVICE_CATALOG%%"
+	SlotBusinessTerms       = "%%BUSINESS_TERMS%%"
 )
 
 // BuildPrompt is the explicit two-step orchestration: BuildCatalog validates
@@ -172,6 +186,8 @@ func renderPromptWithSchema(frame string, input *PromptInput, cat *Catalog, sche
 	out = strings.ReplaceAll(out, SlotDeliveryZones, renderDeliveryZones(input.DeliveryZones))
 	out = strings.ReplaceAll(out, SlotServices, renderServices(input, cat))
 	out = strings.ReplaceAll(out, SlotSpecialists, renderSpecialists(input, cat))
+	out = strings.ReplaceAll(out, SlotServiceCatalog, renderServiceCatalog(input, cat))
+	out = strings.ReplaceAll(out, SlotBusinessTerms, renderBusinessTerms(input))
 	out = strings.ReplaceAll(out, SlotResponseSchema, schemaJSON)
 	if err := ValidatePrompt(out, cat); err != nil {
 		return "", err
@@ -249,21 +265,54 @@ func renderDescriptions(input *PromptInput) string {
 			add("Тариф "+t.Name, strings.Join(parts, " "))
 		}
 	}
-	if c := input.Contacts; c != nil {
-		add("Адрес", c.Address)
-		add("Реквизиты", c.LegalInformation)
-		add("Обратный звонок", c.CallbackTime)
+	for _, t := range contactTerms(input.Contacts) {
+		add(t.name, t.text)
 	}
-	if p := input.Policies; p != nil {
-		add("Предоплата", p.Prepayment)
-		add("Рассрочка", p.Installment)
-		add("Гарантия", p.Warranty)
+	for _, t := range policyTerms(input.Policies) {
+		add(t.name, t.text)
 	}
 	for _, z := range input.DeliveryZones {
 		if !active(z.SalesStatus) {
 			continue
 		}
 		add("Доставка — "+z.Name, z.Notes)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// termField is one labelled seller-authored prose field.
+type termField struct{ name, text string }
+
+// contactTerms and policyTerms are the contact/policy prose fields, in render
+// order, shared by the legacy renderDescriptions and renderBusinessTerms so the
+// two can never disagree on labels.
+func contactTerms(c *Contacts) []termField {
+	if c == nil {
+		return nil
+	}
+	return []termField{{"Адрес", c.Address}, {"Реквизиты", c.LegalInformation}, {"Обратный звонок", c.CallbackTime}}
+}
+
+func policyTerms(p *Policies) []termField {
+	if p == nil {
+		return nil
+	}
+	return []termField{{"Предоплата", p.Prepayment}, {"Рассрочка", p.Installment}, {"Гарантия", p.Warranty}}
+}
+
+// renderBusinessTerms renders %%BUSINESS_TERMS%%: one "- <label>: <text>" line
+// per non-empty contact/policy prose field, "—" when there is none.
+func renderBusinessTerms(input *PromptInput) string {
+	var lines []string
+	for _, group := range [][]termField{contactTerms(input.Contacts), policyTerms(input.Policies)} {
+		for _, t := range group {
+			if s := strings.TrimSpace(t.text); s != "" {
+				lines = append(lines, "- "+t.name+": "+s)
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return "—"
 	}
 	return strings.Join(lines, "\n")
 }
@@ -734,14 +783,14 @@ func renderServiceSpecialists(input *PromptInput, refs []string) []string {
 // service and each of its variant/addon children in renderServices) —
 // indent nests a child visually under its parent in the rendered text, in
 // addition to the explicit parent_ref line every non-base service carries.
-func renderServiceBlock(input *PromptInput, cat *Catalog, sv *Service, indent string) []string {
+func renderServiceBlock(input *PromptInput, cat *Catalog, sv *Service, indent, standaloneLine string) []string {
 	lines := []string{indent + "service: " + sv.Ref}
 	if sv.ParentRef != "" {
 		lines = append(lines, indent+"parent_ref: "+sv.ParentRef)
 	}
 	lines = append(lines, indent+"type: "+sv.ServiceType)
 	if sv.ServiceType == "addon" {
-		lines = append(lines, indent+"standalone: forbidden — this add-on must be booked together with its parent base service (see parent_ref); if the client asks for it alone, decline and offer the base service instead")
+		lines = append(lines, indent+standaloneLine)
 	}
 	lines = append(lines, indent+"name: "+sv.Name)
 	if cat.FactByToken("{{service."+sv.Ref+".price}}") != nil {
@@ -767,6 +816,25 @@ func renderServiceBlock(input *PromptInput, cat *Catalog, sv *Service, indent st
 // has a concrete per-service anchor, never just prose the model must
 // remember unaided.
 func renderServices(input *PromptInput, cat *Catalog) string {
+	return renderServicesWith(input, cat, standaloneLineWithBehavior)
+}
+
+// standaloneLineWithBehavior is the pinned salon-kb@v1 add-on line: the
+// attribute AND the instruction to decline and offer the base service. It is
+// frozen — the salon frame and the eval harness depend on its bytes.
+const standaloneLineWithBehavior = "standalone: forbidden — this add-on must be booked together with its parent base service (see parent_ref); if the client asks for it alone, decline and offer the base service instead"
+
+// standaloneLineAttribute is the editable-template path's add-on line: the bare
+// attribute only. What to do about it is operator-editable template text.
+const standaloneLineAttribute = "standalone: forbidden"
+
+// renderServiceCatalog renders the %%SERVICE_CATALOG%% slot — renderServices'
+// structure with the add-on's standalone line reduced to a bare attribute.
+func renderServiceCatalog(input *PromptInput, cat *Catalog) string {
+	return renderServicesWith(input, cat, standaloneLineAttribute)
+}
+
+func renderServicesWith(input *PromptInput, cat *Catalog, standaloneLine string) string {
 	type categoryBlock struct {
 		name  string
 		lines []string
@@ -801,10 +869,10 @@ func renderServices(input *PromptInput, cat *Catalog) string {
 		if len(b.lines) > 0 {
 			b.lines = append(b.lines, "")
 		}
-		b.lines = append(b.lines, renderServiceBlock(input, cat, sv, "")...)
+		b.lines = append(b.lines, renderServiceBlock(input, cat, sv, "", standaloneLine)...)
 		for _, child := range childrenOf[sv.Ref] {
 			b.lines = append(b.lines, "")
-			b.lines = append(b.lines, renderServiceBlock(input, cat, child, "  ")...)
+			b.lines = append(b.lines, renderServiceBlock(input, cat, child, "  ", standaloneLine)...)
 		}
 	}
 
