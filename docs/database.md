@@ -56,13 +56,15 @@ backend/
     20261006000003_ai_knowledge_base.sql       # 3/5 assistant, knowledge tables, drafts, KB-gap telemetry, KB chat
     20261006000004_crm.sql                     # 4/5 customers, identities, statuses, tags, notes, follow-ups
     20261006000005_campaigns_automation.sql    # 5/5 campaigns, templates, send limits, channel automation
+    20261008000000_ai_prompt_templates.sql     # editable prompt templates + assistant profile selection
   internal/dbx/                                # engine access (the only engine-aware code) and the migration runner
   cmd/migration/                               # developer file-generation command
 ```
 
-There is **one file per migration, shared by both engines**. Today's five files hold the
-whole schema: 70 application tables, four inbox views, their constraints and indexes, and
-the required organization/admin/CRM seed rows. Files 2-5 depend only on file 1. Each
+There is **one file per migration, shared by both engines**. Today's six files hold the
+whole schema: 71 application tables, four inbox views, their constraints and indexes, and
+the required organization/admin/CRM/prompt-template seed rows. Files 2-5 depend only on file 1;
+the prompt-template file depends on files 1 and 3. Each
 file is **plain SQL, executed verbatim**: the same bytes run on SQLite and PostgreSQL,
 with no templates, per-engine variants, extensions or functions. The shared contract and
 integration tests guard divergence between the engines; there is no sequential migration
@@ -233,3 +235,26 @@ go run ./cmd/xchats migrate && go run ./cmd/xchats seed && go run ./cmd/xchats s
 
 Set `DATABASE_TARGET` and `WA_DEVICE_DATABASE_TARGET` to separate PostgreSQL
 databases to run the same flow on PostgreSQL.
+
+### Changing an existing table when replay must stay safe
+
+`ADD COLUMN IF NOT EXISTS` does not exist on SQLite, and an applied file may be force-replayed in
+development, so adding a column to an existing table is a **rebuild**: `CREATE TABLE IF NOT EXISTS
+<table>_next`, copy with explicit columns, `DROP TABLE <table>`, `ALTER TABLE <table>_next RENAME TO
+<table>`. To keep values an earlier run (or an operator) already stored, copy through a one-row
+defaults relation joined with `NATURAL LEFT JOIN`: on the first run the old table lacks the new
+columns, there is no common column, and the defaults supply the values; on a replay the new columns
+exist, so the existing row's values win. `20261008000000_ai_prompt_templates.sql` does this for
+`ai_assistants.prompt_template_id` and `ai_assistants.configured`, and
+`internal/dbtest/templates_test.go` proves, on both engines, that a forced replay keeps the selected
+profile, the setup status and every edited template. PostgreSQL gives the implicitly named
+constraints of each rebuilt table a non-colliding name, so replays do not clash.
+
+### Seeding rows that belong to every organization
+
+Rows every organization needs (the four `ai_prompt_templates` rows) are seeded twice with the same
+protection: the migration inserts them for the organizations that exist (`INSERT ... SELECT ... FROM
+organizations WHERE TRUE ON CONFLICT DO NOTHING`; `WHERE TRUE` disambiguates SQLite's parse of an
+upsert after `INSERT ... SELECT`), and `store.SeedOrganization` (`EnsurePromptTemplates`) does it for
+a business created later. Neither can duplicate a row or overwrite an operator's edit. The seed text
+comes from `backend/aiprompt/templates/*.txt`, and a test pins the migration's literals to those files.

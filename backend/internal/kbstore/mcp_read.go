@@ -117,7 +117,7 @@ func (s *Store) identityIndex(ctx context.Context, db dbtx, orgID uuid.UUID, typ
 		// migration always seeded one; that pair nets to zero today.
 		var existsLive bool
 		if err := db.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM ai_assistants WHERE organization_id = $1)`, orgID).
+			`SELECT EXISTS(SELECT 1 FROM ai_assistants WHERE organization_id = $1 AND configured)`, orgID).
 			Scan(&existsLive); err != nil {
 			return nil, err
 		}

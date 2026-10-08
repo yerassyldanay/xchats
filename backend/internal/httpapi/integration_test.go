@@ -99,6 +99,10 @@ type harness struct {
 	// CompleteMaterialUpload) rather than going through the MCP tool surface
 	// just to get a material into the database.
 	kb *kbstore.Store
+	// kbCache is the same CachedKBRepo the Server reads the prompt-facing KB
+	// through — exposed so a test that edits the database directly can drop the
+	// cached build (invalidateKB), exactly as every /kb/* write does.
+	kbCache *responsestore.CachedKBRepo
 	// blob is the same blob.Store the Server serves bytes from — exposed so
 	// a seeded kbd_materials row's storage_key resolves to real bytes.
 	blob blob.Store
@@ -339,7 +343,7 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	ts := httptest.NewServer(srv.Router())
 	jar, _ := cookiejar.New(nil)
 	h := &harness{t: t, srv: ts, client: &http.Client{Jar: jar}, cfg: cfg, fake: fake, tg: tgFake,
-		queue: q, store: st, kb: kb, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller,
+		queue: q, store: st, kb: kb, kbCache: cachedKB, blob: blobStore, db: db, worker: w, orgID: org.ID, accountID: accountID, tgPoller: tgPoller,
 		kbImport: kbImportSvc, kbImportSettings: kbImportSettings, kbImportCreds: kbImportCreds,
 		chatLLM: chatLLM}
 	// st/db/kb/kbRepo are all closed by dbtest's own t.Cleanup registrations.
@@ -347,6 +351,9 @@ func newHarnessWithLLM(t *testing.T, llmClient llm.ChatClient) *harness {
 	h.login()
 	return h
 }
+
+// invalidateKB drops the cached prompt-facing KB for the harness's org.
+func (h *harness) invalidateKB() { h.kbCache.Invalidate(h.orgID) }
 
 func (h *harness) login() {
 	body, _ := json.Marshal(map[string]string{"email": adminEmail, "password": adminPass})

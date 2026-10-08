@@ -226,11 +226,12 @@ func (s *Store) SeedLiveIfEmpty(ctx context.Context, orgID uuid.UUID, seed *doma
 	defer tx.Rollback(ctx)
 
 	if _, err := tx.Exec(ctx, `INSERT INTO ai_assistants
-		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6, $7, $8, $8)
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at, configured)
+		VALUES ($1,$2,$3,$4,$5,$6, $7, $8, $8, TRUE)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = EXCLUDED.persona, mission = EXCLUDED.mission, guardrails = EXCLUDED.guardrails,
-			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = EXCLUDED.updated_at`,
+			language_policy = EXCLUDED.language_policy, reply_max_words = EXCLUDED.reply_max_words, updated_at = EXCLUDED.updated_at,
+			configured = TRUE`,
 		orgID, seed.Config.Persona, seed.Config.Mission, seed.Config.Guardrails,
 		seed.Config.LanguagePolicy, orDefaultInt(seed.Config.ReplyMaxWords, 120), uuid.New(), now); err != nil {
 		return err
@@ -735,16 +736,21 @@ func nonNilStrings(v []string) []string {
 func upsertConfigRow(ctx context.Context, tx execer, orgID uuid.UUID, p ConfigPatch) error {
 	now := time.Now()
 
+	// configured = TRUE on both paths: this is the settings write that makes the
+	// assistant "set up". It never touches prompt_template_id, so a profile
+	// chosen earlier (templates.go, which stubs the row with configured = FALSE
+	// when no settings exist yet) survives the first real settings save.
 	_, err := tx.Exec(ctx, `INSERT INTO ai_assistants
-		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at)
-		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120), $7, $8, $8)
+		(organization_id, persona, mission, guardrails, language_policy, reply_max_words, id, created_at, updated_at, configured)
+		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5,''), COALESCE($6,120), $7, $8, $8, TRUE)
 		ON CONFLICT (organization_id) DO UPDATE SET
 			persona = COALESCE($2, ai_assistants.persona),
 			mission = COALESCE($3, ai_assistants.mission),
 			guardrails = COALESCE($4, ai_assistants.guardrails),
 			language_policy = COALESCE($5, ai_assistants.language_policy),
 			reply_max_words = COALESCE($6, ai_assistants.reply_max_words),
-			updated_at = EXCLUDED.updated_at`,
+			updated_at = EXCLUDED.updated_at,
+			configured = TRUE`,
 		orgID, p.Persona, p.Mission, p.Guardrails, p.LanguagePolicy, p.ReplyMaxWords, uuid.New(), now)
 	return err
 }

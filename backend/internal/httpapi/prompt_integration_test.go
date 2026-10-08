@@ -25,6 +25,7 @@ import (
 // own copy of that shape rather than reaching into httpapi internals.
 type promptPayload struct {
 	PromptRef     string `json:"prompt_ref"`
+	TemplateID    string `json:"template_id"`
 	RenderedText  string `json:"rendered_text"`
 	FrameText     string `json:"frame_text"`
 	CharCount     int    `json:"char_count"`
@@ -43,8 +44,8 @@ type promptPayload struct {
 
 // TestKBPrompt_OkWithSeededKB proves GET /kb/prompt renders the exact prompt
 // the response engine would use for newHarness's seeded org (brain.SeedSnapshot,
-// via kb.SeedLiveIfEmpty): status ok, the pinned prompt_ref, the ЗОНЫ ДОСТАВКИ
-// section marker and a product block present, and section_counts matching the
+// via kb.SeedLiveIfEmpty): status ok, the template-based prompt_ref, the ЗОНЫ
+// ДОСТАВКИ section marker and a product block present, and section_counts matching the
 // seeded row counts (3 tariffs, 2 products, 5 topics, 1 contacts row, 1
 // policies row — brain/seed.go).
 func TestKBPrompt_OkWithSeededKB(t *testing.T) {
@@ -55,8 +56,8 @@ func TestKBPrompt_OkWithSeededKB(t *testing.T) {
 	if got.Status != "ok" {
 		t.Fatalf("status = %q, want ok (error=%q)", got.Status, got.Error)
 	}
-	if got.PromptRef != "shop-kb@v7" {
-		t.Fatalf("prompt_ref = %q, want shop-kb@v7", got.PromptRef)
+	if !strings.HasPrefix(got.PromptRef, "template:general@") || got.TemplateID != "general" {
+		t.Fatalf("prompt_ref/template_id = %q/%q, want template:general@<revision>/general", got.PromptRef, got.TemplateID)
 	}
 	if !strings.Contains(got.RenderedText, "ЗОНЫ ДОСТАВКИ") {
 		t.Fatalf("rendered_text missing the ЗОНЫ ДОСТАВКИ section marker:\n%s", got.RenderedText)
@@ -82,8 +83,8 @@ func TestKBPrompt_OkWithSeededKB(t *testing.T) {
 	if got.ApproxTokens != got.CharCount/4 {
 		t.Fatalf("approx_tokens = %d, want %d (char_count/4)", got.ApproxTokens, got.CharCount/4)
 	}
-	if !strings.Contains(got.FrameText, "%%PRODUCTS_AVAILABLE%%") {
-		t.Fatalf("frame_text should be the raw frame with unfilled slots")
+	if !strings.Contains(got.FrameText, "%%PRODUCTS_AVAILABLE%%") || !strings.Contains(got.FrameText, "%%RESPONSE_SCHEMA%%") {
+		t.Fatalf("frame_text should be the composed frame with unfilled slots")
 	}
 }
 
@@ -124,23 +125,24 @@ func TestKBPrompt_InvalidationOnWrite(t *testing.T) {
 	}
 }
 
-// TestKBPrompt_ErrorWhenNotConfigured proves an org with no ai_assistants row
-// at all (never seeded, never kb-load-ed) gets an honest status:"error" —
-// never a hardcoded or fabricated prompt — with the exact
-// responsestore.ErrKBNotConfigured message surfaced.
-func TestKBPrompt_ErrorWhenNotConfigured(t *testing.T) {
+// TestKBPrompt_NotConfiguredStillPreviewsDefaultInstructions proves an org
+// with no assistant settings (never seeded, never kb-load-ed) gets an honest
+// status:"not_configured" that explains why the assistant will not reply yet —
+// and still shows the default instructions it will run on, instead of a blank
+// error. Never a fabricated KB: the empty KB contributes no data sections.
+func TestKBPrompt_NotConfiguredStillPreviewsDefaultInstructions(t *testing.T) {
 	h := newPromptHarness(t)
 	var got promptPayload
 	h.get("/xchats/api/v1/kb/prompt", &got)
 
-	if got.Status != "error" {
-		t.Fatalf("status = %q, want error (rendered_text=%q)", got.Status, got.RenderedText)
+	if got.Status != "not_configured" {
+		t.Fatalf("status = %q, want not_configured (rendered_text=%q)", got.Status, got.RenderedText)
 	}
 	if !strings.Contains(got.Error, "not configured") {
 		t.Fatalf("error = %q, want it to mention the KB is not configured", got.Error)
 	}
-	if got.RenderedText != "" {
-		t.Fatalf("rendered_text should be empty on error, got %q", got.RenderedText)
+	if !strings.Contains(got.RenderedText, "ИСТОЧНИК ФАКТОВ") || strings.Contains(got.RenderedText, "product: ") {
+		t.Fatalf("the preview should show the default instructions and no KB data:\n%.300s", got.RenderedText)
 	}
 }
 

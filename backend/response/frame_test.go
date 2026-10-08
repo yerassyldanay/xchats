@@ -1,106 +1,156 @@
 package response
 
 import (
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yerassyldanay/xchats/backend/aiprompt"
+	"github.com/yerassyldanay/xchats/backend/llm"
 	"github.com/yerassyldanay/xchats/backend/messaging"
 )
 
-// TestFrameForChannel pins the mapping GenerateRequest.Channel now drives.
-// The WhatsApp and simulator rows are the important ones: they must stay on the
-// same byte-identical frame, so adding Telegram cannot move the prompt the
-// schema_kb_v1 eval grades. Every row moved v6 -> v7 in 2026-09 (v6 had no
-// structured way for an escalation to report why — see aiprompt.frameFor's
-// doc comment); the pairing that actually matters is that frameFor and
-// PromptRefFor never disagree, since a draft stamped with a ref whose frame
-// did not produce it is unreproducible.
-func TestFrameForChannel(t *testing.T) {
+// withTemplate returns a shallow copy of kb carrying template id/text.
+func withTemplate(kb *aiprompt.KB, id, text string, updated time.Time) *aiprompt.KB {
+	c := *kb
+	c.PromptTemplate = &aiprompt.PromptTemplate{ID: id, Instructions: text, UpdatedAt: updated}
+	return &c
+}
+
+// Channels are handled automatically by a channel fact line: there is no
+// per-channel (or per-vertical) frame to select and no Telegram profile.
+func TestFrameFor_ChannelLine(t *testing.T) {
+	kb := withTemplate(testKB(), "general", "ПРАВИЛА-МАРКЕР", time.Time{})
 	cases := []struct {
-		channel   messaging.Channel
-		want      string
-		wantRef   string
-		wantLabel string
+		channel messaging.Channel
+		want    string // "" = no channel line at all
 	}{
-		{messaging.ChannelWhatsApp, aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "whatsapp"},
-		{messaging.ChannelSimulator, aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "simulator"},
-		{messaging.ChannelTelegram, aiprompt.FrameShopKBV7TGRU(), aiprompt.PromptRefShopKBV7TG, "telegram"},
-		{messaging.Channel(""), aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "unset"},
-		{messaging.Channel("something-else"), aiprompt.FrameShopKBV7RU(), aiprompt.PromptRefShopKBV7, "unknown"},
+		{messaging.ChannelWhatsApp, "WhatsApp"},
+		{messaging.ChannelWhatsAppCloud, "WhatsApp"},
+		{messaging.ChannelSimulator, "WhatsApp"}, // the simulator rehearses the WhatsApp path
+		{messaging.ChannelTelegram, "Telegram"},
+		{messaging.ChannelInstagram, "Instagram"},
+		{messaging.ChannelMessenger, "Facebook Messenger"},
+		{messaging.Channel(""), ""},
+		{messaging.Channel("something-else"), ""},
 	}
 	for _, tc := range cases {
-		t.Run(tc.wantLabel, func(t *testing.T) {
-			if got := FrameFor(nil, tc.channel); got != tc.want {
-				t.Fatalf("FrameFor(nil, %q) picked the wrong frame", tc.channel)
+		t.Run(string(tc.channel)+"/"+tc.want, func(t *testing.T) {
+			frame := FrameFor(kb, tc.channel)
+			if !strings.HasPrefix(frame, "ПРАВИЛА-МАРКЕР\n\n") {
+				t.Fatalf("the template instructions must lead the frame: %.60q", frame)
 			}
-			if got := PromptRefFor(nil, tc.channel); got != tc.wantRef {
-				t.Fatalf("PromptRefFor(nil, %q) = %q, want %q", tc.channel, got, tc.wantRef)
+			if tc.want == "" {
+				if strings.Contains(frame, aiprompt.ChannelLinePrefix) {
+					t.Errorf("no channel line expected for %q", tc.channel)
+				}
+				return
 			}
-		})
-	}
-}
-
-// TestFrameForSalon pins the salon-kb@v1 selection rule (PLAN.md): any
-// specialist or service row picks the salon frame over shop-kb@v7,
-// regardless of channel, and FrameFor/PromptRefFor never disagree about it.
-func TestFrameForSalon(t *testing.T) {
-	withSpecialist := &aiprompt.KB{Specialists: []aiprompt.Specialist{{Ref: "alina"}}}
-	withService := &aiprompt.KB{Services: []aiprompt.Service{{Ref: "haircut"}}}
-	empty := &aiprompt.KB{}
-
-	for _, tc := range []struct {
-		label   string
-		kb      *aiprompt.KB
-		channel messaging.Channel
-		wantSalon bool
-	}{
-		{"specialist-whatsapp", withSpecialist, messaging.ChannelWhatsApp, true},
-		{"specialist-telegram", withSpecialist, messaging.ChannelTelegram, true},
-		{"service-only", withService, messaging.ChannelWhatsApp, true},
-		{"no-salon-data", empty, messaging.ChannelWhatsApp, false},
-		{"nil-kb", nil, messaging.ChannelWhatsApp, false},
-	} {
-		t.Run(tc.label, func(t *testing.T) {
-			gotFrame := FrameFor(tc.kb, tc.channel)
-			gotRef := PromptRefFor(tc.kb, tc.channel)
-			if tc.wantSalon {
-				if gotFrame != aiprompt.FrameSalonKBV1RU() {
-					t.Errorf("FrameFor: want the salon frame, got a different one")
-				}
-				if gotRef != aiprompt.PromptRefSalonKBV1 {
-					t.Errorf("PromptRefFor = %q, want %q", gotRef, aiprompt.PromptRefSalonKBV1)
-				}
-			} else {
-				if gotFrame == aiprompt.FrameSalonKBV1RU() {
-					t.Errorf("FrameFor: unexpectedly picked the salon frame")
-				}
-				if gotRef == aiprompt.PromptRefSalonKBV1 {
-					t.Errorf("PromptRefFor: unexpectedly picked the salon ref")
-				}
+			if !strings.Contains(frame, aiprompt.ChannelLinePrefix+tc.want+".") {
+				t.Errorf("channel line for %q missing: want %q", tc.channel, tc.want)
 			}
 		})
 	}
-}
-
-func TestTelegramFrameIsADistinctFrame(t *testing.T) {
-	if aiprompt.FrameShopKBV7TGRU() == aiprompt.FrameShopKBV7RU() {
-		t.Fatal("the Telegram frame is identical to the WhatsApp one — the persona line was not neutralized")
+	// Frames for different channels differ ONLY in the channel line.
+	wa := strings.Replace(FrameFor(kb, messaging.ChannelWhatsApp), "WhatsApp", "X", 1)
+	tg := strings.Replace(FrameFor(kb, messaging.ChannelTelegram), "Telegram", "X", 1)
+	if wa != tg {
+		t.Error("channel must be the only difference between frames")
 	}
 }
 
-// TestFrameForChannel_ServesTariffCapableFrame is the regression guard for the
-// bug v5 exists to fix: whatever frame a channel gets, it must be able to carry
-// tariffs. v6 carries tariffs through SlotTariffCatalog rather than v5's
-// SlotTariffs (see prompt.go's slot doc comment) — a future frame bump that
-// drops it would put every tariff back out of the model's reach without
-// failing any other test here.
-func TestFrameForChannel_ServesTariffCapableFrame(t *testing.T) {
-	for _, ch := range []messaging.Channel{
-		messaging.ChannelWhatsApp, messaging.ChannelSimulator, messaging.ChannelTelegram, messaging.Channel(""),
-	} {
-		if !strings.Contains(FrameFor(nil, ch), aiprompt.SlotTariffCatalog) {
-			t.Errorf("FrameFor(nil, %q) returned a frame with no %s slot — tariffs would be invisible to the model", ch, aiprompt.SlotTariffCatalog)
+func TestFrameFor_NoTemplateNoFrame(t *testing.T) {
+	if FrameFor(nil, messaging.ChannelWhatsApp) != "" || FrameFor(&aiprompt.KB{}, messaging.ChannelWhatsApp) != "" {
+		t.Error("a KB without a template has no frame")
+	}
+	if got := PromptRefFor(nil); got != "template:none" {
+		t.Errorf("PromptRefFor(nil) = %q", got)
+	}
+}
+
+func TestPromptRefFor(t *testing.T) {
+	at := time.UnixMilli(1791417612345)
+	if got := PromptRefFor(withTemplate(testKB(), "online-shop", "x", at)); got != "template:online-shop@1791417612345" {
+		t.Errorf("ref = %q", got)
+	}
+	if got := PromptRefFor(withTemplate(testKB(), "general", "x", time.Time{})); got != "template:general@default" {
+		t.Errorf("ref of a never-saved template = %q", got)
+	}
+}
+
+// Products, tariffs, services and specialists appear together whenever present,
+// whichever profile is active — the old salon-vs-shop frame switch is gone.
+func TestFrameFor_SectionsFollowDataNotProfile(t *testing.T) {
+	kb := testKB()
+	kb.Services = []aiprompt.Service{{Ref: "haircut", ServiceType: "base", Name: "Стрижка", SalesStatus: "active"}}
+	kb.Specialists = []aiprompt.Specialist{{Ref: "alina", FullName: "Алина", SalesStatus: "active"}}
+	for _, id := range aiprompt.PromptTemplateIDs() {
+		frame := FrameFor(withTemplate(kb, id, "x", time.Time{}), messaging.ChannelWhatsApp)
+		for _, label := range []string{aiprompt.LabelProductsAvailable, aiprompt.LabelServices, aiprompt.LabelSpecialists} {
+			if !strings.Contains(frame, label) {
+				t.Errorf("profile %s: frame lacks %q although the KB has that data", id, label)
+			}
 		}
+	}
+}
+
+// RenderSystemPrompt is the single builder both the preview and Generate use.
+func TestRenderSystemPrompt(t *testing.T) {
+	kb := withTemplate(testKB(), "general", "ПРАВИЛА-МАРКЕР", time.UnixMilli(1791417612345))
+	sys, cat, err := RenderSystemPrompt(kb, messaging.ChannelTelegram)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat == nil || sys.TemplateID != "general" || sys.Ref != "template:general@1791417612345" {
+		t.Errorf("metadata = %+v", sys)
+	}
+	if !strings.Contains(sys.Text, "ПРАВИЛА-МАРКЕР") || !strings.Contains(sys.Text, "product: widget") ||
+		!strings.Contains(sys.Text, aiprompt.ChannelLinePrefix+"Telegram.") || strings.Contains(sys.Text, "%%") {
+		t.Errorf("rendered prompt incomplete:\n%s", sys.Text)
+	}
+	if sys.Frame != FrameFor(kb, messaging.ChannelTelegram) {
+		t.Error("Frame must be exactly FrameFor's output")
+	}
+
+	if _, _, err := RenderSystemPrompt(nil, messaging.ChannelWhatsApp); err == nil {
+		t.Error("nil KB must error")
+	}
+	noTpl := testKB()
+	noTpl.PromptTemplate = nil
+	if _, _, err := RenderSystemPrompt(noTpl, messaging.ChannelWhatsApp); !errors.Is(err, ErrNoPromptTemplate) {
+		t.Errorf("a KB without a template must fail with ErrNoPromptTemplate, got %v", err)
+	}
+}
+
+// Generate must send exactly the prompt the preview shows, built from the KB's
+// template and its CURRENT data.
+func TestGenerate_UsesTemplateAndCurrentKB(t *testing.T) {
+	client := &fakeClient{responses: []llm.ChatResponse{{Text: responseJSON("Здравствуйте", nil, false, "")}}}
+	e := testEngine(client)
+	lastPrompt := func() string { return client.calls[len(client.calls)-1].Messages[0].Content }
+
+	kb := withTemplate(testKB(), "online-shop", "ПРАВИЛА-ОТ-ОПЕРАТОРА", time.UnixMilli(1791417612345))
+	if _, err := e.Generate(t.Context(), GenerateRequest{KB: kb, Channel: messaging.ChannelWhatsApp, IncomingText: "Привет"}); err != nil {
+		t.Fatal(err)
+	}
+	sys, _, _ := RenderSystemPrompt(kb, messaging.ChannelWhatsApp)
+	if !strings.HasPrefix(lastPrompt(), sys.Text) {
+		t.Fatal("the model prompt must begin with exactly the preview text")
+	}
+	if !strings.Contains(lastPrompt(), "ПРАВИЛА-ОТ-ОПЕРАТОРА") {
+		t.Error("the operator's template text did not reach the model")
+	}
+
+	// New KB data shows up on the very next call, and an edited template text too.
+	kb2 := withTemplate(kb, "online-shop", "ДРУГИЕ-ПРАВИЛА", time.UnixMilli(1791417699999))
+	kb2.Products = append(append([]aiprompt.Product{}, kb.Products...),
+		aiprompt.Product{Ref: "gadget", Name: "Гаджет", Price: "2 000 ₸", AvailabilityStatus: "in_stock", SalesStatus: "active"})
+	if _, err := e.Generate(t.Context(), GenerateRequest{KB: kb2, Channel: messaging.ChannelWhatsApp, IncomingText: "Привет"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lastPrompt(), "ДРУГИЕ-ПРАВИЛА") || strings.Contains(lastPrompt(), "ПРАВИЛА-ОТ-ОПЕРАТОРА") ||
+		!strings.Contains(lastPrompt(), "product: gadget") {
+		t.Error("the second call must use the edited template and the new product")
 	}
 }

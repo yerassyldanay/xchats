@@ -604,6 +604,7 @@ func (s *Server) Router() *gin.Engine {
 	// redesign").
 	auth.GET("/kb", s.handleKBGet)
 	auth.GET("/kb/prompt", s.handleKBPrompt)
+	auth.GET("/kb/templates", s.handleKBGetTemplates)
 	auth.GET("/kb/gaps", s.handleKBGaps)
 	kb := auth.Group("/kb")
 	kb.POST("/topics", s.handleKBUpsertTopic)
@@ -627,6 +628,7 @@ func (s *Server) Router() *gin.Engine {
 	kb.POST("/materials", s.handleKBUploadMaterial)
 	kb.GET("/materials/:id/content", s.handleKBMaterialContent)
 	kb.PATCH("/config", s.handleKBPatchConfig)
+	kb.PUT("/templates/:id", s.handleKBPutTemplate)
 
 	// Structured import pipeline (internal/kbimport) — submit URLs/documents,
 	// extract, and synthesize into kbd_draft. Deliberately NOT an extension
