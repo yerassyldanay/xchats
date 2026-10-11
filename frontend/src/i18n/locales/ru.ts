@@ -1869,6 +1869,9 @@ export default {
     organization: 'Организация',
     language: 'Язык',
     logout: 'Выйти',
+    collapseMenu: 'Свернуть меню',
+    expandMenu: 'Развернуть меню',
+    primary: 'Основная навигация',
   },
   login: {
     heroLine1: 'Командный инбокс',

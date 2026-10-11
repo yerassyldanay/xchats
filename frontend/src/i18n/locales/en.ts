@@ -1869,6 +1869,9 @@ export default {
     organization: 'Organization',
     language: 'Language',
     logout: 'Log out',
+    collapseMenu: 'Collapse menu',
+    expandMenu: 'Expand menu',
+    primary: 'Primary navigation',
   },
   login: {
     heroLine1: 'Team inbox',

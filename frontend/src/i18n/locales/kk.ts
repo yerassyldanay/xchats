@@ -1672,6 +1672,9 @@ export default {
     organization: 'Ұйым',
     language: 'Тіл',
     logout: 'Шығу',
+    collapseMenu: 'Мәзірді жию',
+    expandMenu: 'Мәзірді ашу',
+    primary: 'Негізгі навигация',
   },
   login: {
     heroLine1: 'Топтық инбокс',
