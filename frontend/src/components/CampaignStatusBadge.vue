@@ -7,7 +7,7 @@ import type { CampaignStatus } from '@/types'
 const props = defineProps<{ status: CampaignStatus }>()
 const { t } = useI18n()
 
-// Mirrors AutomationStatusBadge's own tone vocabulary: draft/cancelled read
+// Tone vocabulary: draft/cancelled read
 // as neutral, scheduled/paused as informational-waiting, running as active,
 // completed as a positive done state, failed as an error.
 const toneMeta: Record<CampaignStatus, { variant: 'neutral' | 'soft' | 'success' | 'warning' | 'danger'; dot: string }> = {

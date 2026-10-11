@@ -703,6 +703,10 @@ export default {
       hide: 'Hide',
     },
     aiEngine: {
+      advanced: {
+        title: 'Advanced settings',
+        hint: "You usually don't need to change these.",
+      },
       title: 'AI response engine',
       subtitle: 'Choose which configured provider and model draft replies.',
       defaultProvider: 'Default provider',
@@ -1340,6 +1344,12 @@ export default {
   },
   automation: {
     button: 'Automation',
+    row: {
+      label: 'AI suggestions',
+      off: 'Off',
+      suggestions: 'On',
+      scheduled_auto: 'Auto-reply on schedule',
+    },
     badge: {
       off: 'Automation off',
       suggestions: 'Suggestions',

@@ -37,7 +37,7 @@ onMounted(() => {
   <div class="space-y-6">
     <h3 class="font-semibold">{{ t('settings.backup.title') }}</h3>
 
-    <div class="rounded-lg border border-border bg-card p-5 space-y-3">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-3">
       <h4 class="font-medium">{{ t('settings.backup.downloadTitle') }}</h4>
       <p class="text-sm text-muted-foreground">{{ t('settings.backup.downloadBody') }}</p>
       <a :href="backupHref">
@@ -45,7 +45,7 @@ onMounted(() => {
       </a>
     </div>
 
-    <div class="rounded-lg border border-border bg-card p-5 space-y-3">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-3">
       <h4 class="font-medium">{{ t('settings.backup.credentialStorageTitle') }}</h4>
       <p class="text-sm text-muted-foreground">{{ t('settings.backup.credentialStorageBody') }}</p>
       <label class="flex items-center gap-2">
@@ -54,7 +54,7 @@ onMounted(() => {
       </label>
     </div>
 
-    <div class="rounded-lg border border-border bg-card p-5 space-y-3">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-3">
       <h4 class="font-medium">{{ t('settings.backup.versionTitle') }}</h4>
       <p class="text-sm text-muted-foreground">
         {{ t('settings.backup.versionCurrent') }} <span class="font-mono">{{ store.updateCheck?.current_version ?? '…' }}</span>
@@ -80,7 +80,7 @@ onMounted(() => {
       </Button>
     </div>
 
-    <div v-if="store.settings?.storage_locations" class="rounded-lg border border-border bg-card p-5 space-y-3">
+    <div v-if="store.settings?.storage_locations" class="rounded-2xl border border-border bg-card p-6 space-y-3">
       <h4 class="font-medium">{{ t('settings.backup.storageLocationsTitle') }}</h4>
       <p class="text-sm text-muted-foreground">{{ t('settings.backup.storageLocationsBody') }}</p>
       <dl class="grid grid-cols-1 sm:grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">

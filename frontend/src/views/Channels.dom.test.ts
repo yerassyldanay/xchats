@@ -449,3 +449,76 @@ describe('Channels — channel-type filter pills', () => {
     expect(w.findComponent(AddAccountDialog).props('startChannel')).toBe('telegram')
   })
 })
+
+describe('Channels — per-row AI suggestions switch', () => {
+  const schedule = [{ weekday: 1, start_minute: 540, end_minute: 1080 }]
+  function account(mode: 'off' | 'suggestions' | 'scheduled_auto'): Account {
+    return {
+      id: 'acct-1',
+      channel: 'whatsapp',
+      display_name: 'Qazan Home · Sales',
+      external_handle: '77001234567',
+      connection_state: 'connected',
+      assigned: true,
+      last_live_event_at: null,
+      created_at: null,
+      webhook_url: null,
+      webhook_registered_at: null,
+      webhook_last_checked_at: null,
+      webhook_last_error: null,
+      automation: { mode, wait_seconds: 10, wait_seconds_override: 10, default_wait_seconds: 5, schedule },
+    }
+  }
+
+  async function mountWith(mode: 'off' | 'suggestions' | 'scheduled_auto') {
+    const { api } = await installServer({ isAdmin: true })
+    vi.mocked(api.put).mockImplementation(async (path: string, body: any) => {
+      if (path === '/accounts/acct-1/automation') return { ...account(body.mode), automation: { ...account(body.mode).automation, ...body } } as any
+      throw new Error(`unexpected PUT ${path}`)
+    })
+    const { wrapper: w } = await mountChannels(admin())
+    useAccounts().accounts = [account(mode)]
+    await flushPromises()
+    return { w, api }
+  }
+
+  it('shows the account as a row with its AI state, and the switch reflects "on"', async () => {
+    const { w } = await mountWith('suggestions')
+    const row = w.get('[data-testid="account-row"]')
+    expect(row.text()).toContain('Qazan Home · Sales')
+    expect(row.get('[data-testid="account-ai-state"]').text()).toBe('Включено')
+    expect(row.get('[data-testid="account-ai-toggle"]').attributes('aria-checked')).toBe('true')
+  })
+
+  it('switching off keeps the wait override and schedule (the endpoint is a full replace)', async () => {
+    const { w, api } = await mountWith('suggestions')
+    await w.get('[data-testid="account-ai-toggle"]').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith('/accounts/acct-1/automation', { mode: 'off', wait_seconds_override: 10, schedule })
+    expect(w.get('[data-testid="account-ai-state"]').text()).toBe('Выключено')
+  })
+
+  it('switching back on restores the mode it had before — auto-reply is not silently downgraded', async () => {
+    const { w, api } = await mountWith('scheduled_auto')
+    await w.get('[data-testid="account-ai-toggle"]').trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="account-ai-toggle"]').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenLastCalledWith('/accounts/acct-1/automation', { mode: 'scheduled_auto', wait_seconds_override: 10, schedule })
+  })
+
+  it('an account that was always off turns on as "suggestions"', async () => {
+    const { w, api } = await mountWith('off')
+    await w.get('[data-testid="account-ai-toggle"]').trigger('click')
+    await flushPromises()
+    expect(api.put).toHaveBeenCalledWith('/accounts/acct-1/automation', { mode: 'suggestions', wait_seconds_override: 10, schedule })
+  })
+
+  it('a failed save is reported on the row instead of being swallowed', async () => {
+    const { w, api } = await mountWith('suggestions')
+    vi.mocked(api.put).mockRejectedValueOnce(new Error('boom'))
+    await w.get('[data-testid="account-ai-toggle"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-testid="account-row"]').text()).toContain('Не удалось')
+  })
+})

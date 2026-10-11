@@ -18,14 +18,15 @@ import {
 import { useAccounts } from '../stores/accounts'
 import { useChannelSetup } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
-import { connStatus, initials, colorFor, type ConnTone } from '../lib/format'
+import { connStatus, type ConnTone } from '../lib/format'
 import AddAccountDialog from '../components/AddAccountDialog.vue'
 import ReplaceTokenDialog from '../components/ReplaceTokenDialog.vue'
-import AutomationStatusBadge from '../components/AutomationStatusBadge.vue'
 import AutomationSettingsDialog from '../components/AutomationSettingsDialog.vue'
 import ChannelSetupTab from '../components/channels/ChannelSetupTab.vue'
-import type { Account, ConnectableChannel } from '../types'
+import type { Account, AutomationMode, ConnectableChannel } from '../types'
 import { Button } from '@/components/ui/button'
+import { Chip } from '@/components/ui/chip'
+import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
@@ -48,6 +49,31 @@ const working = ref<string | null>(null)
 // actionError surfaces a failed retry/check on the card that caused it, rather
 // than as a toast that disappears before anyone reads it.
 const actionError = ref<Record<string, string>>({})
+
+// The row's «ИИ-подсказки» switch is the simple on/off of the account's
+// automation: off → 'off', on → back to the mode it had before it was switched
+// off ('suggestions' if it never had one). The clock button still opens the
+// full dialog (auto-reply, schedule, wait time); the switch preserves those
+// settings, since the endpoint is a full replace.
+const lastActiveMode = new Map<string, AutomationMode>()
+async function toggleAi(a: Account, on: boolean) {
+  if (working.value === a.id) return
+  if (!on && a.automation.mode !== 'off') lastActiveMode.set(a.id, a.automation.mode)
+  const mode: AutomationMode = on ? (lastActiveMode.get(a.id) ?? 'suggestions') : 'off'
+  working.value = a.id
+  actionError.value = { ...actionError.value, [a.id]: '' }
+  try {
+    await accounts.updateAutomation(a.id, {
+      mode,
+      wait_seconds_override: a.automation.wait_seconds_override,
+      schedule: a.automation.schedule,
+    })
+  } catch (e) {
+    actionError.value = { ...actionError.value, [a.id]: e instanceof ApiError ? e.message : t('accounts.page.errGenericAction') }
+  } finally {
+    working.value = null
+  }
+}
 // connectionBanner surfaces the ONE-SHOT ?instagram_connected / ?instagram_error
 // (or their messenger_* twins) query params a redirect back from Meta's
 // OAuth consent screen lands with (see AddAccountDialog.vue's
@@ -331,27 +357,25 @@ async function remove(a: Account) {
   <div class="h-full flex bg-background">
     <!-- main column -->
     <div class="flex-1 flex flex-col min-w-0">
-      <header class="px-8 py-5 flex items-center justify-between border-b border-border bg-card shrink-0">
+      <header class="flex shrink-0 flex-wrap items-start justify-between gap-4 px-10 pb-5 pt-10">
         <div>
-          <h1 class="text-xl font-bold tracking-tight">{{ t('accounts.page.title') }}</h1>
-          <p class="text-sm text-muted-foreground">{{ t('accounts.page.subtitle') }}</p>
+          <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('accounts.page.title') }}</h1>
+          <p class="text-base text-muted-foreground">{{ t('accounts.page.subtitle') }}</p>
         </div>
-        <div class="flex items-center gap-3">
-          <Button @click="openAdd">
-            <Plus class="w-4 h-4" /> {{ t('accounts.page.connectChannel') }}
-          </Button>
-        </div>
+        <Button @click="openAdd">
+          <Plus class="w-[17px] h-[17px]" /> {{ t('accounts.page.connectChannel') }}
+        </Button>
       </header>
 
       <Tabs v-model="activeTab" class="flex-1 flex flex-col min-h-0">
-        <div class="px-8 pt-4 border-b border-border bg-card shrink-0">
-          <TabsList>
+        <div class="shrink-0 px-10">
+          <TabsList variant="underline" class="border-[#EBEBEB]">
             <TabsTrigger value="accounts">{{ t('accounts.page.tabs.accounts') }}</TabsTrigger>
             <TabsTrigger value="setup">{{ t('accounts.page.tabs.setup') }}</TabsTrigger>
           </TabsList>
         </div>
 
-      <TabsContent value="accounts" class="flex-1 overflow-y-auto px-8 py-6 space-y-6 mt-0">
+      <TabsContent value="accounts" class="mt-0 flex-1 space-y-6 overflow-y-auto px-10 pb-12 pt-6">
         <!-- one-shot result of an Instagram OAuth redirect landing back here -->
         <div
           v-if="connectionBanner"
@@ -385,48 +409,35 @@ async function remove(a: Account) {
         <!-- channel-type filter pills — replaces the old generic Connected/Waiting/Broken
              counters with per-platform counts that double as quick filters. -->
         <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('accounts.page.filters.groupLabel')">
-          <button
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-            :class="activeFilter === 'all' ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
-            :aria-pressed="activeFilter === 'all'"
-            @click="activeFilter = 'all'"
-          >
+          <Chip :active="activeFilter === 'all'" @click="activeFilter = 'all'">
             {{ t('accounts.page.filters.all') }} <span class="text-xs opacity-70">{{ accounts.accounts.length }}</span>
-          </button>
+          </Chip>
           <template v-for="tile in channelFilters" :key="tile.key">
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-              :class="activeFilter === tile.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
-              :aria-pressed="activeFilter === tile.key"
-              @click="activeFilter = tile.key"
-            >
-              <span class="w-4 h-4 rounded grid place-items-center text-white shrink-0" :class="tile.dotClass">
-                <component :is="tile.icon" class="w-2.5 h-2.5" />
+            <Chip :active="activeFilter === tile.key" @click="activeFilter = tile.key">
+              <span class="grid size-4 shrink-0 place-items-center rounded text-white" :class="tile.dotClass">
+                <component :is="tile.icon" class="size-2.5" />
               </span>
               {{ t(tile.labelKey) }} <span class="text-xs opacity-70">{{ tile.count }}</span>
-            </button>
+            </Chip>
             <!-- TODO.md Channels phase: a dedicated "+ Add" per channel,
                  right next to that channel's own filter pill, landing
                  directly on its connect flow rather than the generic picker. -->
             <button
               type="button"
-              class="inline-flex w-7 h-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+              class="inline-flex size-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               :title="t('accounts.page.addToChannel', { channel: t(tile.labelKey) })"
               :aria-label="t('accounts.page.addToChannel', { channel: t(tile.labelKey) })"
               @click="openAddForChannel(tile.key)"
             >
-              <Plus class="w-3.5 h-3.5" />
+              <Plus class="size-3.5" />
             </button>
           </template>
         </div>
 
         <!-- account cards -->
         <div>
-          <div class="flex items-center justify-between mb-3">
-            <span class="font-semibold">{{ t('accounts.page.connectedChannels') }}</span>
-            <span class="text-sm text-muted-foreground">{{ filteredAccounts.length }} {{ t('accounts.page.totalCount') }}</span>
+          <div class="mb-3.5 flex items-baseline justify-between">
+            <h2 class="text-[19px] font-extrabold">{{ t('accounts.page.connectedChannels') }} <span class="font-semibold text-muted-foreground">· {{ filteredAccounts.length }}</span></h2>
           </div>
 
           <p v-if="accounts.loading && !accounts.accounts.length" class="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-muted-foreground">
@@ -463,61 +474,136 @@ async function remove(a: Account) {
             </Button>
           </div>
 
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-            <div
-              v-for="a in filteredAccounts"
-              :key="a.id"
-              class="rounded-lg border border-border bg-card p-4 transition hover:shadow-pop"
-            >
-              <div class="flex items-start gap-3">
-                <!-- mobile-app style channel icon tile -->
-                <div class="relative shrink-0">
-                  <div class="w-14 h-14 rounded-xl grid place-items-center text-white" :class="tileClass(a)">
-                    <component :is="channelIcon(a)" class="w-7 h-7" />
-                  </div>
-                  <span
-                    class="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full ring-2 ring-card grid place-items-center text-white text-[10px] font-semibold"
-                    :style="{ backgroundColor: colorFor(a.id) }"
-                  >
-                    {{ initials(a.display_name) }}
-                  </span>
+          <div v-else class="divide-y divide-[#EBEBEB] overflow-hidden rounded-2xl border border-border shadow-[0_3px_12px_rgba(0,0,0,0.06)]" data-testid="accounts-list">
+            <div v-for="a in filteredAccounts" :key="a.id" class="px-6 py-5" data-testid="account-row">
+              <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+                <div class="grid size-12 shrink-0 place-items-center rounded-[14px] text-white" :class="tileClass(a)">
+                  <component :is="channelIcon(a)" class="size-6" />
                 </div>
-                <div class="min-w-0 flex-1">
-                  <div class="font-semibold truncate">{{ a.display_name }}</div>
-                  <div class="text-sm text-muted-foreground truncate">{{ handle(a) }}</div>
+                <div class="min-w-0 flex-1 basis-56">
+                  <div class="truncate text-[17px] font-bold">{{ a.display_name }}</div>
+                  <div class="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground">
+                    <span class="truncate">{{ handle(a) }}</span>
+                    <Badge variant="secondary" :class="conn(a.connection_state).badge">
+                      <span class="w-1.5 h-1.5 rounded-full" :class="conn(a.connection_state).dot" />
+                      {{ conn(a.connection_state).label }}
+                    </Badge>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <div class="text-right leading-tight">
+                    <div class="text-sm font-bold">{{ t('automation.row.label') }}</div>
+                    <div class="text-[13px] text-muted-foreground" data-testid="account-ai-state">{{ t(`automation.row.${a.automation.mode}`) }}</div>
+                  </div>
+                  <Switch
+                    class="h-7 w-12 [&>span]:size-5 data-[state=checked]:[&>span]:translate-x-5"
+                    :model-value="a.automation.mode !== 'off'"
+                    :disabled="working === a.id"
+                    :aria-label="t('automation.row.label')"
+                    data-testid="account-ai-toggle"
+                    @update:model-value="(v) => toggleAi(a, v)"
+                  />
+                  <div class="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="rounded-full"
+                      :title="t('automation.button')"
+                      @click="automationTarget = a"
+                    >
+                      <Clock class="w-4 h-4" />
+                    </Button>
+                    <!-- Telegram: retry the webhook / probe health / rotate the token -->
+                    <template v-if="isTelegram(a)">
+                      <Button
+                        v-if="a.connection_state !== 'connected'"
+                        variant="ghost"
+                        size="icon"
+                        class="rounded-full text-primary"
+                        :disabled="working === a.id"
+                        :title="t('accounts.page.retryWebhook')"
+                        @click="retryWebhook(a)"
+                      >
+                        <LoaderCircle v-if="working === a.id" class="w-4 h-4 animate-spin" />
+                        <RotateCw v-else class="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="rounded-full"
+                        :disabled="working === a.id"
+                        :title="t('accounts.page.checkConnection')"
+                        @click="checkConnection(a)"
+                      >
+                        <RefreshCw class="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="rounded-full"
+                        :title="t('accounts.page.replaceToken')"
+                        @click="tokenTarget = a"
+                      >
+                        <KeyRound class="w-4 h-4" />
+                      </Button>
+                    </template>
+                    <!-- QR-paired WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
+                    <Button
+                      v-else-if="isQrWhatsApp(a) && a.connection_state !== 'connected'"
+                      variant="ghost"
+                      size="icon"
+                      class="rounded-full text-primary"
+                      :title="t('accounts.page.reconnect')"
+                      @click="openReconnect(a)"
+                    >
+                      <RotateCw class="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="rounded-full text-destructive hover:bg-destructive/10"
+                      :disabled="deleting === a.id"
+                      :title="t('accounts.page.delete')"
+                      @click="remove(a)"
+                    >
+                      <LoaderCircle v-if="deleting === a.id" class="w-4 h-4 animate-spin" />
+                      <Trash2 v-else class="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
 
               <!-- a dropped QR-WhatsApp session gets a prominent, actionable
-                   banner rather than only the small icon button below -->
+                   banner rather than only the small icon button above -->
               <button
                 v-if="isQrWhatsApp(a) && isBroken(a)"
                 type="button"
-                class="mt-3 flex w-full items-start gap-2 rounded-md bg-amber-500/10 px-2.5 py-2 text-left text-[11px] leading-snug text-amber-700 transition hover:bg-amber-500/15 dark:text-amber-400"
+                class="mt-3 flex w-full items-start gap-2 rounded-xl bg-warning-soft px-3.5 py-2.5 text-left text-sm leading-snug text-warning transition-colors hover:bg-warning/15"
                 @click="openReconnect(a)"
               >
-                <TriangleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
+                <TriangleAlert class="mt-px size-4 shrink-0" />
                 <span class="min-w-0 flex-1">
                   {{ t('accounts.page.connectionLost.text') }}
-                  <span class="font-medium underline underline-offset-2">{{ t('accounts.page.connectionLost.cta') }}</span>
+                  <span class="font-semibold underline underline-offset-2">{{ t('accounts.page.connectionLost.cta') }}</span>
                 </span>
               </button>
 
               <!-- a broken connection explains itself; it never silently disappears.
                    For Telegram, the fix is a text button right here, not a tiny
-                   icon in the footer below. -->
+                   icon in the row above. -->
               <div
                 v-if="actionError[a.id] || a.webhook_last_error"
-                class="mt-3 rounded-md bg-destructive/5 px-2.5 py-2 text-[11px] leading-snug text-destructive"
+                class="mt-3 rounded-xl bg-destructive/5 px-3.5 py-2.5 text-sm leading-snug text-destructive"
               >
                 <p class="flex items-start gap-1.5">
-                  <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-px" />
+                  <CircleAlert class="mt-px size-4 shrink-0" />
                   <span class="min-w-0 wrap-break-word">{{ actionError[a.id] || a.webhook_last_error }}</span>
                 </p>
                 <div v-if="isTelegram(a)" class="mt-2 flex flex-wrap gap-1.5 pl-5">
                   <button
                     type="button"
-                    class="rounded-md border border-destructive/30 px-2 py-1 font-medium text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
+                    class="rounded-lg border border-destructive/30 px-2.5 py-1 font-semibold text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
                     :disabled="working === a.id"
                     @click="retryWebhook(a)"
                   >
@@ -525,7 +611,7 @@ async function remove(a: Account) {
                   </button>
                   <button
                     type="button"
-                    class="rounded-md border border-destructive/30 px-2 py-1 font-medium text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
+                    class="rounded-lg border border-destructive/30 px-2.5 py-1 font-semibold text-destructive transition hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-60"
                     :disabled="working === a.id"
                     @click="checkConnection(a)"
                   >
@@ -533,89 +619,12 @@ async function remove(a: Account) {
                   </button>
                 </div>
               </div>
-
-              <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="secondary" :class="conn(a.connection_state).badge">
-                    <span class="w-1.5 h-1.5 rounded-full" :class="conn(a.connection_state).dot" />
-                    {{ conn(a.connection_state).label }}
-                  </Badge>
-                  <AutomationStatusBadge :mode="a.automation.mode" />
-                </div>
-                <div class="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="w-8 h-8"
-                    :title="t('automation.button')"
-                    @click="automationTarget = a"
-                  >
-                    <Clock class="w-4 h-4" />
-                  </Button>
-                  <!-- Telegram: retry the webhook / probe health / rotate the token -->
-                  <template v-if="isTelegram(a)">
-                    <Button
-                      v-if="a.connection_state !== 'connected'"
-                      variant="ghost"
-                      size="icon"
-                      class="w-8 h-8 text-primary"
-                      :disabled="working === a.id"
-                      :title="t('accounts.page.retryWebhook')"
-                      @click="retryWebhook(a)"
-                    >
-                      <LoaderCircle v-if="working === a.id" class="w-4 h-4 animate-spin" />
-                      <RotateCw v-else class="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="w-8 h-8"
-                      :disabled="working === a.id"
-                      :title="t('accounts.page.checkConnection')"
-                      @click="checkConnection(a)"
-                    >
-                      <RefreshCw class="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="w-8 h-8"
-                      :title="t('accounts.page.replaceToken')"
-                      @click="tokenTarget = a"
-                    >
-                      <KeyRound class="w-4 h-4" />
-                    </Button>
-                  </template>
-                  <!-- QR-paired WhatsApp: re-issue a QR (a bot has no session to re-scan) -->
-                  <Button
-                    v-else-if="isQrWhatsApp(a) && a.connection_state !== 'connected'"
-                    variant="ghost"
-                    size="icon"
-                    class="w-8 h-8 text-primary"
-                    :title="t('accounts.page.reconnect')"
-                    @click="openReconnect(a)"
-                  >
-                    <RotateCw class="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="w-8 h-8 text-destructive hover:bg-destructive/10"
-                    :disabled="deleting === a.id"
-                    :title="t('accounts.page.delete')"
-                    @click="remove(a)"
-                  >
-                    <LoaderCircle v-if="deleting === a.id" class="w-4 h-4 animate-spin" />
-                    <Trash2 v-else class="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
       </TabsContent>
 
-      <TabsContent value="setup" class="flex-1 overflow-y-auto px-8 py-6 mt-0">
+      <TabsContent value="setup" class="mt-0 flex-1 overflow-y-auto px-10 pb-12 pt-6">
         <ChannelSetupTab />
       </TabsContent>
       </Tabs>

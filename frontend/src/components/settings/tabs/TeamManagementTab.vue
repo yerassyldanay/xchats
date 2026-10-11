@@ -80,7 +80,7 @@ async function submitCreate() {
 
 <template>
   <div class="space-y-6">
-    <div class="rounded-lg border border-border bg-card p-5 flex items-center justify-between gap-3">
+    <div class="rounded-2xl border border-border bg-card p-6 flex items-center justify-between gap-3">
       <div>
         <h3 class="font-semibold">{{ t('accountSecurity.title') }}</h3>
         <p class="text-sm text-muted-foreground">{{ t('accountSecurity.settingsHint') }}</p>
@@ -90,7 +90,7 @@ async function submitCreate() {
       </Button>
     </div>
 
-    <div class="rounded-lg border border-border bg-card p-5 space-y-3">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-3">
       <h3 class="font-semibold">{{ t('settings.team.orgName') }}</h3>
       <div class="flex items-center gap-2 max-w-md">
         <Input v-model="orgName" class="flex-1" />

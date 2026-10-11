@@ -5,9 +5,8 @@
 // membership, and (eventually, Track 2K) backup. Every tab body stays
 // mounted (v-show, not v-if — matching views/KnowledgeBase.vue) so an
 // in-progress form in one tab survives switching away and back.
-import { onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, Database, Globe, LineChart, Radio, Users, Wifi } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import AiEngineTab from '@/components/settings/tabs/AiEngineTab.vue'
 import ExtractionTab from '@/components/settings/tabs/ExtractionTab.vue'
@@ -31,51 +30,67 @@ onMounted(async () => {
   }
 })
 
-const tabs: { key: string; labelKey: string; icon: Component }[] = [
-  { key: 'ai-engine', labelKey: 'settings.tabs.aiEngine', icon: Bot },
-  { key: 'extraction', labelKey: 'settings.tabs.extraction', icon: Globe },
-  { key: 'monitoring', labelKey: 'settings.tabs.monitoring', icon: LineChart },
-  { key: 'remote-access', labelKey: 'settings.tabs.remoteAccess', icon: Wifi },
-  { key: 'channels', labelKey: 'settings.tabs.channels', icon: Radio },
-  { key: 'team', labelKey: 'settings.tabs.team', icon: Users },
-  { key: 'backup', labelKey: 'settings.tabs.backup', icon: Database },
+const tabs: { key: string; labelKey: string }[] = [
+  { key: 'ai-engine', labelKey: 'settings.tabs.aiEngine' },
+  { key: 'extraction', labelKey: 'settings.tabs.extraction' },
+  { key: 'monitoring', labelKey: 'settings.tabs.monitoring' },
+  { key: 'remote-access', labelKey: 'settings.tabs.remoteAccess' },
+  { key: 'channels', labelKey: 'settings.tabs.channels' },
+  { key: 'team', labelKey: 'settings.tabs.team' },
+  { key: 'backup', labelKey: 'settings.tabs.backup' },
 ]
 const active = ref(tabs[0].key)
+
+// A red dot beside «ИИ-движок» while the assistant can't answer: no model
+// provider has a key yet, or one that does is currently failing its checks.
+const aiNeedsAttention = computed(
+  () => ready.value && (store.hasUnhealthyProvider || !store.integrations.some((p) => p.has_model && p.configured)),
+)
 </script>
 
 <template>
-  <div class="h-full bg-background flex flex-col min-w-0">
-    <header class="px-8 py-4 border-b border-border bg-card shrink-0">
-      <h1 class="text-lg font-bold tracking-tight">{{ t('settings.nav.title') }}</h1>
-      <p class="text-sm text-muted-foreground">{{ t('settings.subtitle') }}</p>
-    </header>
+  <div class="h-full bg-background min-w-0 overflow-y-auto">
+    <div class="mx-auto grid w-full max-w-[1280px] gap-x-12 gap-y-6 px-10 pb-16 pt-10 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <aside class="lg:sticky lg:top-10 lg:self-start">
+        <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('settings.nav.title') }}</h1>
+        <p class="mb-6 text-sm text-muted-foreground">{{ t('settings.subtitle') }}</p>
+        <nav v-if="ready" :aria-label="t('settings.nav.title')" class="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
+          <button
+            v-for="item in tabs"
+            :key="item.key"
+            type="button"
+            :aria-current="active === item.key ? 'page' : undefined"
+            class="flex flex-none items-center justify-between gap-3 whitespace-nowrap rounded-xl px-4 py-3 text-left text-[15px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            :class="active === item.key ? 'bg-secondary font-bold text-foreground' : 'font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground'"
+            @click="active = item.key"
+          >
+            {{ t(item.labelKey) }}
+            <span
+              v-if="item.key === 'ai-engine' && aiNeedsAttention"
+              class="size-2 flex-none rounded-full bg-destructive"
+              data-testid="settings-nav-attention"
+              aria-hidden="true"
+            />
+          </button>
+        </nav>
+      </aside>
 
-    <div v-if="!ready" class="flex-1 grid place-items-center p-8">
-      <p v-if="loadError" class="text-sm text-destructive">{{ loadError }}</p>
-      <p v-else class="text-sm text-muted-foreground">{{ t('settings.common.loading') }}</p>
-    </div>
+      <div class="min-w-0">
+        <div v-if="!ready" class="grid place-items-center py-24">
+          <p v-if="loadError" class="text-sm text-destructive">{{ loadError }}</p>
+          <p v-else class="text-sm text-muted-foreground">{{ t('settings.common.loading') }}</p>
+        </div>
 
-    <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
-      <div class="flex flex-wrap items-center gap-2">
-        <button
-          v-for="item in tabs"
-          :key="item.key"
-          type="button"
-          class="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition"
-          :class="active === item.key ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:bg-muted'"
-          @click="active = item.key"
-        >
-          <component :is="item.icon" class="w-4 h-4" /> {{ t(item.labelKey) }}
-        </button>
+        <div v-else>
+          <div v-show="active === 'ai-engine'"><AiEngineTab /></div>
+          <div v-show="active === 'extraction'"><ExtractionTab /></div>
+          <div v-show="active === 'monitoring'"><MonitoringTab /></div>
+          <div v-show="active === 'remote-access'"><RemoteAccessTab /></div>
+          <div v-show="active === 'channels'"><CommunicationChannelsTab /></div>
+          <div v-show="active === 'team'"><TeamManagementTab /></div>
+          <div v-show="active === 'backup'"><DataBackupTab /></div>
+        </div>
       </div>
-
-      <div v-show="active === 'ai-engine'"><AiEngineTab /></div>
-      <div v-show="active === 'extraction'"><ExtractionTab /></div>
-      <div v-show="active === 'monitoring'"><MonitoringTab /></div>
-      <div v-show="active === 'remote-access'"><RemoteAccessTab /></div>
-      <div v-show="active === 'channels'"><CommunicationChannelsTab /></div>
-      <div v-show="active === 'team'"><TeamManagementTab /></div>
-      <div v-show="active === 'backup'"><DataBackupTab /></div>
     </div>
   </div>
 </template>
