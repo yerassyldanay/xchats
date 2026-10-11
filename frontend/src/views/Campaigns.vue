@@ -78,82 +78,88 @@ const formattedDate = computed(() => (iso: string) =>
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto px-8 py-6">
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-xl font-semibold flex items-center gap-2"><Megaphone class="w-5 h-5" /> {{ t('campaigns.list.title') }}</h1>
-        <p class="text-sm text-muted-foreground mt-0.5">{{ t('campaigns.list.subtitle') }}</p>
-      </div>
-      <RouterLink v-if="activeTab === 'campaigns'" :to="{ name: 'campaign-new' }">
-        <Button type="button"><Plus class="w-4 h-4" /> {{ t('campaigns.list.newCampaign') }}</Button>
-      </RouterLink>
-    </div>
-
-    <!-- CAM-14: Campaigns vs Templates. -->
-    <div class="mt-4 flex items-center gap-1 rounded-lg border border-border p-0.5 w-fit">
-      <button
-        type="button"
-        class="rounded-md px-4 py-1.5 text-sm font-medium transition"
-        :class="activeTab === 'campaigns' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
-        data-testid="campaigns-tab"
-        @click="setTab('campaigns')"
-      >
-        {{ t('campaigns.list.title') }}
-      </button>
-      <button
-        type="button"
-        class="rounded-md px-4 py-1.5 text-sm font-medium transition"
-        :class="activeTab === 'templates' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
-        data-testid="templates-tab"
-        @click="setTab('templates')"
-      >
-        {{ t('campaigns.templates.tabLabel') }}
-      </button>
-    </div>
-
-    <template v-if="activeTab === 'campaigns'">
-      <p v-if="campaigns.loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
-
-      <div v-else-if="campaigns.campaigns.length === 0" class="mt-12 text-center">
-        <Megaphone class="w-10 h-10 mx-auto text-muted-foreground/50" />
-        <p class="mt-3 text-sm font-medium">{{ t('campaigns.list.empty') }}</p>
-        <p class="mt-1 text-xs text-muted-foreground max-w-sm mx-auto">{{ t('campaigns.list.emptyHint') }}</p>
-      </div>
-
-      <div v-else class="mt-6 space-y-2">
-        <RouterLink
-          v-for="c in campaigns.campaigns"
-          :key="c.id"
-          :to="{ name: 'campaign-detail', params: { campaignId: c.id } }"
-          class="block rounded-lg border border-border p-4 hover:bg-muted/40 transition"
-        >
-          <div class="flex items-center gap-3">
-            <span class="w-9 h-9 rounded-lg bg-muted grid place-items-center shrink-0">
-              <component :is="channelIcon(c)" class="w-5 h-5" />
-            </span>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <span class="font-medium truncate">{{ c.name }}</span>
-                <CampaignStatusBadge :status="c.status" />
-              </div>
-              <div class="mt-0.5 text-xs text-muted-foreground truncate">
-                {{ t('campaigns.list.columnAccount') }}: {{ accounts.accountName(c.account_id) || c.account_id }}
-                · {{ t('campaigns.list.columnCreated') }}: {{ formattedDate(c.created_at) }}
-              </div>
-            </div>
-            <div class="w-40 shrink-0 text-right">
-              <div class="text-xs text-muted-foreground">{{ t('campaigns.list.sentOf', { sent: sentCount(c), total: totalCount(c) }) }}</div>
-              <div class="mt-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                <div class="h-full rounded-full bg-primary" :style="{ width: progressPct(c) + '%' }" />
-              </div>
-            </div>
-          </div>
+  <div class="flex-1 overflow-y-auto">
+    <div class="mx-auto max-w-[1120px] px-10 pb-20 pt-10">
+      <div class="mb-7 flex items-start justify-between gap-4">
+        <div>
+          <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('campaigns.list.title') }}</h1>
+          <p class="text-base text-muted-foreground">{{ t('campaigns.list.subtitle') }}</p>
+        </div>
+        <RouterLink v-if="activeTab === 'campaigns'" :to="{ name: 'campaign-new' }" class="flex-none">
+          <Button type="button"><Plus class="w-[17px] h-[17px]" /> {{ t('campaigns.list.newCampaign') }}</Button>
         </RouterLink>
-
-        <Pagination :page="page" :page-size="PAGE_SIZE" :total="campaigns.total" @update:page="loadPage" />
       </div>
-    </template>
 
-    <CampaignTemplatesPanel v-else />
+      <!-- CAM-14: Campaigns vs Templates. -->
+      <div class="mb-6 flex gap-7 border-b border-[#EBEBEB]" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'campaigns'"
+          class="-mb-px border-b-2 py-3 text-[15px] font-bold transition-colors"
+          :class="activeTab === 'campaigns' ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+          data-testid="campaigns-tab"
+          @click="setTab('campaigns')"
+        >
+          {{ t('campaigns.list.title') }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'templates'"
+          class="-mb-px border-b-2 py-3 text-[15px] font-bold transition-colors"
+          :class="activeTab === 'templates' ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+          data-testid="templates-tab"
+          @click="setTab('templates')"
+        >
+          {{ t('campaigns.templates.tabLabel') }}
+        </button>
+      </div>
+
+      <template v-if="activeTab === 'campaigns'">
+        <p v-if="campaigns.loading" class="mt-8 text-sm text-muted-foreground">{{ t('campaigns.list.loading') }}</p>
+
+        <div v-else-if="campaigns.campaigns.length === 0" class="rounded-[20px] border border-dashed border-border px-6 py-16 text-center">
+          <Megaphone class="mx-auto size-[30px]" />
+          <p class="mt-3.5 text-base font-bold">{{ t('campaigns.list.empty') }}</p>
+          <p class="mx-auto mt-1 max-w-md text-base leading-normal text-muted-foreground">{{ t('campaigns.list.emptyHint') }}</p>
+        </div>
+
+        <div v-else class="flex flex-col gap-3.5">
+          <RouterLink
+            v-for="c in campaigns.campaigns"
+            :key="c.id"
+            :to="{ name: 'campaign-detail', params: { campaignId: c.id } }"
+            class="block rounded-2xl border border-border px-[22px] py-5 transition-shadow hover:shadow-[0_6px_20px_rgba(0,0,0,0.08)]"
+          >
+            <div class="flex items-center gap-[18px]">
+              <span class="grid size-12 shrink-0 place-items-center rounded-[14px] bg-secondary">
+                <component :is="channelIcon(c)" class="size-5" />
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2.5">
+                  <span class="truncate text-[17px] font-bold">{{ c.name }}</span>
+                  <CampaignStatusBadge :status="c.status" />
+                </div>
+                <div class="mt-1 truncate text-sm text-muted-foreground">
+                  {{ t('campaigns.list.columnAccount') }}: {{ accounts.accountName(c.account_id) || c.account_id }}
+                  · {{ t('campaigns.list.columnCreated') }}: {{ formattedDate(c.created_at) }}
+                </div>
+              </div>
+              <div class="hidden w-[200px] shrink-0 sm:block">
+                <div class="mb-2 text-right text-sm font-semibold">{{ t('campaigns.list.sentOf', { sent: sentCount(c), total: totalCount(c) }) }}</div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-[#EBEBEB]">
+                  <div class="h-full rounded-full bg-primary" :style="{ width: progressPct(c) + '%' }" />
+                </div>
+              </div>
+            </div>
+          </RouterLink>
+
+          <Pagination :page="page" :page-size="PAGE_SIZE" :total="campaigns.total" @update:page="loadPage" />
+        </div>
+      </template>
+
+      <CampaignTemplatesPanel v-else />
+    </div>
   </div>
 </template>

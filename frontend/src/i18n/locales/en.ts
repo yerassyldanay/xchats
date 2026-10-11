@@ -1457,6 +1457,7 @@ export default {
       back: 'Back to campaigns',
     },
     wizard: {
+      backToList: 'Back to campaigns',
       title: 'New campaign',
       stepAudience: 'Audience',
       stepMessage: 'Message',
@@ -2078,6 +2079,8 @@ export default {
   },
   // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
   inbox: {
+    listTitle: 'Messages',
+    filtersLabel: 'Chat filters',
     newMessage: 'New message',
     collapseList: 'Collapse chat list',
     expandList: 'Expand chat list',

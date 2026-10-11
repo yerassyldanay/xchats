@@ -1445,6 +1445,7 @@ export default {
       back: 'Таратылымдарға',
     },
     wizard: {
+      backToList: 'Жіберулерге оралу',
       title: 'Жаңа таратылым',
       stepAudience: 'Аудитория',
       stepMessage: 'Хабарлама',
@@ -1879,6 +1880,8 @@ export default {
   },
   // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
   inbox: {
+    listTitle: 'Хабарламалар',
+    filtersLabel: 'Чат сүзгілері',
     newMessage: 'Жаңа хабарлама',
     collapseList: 'Чат тізімін жию',
     expandList: 'Чат тізімін жаю',

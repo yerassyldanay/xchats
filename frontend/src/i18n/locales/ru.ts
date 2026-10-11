@@ -1457,6 +1457,7 @@ export default {
       back: 'К рассылкам',
     },
     wizard: {
+      backToList: 'К рассылкам',
       title: 'Новая рассылка',
       stepAudience: 'Аудитория',
       stepMessage: 'Сообщение',
@@ -2076,6 +2077,8 @@ export default {
   },
   // inbox.* — the chat board: list, thread, composer and the compose-new dialog.
   inbox: {
+    listTitle: 'Сообщения',
+    filtersLabel: 'Фильтры чатов',
     newMessage: 'Новое сообщение',
     collapseList: 'Свернуть список чатов',
     expandList: 'Развернуть список чатов',

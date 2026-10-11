@@ -14,7 +14,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, onBeforeRouteLeave, useRouter } from 'vue-router'
-import { CircleAlert, FlaskConical, LoaderCircle, Megaphone, Plus, Save, Trash2 } from 'lucide-vue-next'
+import { ChevronLeft, CircleAlert, FlaskConical, LoaderCircle, Megaphone, Plus, Save, Trash2 } from 'lucide-vue-next'
 import { useCampaigns } from '@/stores/campaigns'
 import { useAccounts } from '@/stores/accounts'
 import { useCampaignTemplates } from '@/stores/campaignTemplates'
@@ -61,6 +61,8 @@ const sortedAccounts = computed(() =>
 )
 
 const step = ref<'audience' | 'message' | 'schedule'>('audience')
+// 0..2 — how far along the three-bar progress strip is filled.
+const stepIndex = computed(() => (step.value === 'audience' ? 0 : step.value === 'message' ? 1 : 2))
 const pendingCampaignId = ref('')
 const finished = ref(false)
 const DRAFT_MESSAGE_PLACEHOLDER = '(draft)'
@@ -621,59 +623,61 @@ async function launchCampaign() {
 </script>
 
 <template>
-  <div class="flex-1 overflow-y-auto px-8 py-6 max-w-2xl">
-    <h1 class="text-xl font-semibold flex items-center gap-2"><Megaphone class="w-5 h-5" /> {{ t('campaigns.wizard.title') }}</h1>
+  <div class="flex-1 overflow-y-auto">
+  <div class="mx-auto max-w-[720px] px-6 pb-10 pt-10">
+    <RouterLink :to="{ name: 'campaigns' }" class="mb-6 inline-flex items-center gap-1.5 text-[15px] font-semibold hover:text-primary" data-testid="wizard-back-to-list">
+      <ChevronLeft class="size-[18px]" /> {{ t('campaigns.wizard.backToList') }}
+    </RouterLink>
+    <h1 class="text-[32px] font-extrabold leading-tight tracking-tight">{{ t('campaigns.wizard.title') }}</h1>
 
     <!-- CAM-15: a real 3-step stepper — clicking back to an already-reached
          step is allowed (nothing is lost, all fields stay populated in this
          same component's state); a step ahead of what's been reached yet is
          disabled rather than skippable. -->
-    <div class="mt-3 flex items-center gap-2 text-xs font-medium" data-testid="wizard-step-indicator">
+    <div class="mb-9 mt-5 flex gap-2" data-testid="wizard-step-indicator">
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-full px-2.5 py-1"
+        class="flex-1 text-left"
         data-testid="wizard-step-audience"
-        :class="step === 'audience' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
+        :aria-current="step === 'audience' ? 'step' : undefined"
         @click="step = 'audience'"
       >
-        <span class="grid place-items-center w-4 h-4 rounded-full text-[10px]" :class="step === 'audience' ? 'bg-primary-foreground text-primary' : 'bg-muted'">1</span>
-        {{ t('campaigns.wizard.stepAudience') }}
+        <span class="mb-2 block h-1 rounded-full" :class="stepIndex >= 0 ? 'bg-foreground' : 'bg-[#EBEBEB]'" />
+        <span class="text-sm font-bold" :class="step === 'audience' ? 'text-foreground' : 'text-muted-foreground'">1. {{ t('campaigns.wizard.stepAudience') }}</span>
       </button>
-      <span class="text-muted-foreground">→</span>
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-full px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+        class="flex-1 text-left disabled:cursor-not-allowed disabled:opacity-60"
         data-testid="wizard-step-message"
+        :aria-current="step === 'message' ? 'step' : undefined"
         :disabled="!pendingCampaignId"
-        :class="step === 'message' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
         @click="pendingCampaignId && (step = 'message')"
       >
-        <span class="grid place-items-center w-4 h-4 rounded-full text-[10px]" :class="step === 'message' ? 'bg-primary-foreground text-primary' : 'bg-muted'">2</span>
-        {{ t('campaigns.wizard.stepMessage') }}
+        <span class="mb-2 block h-1 rounded-full" :class="stepIndex >= 1 ? 'bg-foreground' : 'bg-[#EBEBEB]'" />
+        <span class="text-sm font-bold" :class="step === 'message' ? 'text-foreground' : 'text-muted-foreground'">2. {{ t('campaigns.wizard.stepMessage') }}</span>
       </button>
-      <span class="text-muted-foreground">→</span>
       <button
         type="button"
-        class="flex items-center gap-1.5 rounded-full px-2.5 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+        class="flex-1 text-left disabled:cursor-not-allowed disabled:opacity-60"
         data-testid="wizard-step-schedule"
+        :aria-current="step === 'schedule' ? 'step' : undefined"
         :disabled="!pendingCampaignId || !messageBody.trim()"
-        :class="step === 'schedule' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'"
         @click="pendingCampaignId && messageBody.trim() && (step = 'schedule')"
       >
-        <span class="grid place-items-center w-4 h-4 rounded-full text-[10px]" :class="step === 'schedule' ? 'bg-primary-foreground text-primary' : 'bg-muted'">3</span>
-        {{ t('campaigns.wizard.stepSchedule') }}
+        <span class="mb-2 block h-1 rounded-full" :class="stepIndex >= 2 ? 'bg-foreground' : 'bg-[#EBEBEB]'" />
+        <span class="text-sm font-bold" :class="step === 'schedule' ? 'text-foreground' : 'text-muted-foreground'">3. {{ t('campaigns.wizard.stepSchedule') }}</span>
       </button>
     </div>
 
     <!-- Step 1: Who -->
-    <section v-if="step === 'audience'" class="mt-6 space-y-4">
-      <h2 class="text-sm font-semibold">{{ t('campaigns.wizard.audienceHeading') }}</h2>
+    <section v-if="step === 'audience'" class="space-y-[22px]">
+      <h2 class="text-2xl font-extrabold">{{ t('campaigns.wizard.audienceHeading') }}</h2>
       <div>
-        <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.nameLabel') }}</label>
+        <label class="text-[15px] font-bold">{{ t('campaigns.wizard.nameLabel') }}</label>
         <Input v-model="name" :placeholder="t('campaigns.wizard.namePlaceholder')" class="mt-1.5" />
       </div>
       <div>
-        <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.accountLabel') }}</label>
+        <label class="text-[15px] font-bold">{{ t('campaigns.wizard.accountLabel') }}</label>
         <div v-if="noAccounts" class="mt-1.5 rounded-md border border-border bg-muted/40 p-3">
           <p class="text-sm">{{ t('campaigns.wizard.noAccounts') }}</p>
           <RouterLink :to="{ name: 'channels' }" class="mt-2 inline-block">
@@ -705,7 +709,7 @@ async function launchCampaign() {
       </div>
 
       <div v-if="!noAccounts">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.pasteLabel') }}</label>
+        <label class="text-[15px] font-bold">{{ t('campaigns.wizard.pasteLabel') }}</label>
         <p v-if="!audienceReady" class="mt-0.5 text-xs text-muted-foreground">{{ t('campaigns.wizard.audienceNeedsDetails') }}</p>
         <Textarea v-model="pastedText" :placeholder="t('campaigns.wizard.pastePlaceholder')" class="mt-1.5 min-h-[120px] font-mono text-xs" data-testid="paste-recipients" />
         <div class="mt-2 flex items-center gap-2">
@@ -744,18 +748,20 @@ async function launchCampaign() {
       <p v-if="audienceError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ audienceError }}
       </p>
-      <Button type="button" :disabled="continuing || noAccounts" @click="continueToMessage">
-        <LoaderCircle v-if="continuing" class="w-4 h-4 animate-spin" />
-        {{ t('campaigns.wizard.continueToMessage') }}
-      </Button>
+      <div class="sticky bottom-0 z-10 -mx-6 mt-10 flex items-center justify-end border-t border-[#EBEBEB] bg-background px-6 py-4">
+        <Button type="button" size="lg" class="px-7" :disabled="continuing || noAccounts" @click="continueToMessage">
+          <LoaderCircle v-if="continuing" class="w-4 h-4 animate-spin" />
+          {{ t('campaigns.wizard.continueToMessage') }}
+        </Button>
+      </div>
     </section>
 
     <!-- Step 2: What -->
-    <section v-if="step === 'message'" class="mt-6 space-y-4">
-      <h2 class="text-sm font-semibold">{{ t('campaigns.wizard.messageHeading') }}</h2>
+    <section v-if="step === 'message'" class="space-y-[22px]">
+      <h2 class="text-2xl font-extrabold">{{ t('campaigns.wizard.messageHeading') }}</h2>
 
       <div v-if="templateOptions.length">
-        <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.templatePickerLabel') }}</label>
+        <label class="text-[15px] font-bold">{{ t('campaigns.wizard.templatePickerLabel') }}</label>
         <Select v-model="selectedTemplateId">
           <SelectTrigger class="mt-1.5" data-testid="template-picker">
             <SelectValue :placeholder="t('campaigns.wizard.templatePickerPlaceholder')" />
@@ -767,7 +773,7 @@ async function launchCampaign() {
       </div>
 
       <div>
-        <label class="text-xs font-medium text-muted-foreground">{{ t('campaigns.wizard.messageLabel') }}</label>
+        <label class="text-[15px] font-bold">{{ t('campaigns.wizard.messageLabel') }}</label>
         <p class="mt-0.5 text-xs text-muted-foreground">{{ t('campaigns.wizard.autocompleteTip') }}</p>
         <div class="relative mt-1.5">
           <textarea
@@ -848,9 +854,9 @@ async function launchCampaign() {
       <p v-if="messageError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ messageError }}
       </p>
-      <div class="flex items-center gap-2">
-        <Button type="button" variant="ghost" @click="backToAudience">{{ t('campaigns.wizard.stepBack') }}</Button>
-        <Button type="button" :disabled="continuingToSchedule" @click="continueToSchedule">
+      <div class="sticky bottom-0 z-10 -mx-6 mt-10 flex items-center justify-between border-t border-[#EBEBEB] bg-background px-6 py-4">
+        <Button type="button" variant="link" class="px-0" @click="backToAudience">{{ t('campaigns.wizard.stepBack') }}</Button>
+        <Button type="button" size="lg" class="px-7" :disabled="continuingToSchedule" @click="continueToSchedule">
           <LoaderCircle v-if="continuingToSchedule" class="w-4 h-4 animate-spin" />
           {{ t('campaigns.wizard.continueToSchedule') }}
         </Button>
@@ -860,8 +866,8 @@ async function launchCampaign() {
     </section>
 
     <!-- Step 3: When & Launch -->
-    <section v-if="step === 'schedule'" class="mt-6 space-y-3">
-      <h2 class="text-sm font-semibold">{{ t('campaigns.wizard.scheduleHeading') }}</h2>
+    <section v-if="step === 'schedule'" class="space-y-[22px]">
+      <h2 class="text-2xl font-extrabold">{{ t('campaigns.wizard.scheduleHeading') }}</h2>
       <div class="flex items-center gap-2">
         <Button type="button" size="sm" :variant="paceMode === 'inherit' ? 'default' : 'outline'" @click="paceMode = 'inherit'">
           {{ t('campaigns.wizard.paceInherit') }}
@@ -954,16 +960,18 @@ async function launchCampaign() {
       <p v-if="scheduleActionError" class="flex items-center gap-1.5 text-sm text-destructive">
         <CircleAlert class="w-4 h-4 shrink-0" /> {{ scheduleActionError }}
       </p>
-      <div class="flex items-center gap-2 pb-10">
-        <Button type="button" variant="ghost" @click="backToMessage">{{ t('campaigns.wizard.stepBack') }}</Button>
-        <Button type="button" variant="outline" :disabled="savingDraft || launching" data-testid="save-as-draft" @click="saveAsDraft">
+      <div class="sticky bottom-0 z-10 -mx-6 mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-[#EBEBEB] bg-background px-6 py-4">
+        <Button type="button" variant="link" class="px-0" @click="backToMessage">{{ t('campaigns.wizard.stepBack') }}</Button>
+        <div class="flex items-center gap-3">
+        <Button type="button" size="lg" variant="outline" :disabled="savingDraft || launching" data-testid="save-as-draft" @click="saveAsDraft">
           <LoaderCircle v-if="savingDraft" class="w-4 h-4 animate-spin" />
           {{ savingDraft ? t('common.saving') : t('campaigns.wizard.saveAsDraft') }}
         </Button>
-        <Button type="button" :disabled="savingDraft || launching" data-testid="launch-campaign" @click="launchCampaign">
+        <Button type="button" size="lg" class="px-7" :disabled="savingDraft || launching" data-testid="launch-campaign" @click="launchCampaign">
           <LoaderCircle v-if="launching" class="w-4 h-4 animate-spin" />
           {{ launching ? t('campaigns.wizard.launching') : t('campaigns.wizard.launchCampaign') }}
         </Button>
+        </div>
       </div>
     </section>
 
@@ -984,5 +992,6 @@ async function launchCampaign() {
       @update:open="(v) => !v && stayOnWizard()"
       @confirm="discardAndLeave"
     />
+  </div>
   </div>
 </template>

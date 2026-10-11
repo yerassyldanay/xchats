@@ -65,7 +65,7 @@ watch(() => inbox.activeId, resetFiles)
 </script>
 
 <template>
-  <div class="border-t border-border bg-card px-4 py-3 shrink-0">
+  <div class="shrink-0 bg-card px-6 pb-5 pt-4">
     <p
       v-if="inbox.activeSendError"
       class="mb-2 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive"
@@ -88,42 +88,41 @@ watch(() => inbox.activeId, resetFiles)
         </button>
       </span>
     </div>
-    <div class="flex items-end gap-2">
-      <Button variant="ghost" size="icon" class="shrink-0" :title="t('inbox.attachFile')" @click="fileInput?.click()">
+    <!-- One pill: attach, the growing text field, emoji, and Send inside it. -->
+    <div class="flex items-end gap-1.5 rounded-[28px] border border-border bg-background py-1.5 pl-3 pr-1.5 transition-colors focus-within:border-foreground">
+      <Button variant="ghost" size="icon" class="shrink-0 rounded-full text-muted-foreground" :title="t('inbox.attachFile')" @click="fileInput?.click()">
         <Paperclip class="w-[18px] h-[18px]" />
       </Button>
       <input ref="fileInput" type="file" multiple class="hidden" @change="pick" />
-      <div class="flex-1 flex items-end rounded-xl bg-muted border border-border focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30 transition px-3">
-        <Textarea
-          v-model="inbox.composerText"
-          v-autosize
-          rows="1"
-          :placeholder="t('inbox.messagePlaceholder')"
-          class="flex-1 resize-none border-0 bg-transparent py-2.5 min-h-0 max-h-[40vh] overflow-y-auto text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
-          @keydown.enter.exact.prevent="submit"
-        />
-        <DropdownMenu v-model:open="emojiOpen">
-          <DropdownMenuTrigger as-child>
-            <button class="pb-2.5 pl-2 text-muted-foreground hover:text-foreground transition" :title="t('inbox.emoji')" type="button">
-              <Smile class="w-5 h-5" />
+      <Textarea
+        v-model="inbox.composerText"
+        v-autosize
+        rows="1"
+        :placeholder="t('inbox.messagePlaceholder')"
+        class="max-h-[40vh] min-h-0 flex-1 resize-none overflow-y-auto rounded-none border-0 bg-transparent px-1 py-2.5 text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        @keydown.enter.exact.prevent="submit"
+      />
+      <DropdownMenu v-model:open="emojiOpen">
+        <DropdownMenuTrigger as-child>
+          <button class="grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground" :title="t('inbox.emoji')" type="button">
+            <Smile class="w-5 h-5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" class="w-64 p-2">
+          <div class="grid grid-cols-8 gap-0.5">
+            <button
+              v-for="e in EMOJIS"
+              :key="e"
+              type="button"
+              class="grid place-items-center w-7 h-7 rounded-md text-lg hover:bg-accent transition"
+              @click="pickEmoji(e)"
+            >
+              {{ e }}
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-64 p-2">
-            <div class="grid grid-cols-8 gap-0.5">
-              <button
-                v-for="e in EMOJIS"
-                :key="e"
-                type="button"
-                class="grid place-items-center w-7 h-7 rounded-md text-lg hover:bg-accent transition"
-                @click="pickEmoji(e)"
-              >
-                {{ e }}
-              </button>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-      <Button :disabled="sending" class="shrink-0" @click="submit">
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button :disabled="sending" class="h-10 shrink-0 rounded-full px-[18px] text-sm" @click="submit">
         <Send class="w-4 h-4" /> {{ t('inbox.send') }}
       </Button>
     </div>
