@@ -135,8 +135,8 @@ build: ## Build backend binary + frontend bundle
 	cd $(BACKEND) && go build -o bin/xchats ./cmd/xchats
 	cd $(FRONTEND) && npm ci && npm run build
 
-screenshots: ## Regenerate docs/images/*.png from a running demo (`make up && make seed` first)
-	cd $(FRONTEND) && node scripts/capture-screenshots.mjs
+screenshots: ## Regenerate docs/images/*.png (and the landing/visit-card copies) from a running demo (`make up && make seed` first)
+	cd $(FRONTEND) && node scripts/capture-screenshots.mjs && npm run build:visit-card
 
 desktop-tools: ## Install the pinned Wails CLI (one-off; see docs/desktop.md for the OS packages it needs)
 	go install github.com/wailsapp/wails/v2/cmd/wails@$(WAILS_VERSION)
