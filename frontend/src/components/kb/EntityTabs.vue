@@ -10,13 +10,12 @@ const emit = defineEmits<{ 'update:active': [string] }>()
 </script>
 
 <template>
-  <div class="flex gap-7 overflow-x-auto border-b border-[#EBEBEB]" role="tablist">
+  <div class="flex gap-7 overflow-x-auto border-b border-[#EBEBEB]">
     <button
       v-for="item in tabs"
       :key="item.key"
       type="button"
-      role="tab"
-      :aria-selected="active === item.key"
+      :aria-current="active === item.key ? 'true' : undefined"
       class="-mb-px inline-flex flex-none items-center gap-1.5 whitespace-nowrap border-b-2 py-3 text-sm font-bold transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       :class="active === item.key ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
       @click="emit('update:active', item.key)"

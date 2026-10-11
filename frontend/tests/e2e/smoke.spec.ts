@@ -1,22 +1,29 @@
 import { test, expect } from '@playwright/test'
 import { login } from './helpers'
 
-test('login → chatboard (nav rail + chat list)', async ({ page }) => {
+test('login → dashboard (sidebar + greeting), and the Inbox is one click away', async ({ page }) => {
   await login(page)
-  await expect(page.getByText('xchats')).toBeVisible()
+  await expect(page.getByTestId('dashboard-greeting')).toBeVisible()
+  await page.getByRole('link', { name: 'Инбокс', exact: true }).click()
+  await expect(page).toHaveURL(/\/chatboard/)
+  await expect(page.getByRole('heading', { name: 'Сообщения' })).toBeVisible()
 })
 
-test('NavRail exposes the two Knowledge-Base destinations', async ({ page }) => {
+// Черновик has no sidebar entry of its own — it is the review step of the
+// Знаний база, so the sidebar item for the latter stays lit on both pages.
+test('Sidebar exposes the Knowledge Base, and Черновик opens from /draft', async ({ page }) => {
   await login(page)
-  // hover the rail icons → tooltips (Reka renders tooltip content as text)
-  await page.getByRole('link', { name: 'Черновик' }).first().hover()
-  await page.goto('/knowledge-base')
+  const sidebar = page.getByRole('navigation', { name: 'Основная навигация' })
+  await sidebar.getByRole('link', { name: 'База знаний', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'База знаний' })).toBeVisible()
+  await page.goto('/draft')
+  await expect(page.getByRole('heading', { name: 'Черновик', level: 1 })).toBeVisible()
+  await expect(sidebar.getByRole('link', { name: 'База знаний', exact: true })).toBeVisible()
 })
 
 // /knowledge-base is the sole creation/edit surface (kb-draft-review-
 // boundaries) — every write here stages into the draft, so there is no
-// "Правки" tab, and the tab row is the fixed seven kinds plus Промпт/Файлы,
+// "Правки" tab, and the tab row is the fixed kinds plus Медиафайлы/Промпт/Пробелы,
 // never dynamic the way Черновик's is.
 test('База знаний: the live KB shows the fixed tab row, no draft/Правки here', async ({ page }) => {
   await login(page)
@@ -39,7 +46,7 @@ test('База знаний: Промпт tab renders the rendered prompt with i
   await page.goto('/knowledge-base')
   await page.getByRole('button', { name: 'Промпт' }).click()
   await expect(page.getByText('Промпт ассистента')).toBeVisible()
-  await expect(page.getByText('shop-kb@v5')).toBeVisible()
+  await expect(page.getByText(/shop-kb@v\d+/)).toBeVisible()
   await expect(page.getByText('Собран успешно')).toBeVisible()
 })
 

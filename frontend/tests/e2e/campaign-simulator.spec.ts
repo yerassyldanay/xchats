@@ -74,7 +74,7 @@ test('a campaign sent through Simulator runs the real pipeline: audience, messag
   await expect(page).toHaveURL('/campaigns/new')
 
   // --- Step 1: Audience (Who) --------------------------------------------
-  await expect(page.getByTestId('wizard-step-audience')).toHaveClass(/bg-primary/)
+  await expect(page.getByTestId('wizard-step-audience')).toHaveAttribute('aria-current', 'step')
   await page.getByPlaceholder('Например, Летняя акция').fill(name)
   await pickSimulatorAccount(page)
   await expect(page.getByTestId('simulator-notice')).toBeVisible()
@@ -86,7 +86,7 @@ test('a campaign sent through Simulator runs the real pipeline: audience, messag
   await expect(page.getByText('корректных: 2')).toBeVisible({ timeout: 10_000 })
 
   await page.getByRole('button', { name: 'Продолжить к сообщению →' }).click()
-  await expect(page.getByTestId('wizard-step-message')).toHaveClass(/bg-primary/)
+  await expect(page.getByTestId('wizard-step-message')).toHaveAttribute('aria-current', 'step')
 
   // --- Step 2: Message (What) --------------------------------------------
   const messageBox = page.getByTestId('message-textarea')
@@ -106,7 +106,7 @@ test('a campaign sent through Simulator runs the real pipeline: audience, messag
   await expect(page.getByTestId('message-preview-bubble')).toHaveText('Привет, Aigul! Ваш промокод: SUMMER2026 77011234567')
 
   await page.getByRole('button', { name: 'Продолжить к расписанию →' }).click()
-  await expect(page.getByTestId('wizard-step-schedule')).toHaveClass(/bg-primary/)
+  await expect(page.getByTestId('wizard-step-schedule')).toHaveAttribute('aria-current', 'step')
 
   // --- Step 3: Schedule & Launch (When) -----------------------------------
   await expect(page.getByTestId('summary-reachable')).toContainText('2')
