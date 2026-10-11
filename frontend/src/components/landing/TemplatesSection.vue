@@ -62,6 +62,7 @@ watch(
     :eyebrow="t('landing.templates.eyebrow')"
     :title="t('landing.templates.title')"
     :description="t('landing.templates.description')"
+    muted
   >
     <div ref="demoRef" class="landing-chat-demo">
       <p class="landing-bubble landing-bubble--customer">{{ t('landing.templates.question') }}</p>

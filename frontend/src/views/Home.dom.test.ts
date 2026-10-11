@@ -68,6 +68,43 @@ describe('Home (landing page)', () => {
     expect(blogLinks.length).toBeGreaterThan(0)
   })
 
+  it('says what the product is and walks one request through it', () => {
+    const wrapper = mountKb(Home, { pinia: testPinia() })
+    const overview = wrapper.get('#what')
+    expect(overview.text()).toContain('Рабочее место для общения с клиентами')
+    expect(overview.text()).toContain('Клиент пишет')
+    expect(overview.text()).toContain('Ассистент готовит ответ')
+    expect(overview.text()).toContain('Человек подтверждает')
+  })
+
+  it('describes every section of the app, one card each', () => {
+    const wrapper = mountKb(Home, { pinia: testPinia() })
+    const cards = wrapper.findAll('[data-testid^="landing-feature-"]')
+    expect(cards.map((c) => c.attributes('data-testid'))).toEqual(
+      ['inbox', 'customers', 'followups', 'campaigns', 'kb', 'draft', 'check', 'channels', 'settings'].map((k) => `landing-feature-${k}`),
+    )
+    const text = wrapper.get('#features').text()
+    for (const title of ['Инбокс', 'Клиенты', 'Задачи', 'Рассылки', 'База знаний', 'Черновик', 'Проверка', 'Каналы', 'Настройки']) {
+      expect(text).toContain(title)
+    }
+  })
+
+  it('shows WhatsApp and Telegram as available and the Meta channels as coming soon', () => {
+    const wrapper = mountKb(Home, { pinia: testPinia() })
+    const cards = wrapper.get('#platforms').findAll('.landing-card')
+    expect(cards).toHaveLength(4)
+    expect(cards.filter((c) => c.classes().includes('landing-card--soon')).map((c) => c.find('h3').text())).toEqual(['Instagram', 'Messenger'])
+    expect(wrapper.get('#platforms').text()).toContain('Скоро')
+  })
+
+  it('the showcase tour has one tab per app page and switches its screenshot', async () => {
+    const wrapper = mountKb(Home, { pinia: testPinia() })
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(9)
+    await tabs[7].trigger('click') // Каналы
+    expect(wrapper.get('#showcase img').attributes('src')).toBe('/screenshots/channels.png')
+  })
+
   it('the WhatsApp footnote carries the unofficial-connectivity warning', () => {
     const wrapper = mountKb(Home, { pinia: testPinia() })
     expect(wrapper.text()).toContain('WhatsApp Web-подключение неофициальное')

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<!--
+  GENERATED FILE — do not edit by hand.
+  Source: frontend/scripts/visit-card.template.html (markup),
+          frontend/src/components/landing/landing.css (styles) and the
+          landing.* strings of frontend/src/i18n/locales/{ru,en,kk}.ts (copy).
+  Regenerate with `npm run build:visit-card` in frontend/.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>xchats — the AI assistant that never makes things up</title>
+  <meta name="description" content="xchats is a free, open-source inbox for WhatsApp and Telegram: shared team conversations, customer profiles and follow-ups, campaigns, and an AI assistant that drafts every reply strictly from your knowledge base. A native desktop app for Windows, macOS and Linux — no Docker required." />
+  <meta property="og:title" content="xchats — the AI assistant that never makes things up" />
+  <meta property="og:description" content="A free, open-source team inbox for WhatsApp and Telegram with an AI assistant that answers only from your knowledge base." />
+  <meta property="og:image" content="./screenshots/inbox.png" />
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Manrope — the same face the app itself uses. -->
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* Minimal reset (the app gets this from Tailwind's preflight). */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; scroll-padding-top: 88px; }
+    body { margin: 0; }
+    h1, h2, h3, h4 { font-size: inherit; font-weight: inherit; }
+    ul, ol { list-style: none; }
+    button, select { font: inherit; color: inherit; }
+    address { font-style: normal; }
+
+    /* The visit-card has no scroll-reveal or live demos: show the end state. */
+    .landing-assign-chip,
+    .landing-tool-chip { opacity: 1; transform: none; animation: none; }
+
+    /* ---- landing.css, verbatim ---- */
+    /*__LANDING_CSS__*/
+  </style>
+</head>
+<body>
+<div class="landing">
+
+  <header class="landing-nav">
+    <div class="landing-shell landing-nav__inner">
+      <a href="./" class="landing-nav__brand">
+        <img src="./logo.png" alt="" class="landing-nav__logo" />
+        <span>xchats</span>
+      </a>
+
+      <nav class="landing-nav__links" aria-label="landing">
+        <a href="#features" class="landing-nav__link" data-i18n="nav.features"></a>
+        <a href="#how-it-works" class="landing-nav__link" data-i18n="nav.howItWorks"></a>
+        <a href="#showcase" class="landing-nav__link" data-i18n="nav.tour"></a>
+        <a href="#desktop" class="landing-nav__link" data-i18n="nav.desktop"></a>
+        <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="landing-nav__link" data-i18n="nav.docs"></a>
+      </nav>
+
+      <div class="landing-nav__right">
+        <a href="https://github.com/yerassyldanay/xchats" class="landing-nav__github" target="_blank" rel="noreferrer" aria-label="GitHub">
+          {{i:Github:18}}
+          <span>GitHub</span>
+        </a>
+        <label class="landing-lang-select">
+          {{i:Globe:16:landing-lang-select__icon}}
+          <select id="lang-select" aria-label="Language">
+            <option value="en">English</option>
+            <option value="ru">Русский</option>
+            <option value="kk">Қазақша</option>
+          </select>
+          {{i:ChevronDown:14:landing-lang-select__chevron}}
+        </label>
+        <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-btn landing-btn--primary" data-i18n="desktop.downloadCta"></a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="landing-hero landing-shell">
+      <div>
+        <span class="landing-pill landing-pill--soft" data-i18n="hero.eyebrow"></span>
+        <h1 class="landing-hero__title">
+          <span data-i18n="hero.titlePrefix"></span> <em data-i18n="hero.titleHighlight"></em> <span data-i18n="hero.titleSuffix"></span>
+        </h1>
+        <p class="landing-hero__subtitle" data-i18n="hero.subtitle"></p>
+
+        <div class="landing-hero__ctas">
+          <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-btn landing-btn--primary landing-btn--lg">{{i:Download:17}} <span data-i18n="hero.ctaPrimary"></span></a>
+          <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-btn landing-btn--outline landing-btn--lg">{{i:Star:17}} <span data-i18n="hero.ctaSecondary"></span></a>
+        </div>
+
+        <div class="landing-hero__downloads">
+          <span class="landing-hero__downloads-chip">{{i:AppWindow:15}} <span data-i18n="hero.downloadsWindows"></span></span>
+          <span class="landing-hero__downloads-chip">{{i:Laptop:15}} <span data-i18n="hero.downloadsMac"></span></span>
+          <span class="landing-hero__downloads-chip">{{i:Terminal:15}} <span data-i18n="hero.downloadsLinux"></span></span>
+          <p class="landing-hero__downloads-caption" data-i18n="hero.downloadsLabel"></p>
+        </div>
+
+        <div class="landing-hero__trust">
+          <span class="landing-hero__trust-item">{{i:Check:18}} <span data-i18n="hero.trust1"></span></span>
+          <span class="landing-hero__trust-item">{{i:Check:18}} <span data-i18n="hero.trust2"></span></span>
+          <span class="landing-hero__trust-item">{{i:Check:18}} <span data-i18n="hero.trust3"></span></span>
+        </div>
+
+        <p class="landing-hero__server-hint"><span data-i18n="hero.serverHintPrefix"></span> <code>make up</code> <span data-i18n="hero.serverHintSuffix"></span></p>
+      </div>
+
+      <div class="landing-window">
+        <img src="./screenshots/inbox.png" data-i18n-alt="hero.screenshotAlt" alt="" fetchpriority="high" />
+      </div>
+    </section>
+
+    <section id="what" class="landing-section">
+      <div class="landing-shell landing-overview">
+        <div class="landing-overview__copy">
+          <span class="landing-pill landing-pill--soft" data-i18n="overview.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="overview.title"></h2>
+          <p class="landing-section__description" data-i18n="overview.description"></p>
+          <p class="landing-overview__note">{{i:Lock:20}} <span data-i18n="overview.note"></span></p>
+        </div>
+
+        <div class="landing-flow">
+          <div class="landing-flow__head" data-i18n="overview.flowTitle"></div>
+{{block:flow}}
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="landing-section landing-section--muted">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="features.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="features.title"></h2>
+          <p class="landing-section__description" data-i18n="features.description"></p>
+        </div>
+        <div class="landing-feature-grid">
+{{block:features}}
+        </div>
+      </div>
+    </section>
+
+    <section id="showcase" class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="showcase.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="showcase.title"></h2>
+          <p class="landing-section__description" data-i18n="showcase.description"></p>
+        </div>
+        <div class="landing-showcase">
+          <div class="landing-showcase__tabs" role="tablist" id="showcase-tabs">
+{{block:showcaseTabs}}
+          </div>
+          <div id="showcase-panel" role="tabpanel" aria-labelledby="showcase-tab-inbox" tabindex="0">
+            <div class="landing-showcase__frame">
+              <img id="showcase-img" src="./screenshots/inbox.png" data-i18n-alt="showcase.inboxAlt" alt="" loading="lazy" />
+            </div>
+            <p class="landing-showcase__desc" id="showcase-desc" data-i18n="showcase.inboxDesc"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="platforms" class="landing-section landing-section--muted">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="platforms.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="platforms.title"></h2>
+          <p class="landing-section__description" data-i18n="platforms.description"></p>
+        </div>
+        <div class="landing-platforms">
+{{block:channels}}
+        </div>
+        <p class="landing-footnote" data-i18n="platforms.footnote"></p>
+      </div>
+    </section>
+
+    <section id="team" class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="team.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="team.title"></h2>
+          <p class="landing-section__description" data-i18n="team.description"></p>
+        </div>
+
+        <div class="landing-team-card">
+          <div class="landing-team-card__head">
+            <span class="landing-role-badge landing-role-badge--admin" data-i18n="team.roleAdmin"></span>
+            <span class="landing-role-badge" data-i18n="team.roleMember"></span>
+          </div>
+          <div class="landing-filter-pills">
+            <span class="landing-filter-pill landing-filter-pill--active" data-i18n="team.filterMine"></span>
+            <span class="landing-filter-pill" data-i18n="team.filterUnassigned"></span>
+            <span class="landing-filter-pill" data-i18n="team.filterAll"></span>
+          </div>
+          <div class="landing-chat-row">
+            <div class="landing-chat-row__avatar" aria-hidden="true">{{i:UserRound:18}}</div>
+            <div class="landing-chat-row__body">
+              <div class="landing-chat-row__name" data-i18n="team.customerName"></div>
+              <div class="landing-chat-row__preview" data-i18n="team.messagePreview"></div>
+            </div>
+            <span class="landing-assign-chip" data-i18n="team.assignedTo"></span>
+          </div>
+        </div>
+        <p class="landing-footnote" data-i18n="team.note"></p>
+      </div>
+    </section>
+
+    <section id="templates" class="landing-section landing-section--muted">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="templates.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="templates.title"></h2>
+          <p class="landing-section__description" data-i18n="templates.description"></p>
+        </div>
+
+        <div class="landing-chat-demo">
+          <p class="landing-bubble landing-bubble--customer" data-i18n="templates.question"></p>
+          <p class="landing-bubble landing-bubble--assistant">
+            <span data-i18n="templates.sentencePrefix"></span><span class="landing-token is-resolved" data-i18n="templates.resolvedPrice"></span><span data-i18n="templates.sentenceMiddle"></span><span class="landing-token is-resolved" data-i18n="templates.resolvedDays"></span><span data-i18n="templates.sentenceSuffix"></span>
+          </p>
+        </div>
+        <p class="landing-note" data-i18n="templates.note"></p>
+      </div>
+    </section>
+
+    <section id="mcp" class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="mcp.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="mcp.title"></h2>
+          <p class="landing-section__description" data-i18n="mcp.description"></p>
+        </div>
+
+        <div class="landing-mcp-demo">
+          <p class="landing-bubble landing-bubble--customer landing-bubble--wide">
+            <span data-i18n="mcp.userMessage"></span>
+            <span class="landing-attachments">
+              <span class="landing-attachment-chip">{{i:FileText:14}} <span data-i18n="mcp.pdfLabel"></span></span>
+              <span class="landing-attachment-chip">{{i:Link2:14}} <span data-i18n="mcp.urlLabel"></span></span>
+            </span>
+          </p>
+          <div class="landing-tool-calls">
+{{block:tools}}
+          </div>
+          <div class="landing-result-card">
+            {{i:CircleCheck:18}}
+            <span><strong data-i18n="mcp.resultTitle"></strong> — <span data-i18n="mcp.resultBody"></span></span>
+          </div>
+        </div>
+        <p class="landing-note" data-i18n="mcp.note"></p>
+      </div>
+    </section>
+
+    <section id="desktop" class="landing-section landing-section--muted">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="desktop.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="desktop.title"></h2>
+          <p class="landing-section__description" data-i18n="desktop.description"></p>
+        </div>
+        <div class="landing-arch-grid">
+{{block:desktop}}
+        </div>
+        <p class="landing-footnote" data-i18n="desktop.signingNote"></p>
+        <p class="landing-footnote"><span data-i18n="desktop.footnotePrefix"></span> <code>make up</code> <span data-i18n="desktop.footnoteSuffix"></span></p>
+      </div>
+    </section>
+
+    <section id="architecture" class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="architecture.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="architecture.title"></h2>
+          <p class="landing-section__description" data-i18n="architecture.description"></p>
+        </div>
+        <div class="landing-arch-grid">
+{{block:architecture}}
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works" class="landing-section landing-section--muted">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <h2 class="landing-section__title" data-i18n="how.title"></h2>
+        </div>
+        <div class="landing-steps">
+{{block:steps}}
+        </div>
+      </div>
+    </section>
+
+    <section id="learn-more" class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-section__head">
+          <span class="landing-pill landing-pill--soft landing-section__eyebrow" data-i18n="links.eyebrow"></span>
+          <h2 class="landing-section__title" data-i18n="links.title"></h2>
+        </div>
+        <div class="landing-links">
+          <a href="https://github.com/yerassyldanay/xchats/tree/master/evals" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">{{i:FlaskConical:23}}</div>
+            <div class="landing-link-card__title" data-i18n="links.evalsTitle"></div>
+            <p class="landing-link-card__desc" data-i18n="links.evalsDesc"></p>
+            <span class="landing-link-card__cta"><span data-i18n="links.evalsCta"></span> {{i:ArrowRight:14}}</span>
+          </a>
+          <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="landing-link-card">
+            <div class="landing-link-card__icon">{{i:BookOpen:23}}</div>
+            <div class="landing-link-card__title" data-i18n="nav.docs"></div>
+            <p class="landing-link-card__desc" data-i18n="footer.description"></p>
+            <span class="landing-link-card__cta"><span data-i18n="nav.docs"></span> {{i:ArrowRight:14}}</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="landing-section">
+      <div class="landing-shell">
+        <div class="landing-cta-panel">
+          <h2 class="landing-cta-panel__title" data-i18n="cta.title"></h2>
+          <p class="landing-cta-panel__desc" data-i18n="cta.description"></p>
+          <div class="landing-cta-panel__ctas">
+            <a href="https://github.com/yerassyldanay/xchats/releases/latest" target="_blank" rel="noreferrer" class="landing-btn landing-btn--primary landing-btn--lg">{{i:Download:17}} <span data-i18n="cta.ctaPrimary"></span></a>
+            <a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer" class="landing-btn landing-btn--outline landing-btn--lg">{{i:Github:17}} <span data-i18n="cta.ctaSecondary"></span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="landing-footer">
+    <div class="landing-shell landing-footer__grid">
+      <div class="landing-footer__brand-column">
+        <a href="./" class="landing-footer__brand">
+          <img src="./logo.png" alt="" class="landing-footer__logo" />
+          <span>xchats</span>
+        </a>
+        <p class="landing-footer__description" data-i18n="footer.description"></p>
+        <p class="landing-footer__copyright">© <span id="year"></span> xchats. <span data-i18n="footer.copyrightSuffix"></span></p>
+      </div>
+
+      <nav aria-label="Product">
+        <h2 class="landing-footer__heading" data-i18n="footer.productHeading"></h2>
+        <ul class="landing-footer__links">
+          <li><a href="#features" data-i18n="nav.features"></a></li>
+          <li><a href="#showcase" data-i18n="nav.tour"></a></li>
+          <li><a href="#desktop" data-i18n="nav.desktop"></a></li>
+          <li><a href="#architecture" data-i18n="nav.architecture"></a></li>
+          <li><a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" data-i18n="nav.docs"></a></li>
+        </ul>
+      </nav>
+
+      <nav aria-label="Community">
+        <h2 class="landing-footer__heading" data-i18n="footer.communityHeading"></h2>
+        <ul class="landing-footer__links">
+          <li><a href="https://github.com/yerassyldanay/xchats" target="_blank" rel="noreferrer">{{i:Github:17}} <span>GitHub</span></a></li>
+        </ul>
+      </nav>
+
+      <div>
+        <h2 class="landing-footer__heading" data-i18n="footer.contactsHeading"></h2>
+        <address class="landing-footer__contact">
+          <a href="https://wa.me/77029766509" target="_blank" rel="noreferrer">{{b:whatsapp:19:landing-footer__contact-icon landing-footer__contact-icon--whatsapp}} <span>+7 702 976 65 09</span></a>
+          <a href="mailto:yerassyl.danay.abc@gmail.com">{{i:Mail:19:landing-footer__contact-icon landing-footer__contact-icon--email}} <span>yerassyl.danay.abc@gmail.com</span></a>
+          <a href="https://www.instagram.com/yerassyl.danay/" target="_blank" rel="noreferrer">{{i:Instagram:19:landing-footer__contact-icon landing-footer__contact-icon--instagram}} <span>@yerassyl.danay</span></a>
+          <a href="https://www.linkedin.com/in/yerassyldanay/" target="_blank" rel="noreferrer">{{i:Linkedin:19:landing-footer__contact-icon landing-footer__contact-icon--linkedin}} <span>yerassyldanay</span></a>
+        </address>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  const translations = /*__TRANSLATIONS__*/{};
+  const SHOWCASE = /*__SHOWCASE__*/[];
+  const SHOWCASE_IMG = Object.fromEntries(SHOWCASE);
+  const SHOWCASE_ORDER = SHOWCASE.map((entry) => entry[0]);
+  let currentLang = 'en';
+  let activeShowcaseTab = SHOWCASE_ORDER[0];
+
+  function setLanguage(lang) {
+    if (!translations[lang]) return;
+    currentLang = lang;
+    const dict = translations[lang];
+
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (dict[key] !== undefined) el.textContent = dict[key];
+    });
+    document.querySelectorAll('[data-i18n-alt]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-alt');
+      if (dict[key] !== undefined) el.setAttribute('alt', dict[key]);
+    });
+
+    const select = document.getElementById('lang-select');
+    if (select && select.value !== lang) select.value = lang;
+    document.documentElement.setAttribute('lang', lang);
+    try {
+      localStorage.setItem('xchats_visit_card_lang', lang);
+      localStorage.setItem('locale', lang);
+    } catch (e) {
+      /* storage can be blocked — the language just won't be remembered */
+    }
+
+    // The open showcase tab holds translated text the sweep above never touches
+    // directly (the image, its alt and its description change together).
+    setShowcaseTab(activeShowcaseTab);
+  }
+
+  function setShowcaseTab(key) {
+    if (!SHOWCASE_IMG[key]) return;
+    activeShowcaseTab = key;
+    document.querySelectorAll('.landing-showcase__tab').forEach((btn) => {
+      const isActive = btn.getAttribute('data-tab') === key;
+      btn.classList.toggle('is-active', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    document.getElementById('showcase-panel').setAttribute('aria-labelledby', 'showcase-tab-' + key);
+
+    const dict = translations[currentLang] || translations.en;
+    const img = document.getElementById('showcase-img');
+    img.src = './screenshots/' + SHOWCASE_IMG[key] + '.png';
+    img.alt = dict['showcase.' + key + 'Alt'] || '';
+    document.getElementById('showcase-desc').textContent = dict['showcase.' + key + 'Desc'] || '';
+  }
+
+  // WAI-ARIA tabs, automatic activation: arrows move focus and switch the
+  // panel, Home/End jump to the ends.
+  function onShowcaseKeydown(event) {
+    const i = SHOWCASE_ORDER.indexOf(activeShowcaseTab);
+    let next;
+    if (event.key === 'ArrowRight') next = (i + 1) % SHOWCASE_ORDER.length;
+    else if (event.key === 'ArrowLeft') next = (i - 1 + SHOWCASE_ORDER.length) % SHOWCASE_ORDER.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = SHOWCASE_ORDER.length - 1;
+    else return;
+    event.preventDefault();
+    setShowcaseTab(SHOWCASE_ORDER[next]);
+    document.getElementById('showcase-tab-' + SHOWCASE_ORDER[next]).focus();
+  }
+
+  function detectLanguage() {
+    try {
+      const stored = localStorage.getItem('xchats_visit_card_lang') || localStorage.getItem('locale');
+      if (stored && translations[stored]) return stored;
+    } catch (e) {
+      /* fall through to the browser language */
+    }
+    const userLangs = navigator.languages || [navigator.language];
+    for (const lang of userLangs) {
+      const code = (lang || '').toLowerCase().slice(0, 2);
+      if (translations[code]) return code;
+    }
+    return 'en';
+  }
+
+  document.getElementById('lang-select').addEventListener('change', (e) => setLanguage(e.target.value));
+  document.querySelectorAll('.landing-showcase__tab').forEach((btn) => {
+    btn.addEventListener('click', () => setShowcaseTab(btn.getAttribute('data-tab')));
+  });
+  document.getElementById('showcase-tabs').addEventListener('keydown', onShowcaseKeydown);
+  document.getElementById('year').textContent = new Date().getFullYear();
+  setLanguage(detectLanguage());
+</script>
+</body>
+</html>

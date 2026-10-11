@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// The interactive tabbed product showcase — seven REAL screenshots
-// (frontend/public/screenshots/*.png, mirrored from docs/images/ by
+// The interactive tabbed product showcase — nine REAL screenshots, one per
+// app page (frontend/public/screenshots/*.png, mirrored from docs/images/ by
 // scripts/capture-screenshots.mjs) rather than another hand-built mock demo
-// like the sections above. id="showcase" is the landing nav's "Tour" anchor.
+// like the sections around it. The tab strip is the app's own underline tabs.
+// id="showcase" is the landing nav's "Tour" anchor.
 //
 // Follows the WAI-ARIA tabs pattern with automatic activation: arrow keys
 // both move focus AND switch the panel (matching the existing click
@@ -11,19 +12,21 @@
 // in the Tab order, matching the pattern's expected keyboard behavior.
 import { ref, computed, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CalendarCheck, GitCompare, Inbox, Library, Megaphone, Users, Wand2 } from 'lucide-vue-next'
+import { Bot, CalendarClock, GitPullRequestDraft, Inbox, Library, Megaphone, Radio, Settings, UsersRound } from 'lucide-vue-next'
 import SectionShell from './SectionShell.vue'
 
 const { t } = useI18n()
 
 const TABS = [
   { key: 'inbox', icon: Inbox, img: '/screenshots/inbox.png' },
-  { key: 'kb', icon: Library, img: '/screenshots/knowledge-base.png' },
-  { key: 'draft', icon: GitCompare, img: '/screenshots/draft-staging.png' },
-  { key: 'customers', icon: Users, img: '/screenshots/customers.png' },
-  { key: 'followups', icon: CalendarCheck, img: '/screenshots/followups.png' },
+  { key: 'customers', icon: UsersRound, img: '/screenshots/customers.png' },
+  { key: 'followups', icon: CalendarClock, img: '/screenshots/followups.png' },
   { key: 'campaigns', icon: Megaphone, img: '/screenshots/campaigns.png' },
-  { key: 'simulator', icon: Wand2, img: '/screenshots/simulator.png' },
+  { key: 'kb', icon: Library, img: '/screenshots/knowledge-base.png' },
+  { key: 'draft', icon: GitPullRequestDraft, img: '/screenshots/draft-staging.png' },
+  { key: 'simulator', icon: Bot, img: '/screenshots/simulator.png' },
+  { key: 'channels', icon: Radio, img: '/screenshots/channels.png' },
+  { key: 'settings', icon: Settings, img: '/screenshots/settings.png' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
@@ -87,7 +90,7 @@ function onKeydown(event: KeyboardEvent) {
           :class="{ 'is-active': active === tab.key }"
           @click="activate(tab.key)"
         >
-          <component :is="tab.icon" class="w-4 h-4" aria-hidden="true" />
+          <component :is="tab.icon" aria-hidden="true" />
           {{ t(`landing.showcase.${tab.key}Tab`) }}
         </button>
       </div>

@@ -11,7 +11,7 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <SectionShell id="team" :eyebrow="t('landing.team.eyebrow')" :title="t('landing.team.title')" :description="t('landing.team.description')" muted>
+  <SectionShell id="team" :eyebrow="t('landing.team.eyebrow')" :title="t('landing.team.title')" :description="t('landing.team.description')">
     <template #default="{ visible }">
       <div class="landing-team-card">
         <div class="landing-team-card__head">

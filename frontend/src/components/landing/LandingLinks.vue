@@ -12,7 +12,7 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <SectionShell id="learn-more" :eyebrow="t('landing.links.eyebrow')" :title="t('landing.links.title')" muted>
+  <SectionShell id="learn-more" :eyebrow="t('landing.links.eyebrow')" :title="t('landing.links.title')">
     <div class="landing-links">
       <a href="/blog/" class="landing-link-card">
         <div class="landing-link-card__icon"><BookOpen aria-hidden="true" /></div>

@@ -98,14 +98,6 @@ function fire(key: KbActionKey) {
       >
         {{ t(RECORD_STATE_META[state].labelKey) }}
       </span>
-      <span
-        v-else-if="pendingMark"
-        class="absolute right-3 top-3 rounded-full bg-warning-soft px-2.5 py-1 text-xs font-bold text-warning"
-        :title="t('kb.pendingMark.' + pendingMark)"
-      >
-        {{ t('kb.pendingMark.' + pendingMark) }}
-      </span>
-
       <label
         v-if="reviewing && selectable"
         class="absolute bottom-3 left-3 grid size-8 cursor-pointer place-items-center rounded-full bg-background/95 shadow-[0_1px_2px_rgba(0,0,0,0.12)]"
@@ -142,6 +134,16 @@ function fire(key: KbActionKey) {
     <h3 class="mt-3 text-[17px] font-bold leading-snug" :class="reviewing && state === 'to_delete' ? 'line-through' : ''">{{ row.name || '—' }}</h3>
     <p class="mt-1 line-clamp-2 text-sm leading-snug text-muted-foreground">{{ row.description }}</p>
     <p class="mt-1.5 text-[17px] font-bold">{{ row.price || '—' }}</p>
+    <!-- a published product that also has a staged change: a mark under the
+         price (a pill over the photo would collide with the stock pill on a
+         narrow tile) — never the draft value itself -->
+    <span
+      v-if="!reviewing && pendingMark"
+      class="mt-2 inline-flex rounded-full bg-warning-soft px-2.5 py-1 text-xs font-bold text-warning"
+      data-testid="kb-product-pending-mark"
+    >
+      {{ t('kb.pendingMark.' + pendingMark) }}
+    </span>
     <!-- before/after captions, only on a staged change that has a published original -->
     <div v-if="diff.length" class="mt-1.5 space-y-1 [&>*]:mt-0">
       <FieldDiffNote :show="diff.includes('name')" :was="liveRow?.name ?? ''" :now="row.name" />
