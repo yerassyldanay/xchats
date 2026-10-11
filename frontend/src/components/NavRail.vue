@@ -9,6 +9,7 @@ import {
   ChevronsUpDown,
   FlaskConical,
   Globe,
+  House,
   Inbox,
   KeyRound,
   Library,
@@ -20,6 +21,7 @@ import {
   Settings,
   Sparkles,
   UsersRound,
+  WandSparkles,
 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useCrm } from '../stores/crm'
@@ -96,6 +98,7 @@ type NavItem = { name: string; icon: Component; label: string; match: string[]; 
 // it is the review step of the Knowledge Base, so that item stays lit on it.
 const navClusters = computed<NavItem[][]>(() => [
   [
+    { name: 'dashboard', icon: House, label: t('nav.home'), match: ['dashboard'] },
     { name: 'chatboard', icon: Inbox, label: t('nav.inbox'), match: ['chatboard'] },
     { name: 'customers', icon: UsersRound, label: t('crm.nav.customers'), match: ['customers'] },
     { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
@@ -152,7 +155,7 @@ async function switchOrg(orgId: string) {
     :aria-label="t('nav.primary')"
   >
     <div class="flex h-20 shrink-0 items-center gap-2.5 px-4" :class="open ? 'justify-between' : 'justify-center'">
-      <RouterLink v-if="open" :to="{ name: 'home' }" class="flex min-w-0 flex-1 items-center gap-2.5 text-foreground">
+      <RouterLink v-if="open" :to="{ name: 'dashboard' }" class="flex min-w-0 flex-1 items-center gap-2.5 text-foreground">
         <img src="/logo.png" alt="xchats logo" class="size-9 flex-none rounded-[10px] bg-slate-900 object-contain" />
         <span class="text-[21px] font-extrabold tracking-tight">xchats</span>
       </RouterLink>
@@ -252,6 +255,9 @@ async function switchOrg(orgId: string) {
           <DropdownMenuSeparator />
           <DropdownMenuItem v-if="auth.isAdmin" @select="router.push({ name: 'settings' })">
             <Settings class="size-[18px]" /> {{ t('nav.settings') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem v-if="auth.isAdmin" @select="router.push({ name: 'setup' })">
+            <WandSparkles class="size-[18px]" /> {{ t('nav.setupWizard') }}
           </DropdownMenuItem>
           <div class="flex items-center gap-2 px-3 pb-1 pt-2 text-xs font-semibold text-muted-foreground">
             <Globe class="size-4" /> {{ t('nav.language') }}

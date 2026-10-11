@@ -2,17 +2,17 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, LoaderCircle, Lock, Mail, ShieldCheck, WandSparkles, Wand2 } from 'lucide-vue-next'
+import { CircleAlert, LoaderCircle } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { ApiError } from '../api/client'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { FieldGroup, FieldRow } from '@/components/ui/field-group'
+import AuthShell from '@/components/auth/AuthShell.vue'
 import MaskedSecretInput from '@/components/settings/MaskedSecretInput.vue'
-import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
 
 const auth = useAuth()
 const router = useRouter()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const email = ref('')
 const password = ref('')
 const error = ref('')
@@ -40,21 +40,12 @@ function fillDefaultCreds() {
   password.value = DEFAULT_ADMIN_PASSWORD
 }
 
-// Login renders outside the nav rail, so its own switcher is the only way to
-// pick a language before signing in. Native language names, same three
-// locales and same convention as NavRail/LandingLangSwitcher.
-const LOCALES = [
-  { code: 'ru', label: 'Русский' },
-  { code: 'en', label: 'English' },
-  { code: 'kk', label: 'Қазақша' },
-] as const
-
 async function submit() {
   error.value = ''
   busy.value = true
   try {
     await auth.login(email.value.trim(), password.value)
-    router.push({ name: 'chatboard' })
+    router.push({ name: 'dashboard' })
   } catch (e) {
     error.value =
       e instanceof ApiError && e.errcode === 'UNAUTHORIZED'
@@ -67,102 +58,51 @@ async function submit() {
 </script>
 
 <template>
-  <div class="flex min-h-full">
-    <!-- brand panel (flat dark; no gradients/orbs) -->
-    <div class="hidden md:flex w-1/2 bg-slate-900 text-slate-100 flex-col justify-center px-16">
-      <div>
-        <div class="flex items-center gap-3 text-2xl font-bold tracking-tight">
-          <span class="w-11 h-11 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">X</span>
-          xchats
-        </div>
-        <h1 class="mt-8 text-3xl font-semibold leading-snug tracking-tight">{{ t('login.heroLine1') }}<br />{{ t('login.heroLine2') }}</h1>
-        <ul class="mt-10 space-y-4 text-slate-300">
-          <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-wa"><WhatsappIcon class="w-4 h-4" /></span>
-            {{ t('login.benefitInbox') }}
-          </li>
-          <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-indigo-300"><WandSparkles class="w-4 h-4" /></span>
-            {{ t('login.benefitAi') }}
-          </li>
-          <li class="flex items-center gap-3">
-            <span class="w-7 h-7 rounded-md bg-white/5 grid place-items-center text-emerald-300"><ShieldCheck class="w-4 h-4" /></span>
-            {{ t('login.benefitSecurity') }}
-          </li>
-        </ul>
-      </div>
-    </div>
+  <AuthShell>
+    <form @submit.prevent="submit">
+      <h2 class="mb-1.5 text-[30px] font-extrabold tracking-tight">{{ t('login.title') }}</h2>
+      <p class="mb-7 text-base text-muted-foreground">{{ t('login.subtitle') }}</p>
 
-    <!-- form -->
-    <div class="flex w-full md:w-1/2 items-center justify-center bg-card px-6">
-      <form class="w-full max-w-sm" @submit.prevent="submit">
-        <div class="md:hidden flex items-center gap-2 text-2xl font-bold mb-6">
-          <span class="w-9 h-9 rounded-md bg-primary text-primary-foreground grid place-items-center">X</span>
-          xchats
-        </div>
-        <h2 class="text-2xl font-semibold tracking-tight mb-1">{{ t('login.title') }}</h2>
-        <p class="text-sm text-muted-foreground mb-7">{{ t('login.subtitle') }}</p>
-
-        <label class="block text-sm font-medium mb-1.5">{{ t('login.email') }}</label>
-        <div class="relative mb-4">
-          <Mail class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
+      <FieldGroup>
+        <FieldRow :label="t('login.email')">
+          <input
             v-model="email"
             type="email"
             autocomplete="username"
             required
-            placeholder="you@example.com"
-            class="pl-9"
+            placeholder="name@company.kz"
           />
-        </div>
-
-        <label class="block text-sm font-medium mb-1.5">{{ t('login.password') }}</label>
-        <div class="relative mb-5">
-          <Lock class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground z-10" />
+        </FieldRow>
+        <FieldRow :label="t('login.password')">
           <MaskedSecretInput
             v-model="password"
             autocomplete="current-password"
             required
             placeholder="••••••••"
-            class="pl-9"
           />
-        </div>
+        </FieldRow>
+      </FieldGroup>
 
-        <p v-if="error" class="flex items-center gap-2 text-sm text-destructive mb-3">
-          <CircleAlert class="w-4 h-4 shrink-0" /> {{ error }}
-        </p>
+      <button
+        v-if="showDefaultCreds"
+        type="button"
+        class="mb-6 mt-3 text-sm text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+        @click="fillDefaultCreds"
+      >
+        {{ t('login.fillDefaultCreds') }}
+      </button>
+      <div v-else class="h-6" />
 
-        <button
-          v-if="showDefaultCreds"
-          type="button"
-          class="mb-4 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border py-2 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-          @click="fillDefaultCreds"
-        >
-          <Wand2 class="w-3.5 h-3.5" /> {{ t('login.fillDefaultCreds') }}
-        </button>
+      <p v-if="error" class="-mt-3 mb-4 flex items-center gap-2 text-sm text-destructive">
+        <CircleAlert class="size-4 shrink-0" /> {{ error }}
+      </p>
 
-        <Button type="submit" :disabled="busy" class="w-full h-11">
-          <LoaderCircle v-if="busy" class="w-4 h-4 animate-spin" />
-          {{ busy ? t('login.busy') : t('login.submit') }}
-        </Button>
+      <Button type="submit" size="lg" :disabled="busy" class="w-full">
+        <LoaderCircle v-if="busy" class="size-4 animate-spin" />
+        {{ busy ? t('login.busy') : t('login.submit') }}
+      </Button>
 
-        <p class="mt-6 text-center text-xs text-muted-foreground">{{ t('login.noAccount') }}</p>
-
-        <nav :aria-label="t('nav.language')" class="mt-5 flex items-center justify-center gap-2 text-xs">
-          <template v-for="(l, i) in LOCALES" :key="l.code">
-            <span v-if="i > 0" class="text-border" aria-hidden="true">·</span>
-            <button
-              type="button"
-              class="transition hover:text-foreground"
-              :class="locale === l.code ? 'font-medium text-foreground' : 'text-muted-foreground'"
-              :aria-current="locale === l.code ? 'true' : undefined"
-              @click="locale = l.code"
-            >
-              {{ l.label }}
-            </button>
-          </template>
-        </nav>
-      </form>
-    </div>
-  </div>
+      <p class="mt-5 text-center text-sm text-muted-foreground">{{ t('login.noAccount') }}</p>
+    </form>
+  </AuthShell>
 </template>

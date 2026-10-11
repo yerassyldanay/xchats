@@ -13,8 +13,9 @@ const settingsStore = useSettings()
 // while a forced password change is pending (A1): every settings/inbox API
 // call 403s until that's resolved (see requirePasswordChanged, backend
 // server.go), so a clickable rail here would just bounce back to
-// /change-password.
-const showRail = computed(() => !!route.meta.requiresAuth && !auth.mustChangePassword)
+// /change-password. Routes flagged meta.fullscreen (the setup wizard) own the
+// whole viewport and hide it too.
+const showRail = computed(() => !!route.meta.requiresAuth && !route.meta.fullscreen && !auth.mustChangePassword)
 
 // onboardingReady gates the self-healing provider status watcher below: an
 // admin whose forced password change (A1) is still pending cannot call

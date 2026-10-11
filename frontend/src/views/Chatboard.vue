@@ -7,7 +7,6 @@ import { useCrm } from '../stores/crm'
 import ChatList from '../components/ChatList.vue'
 import ChatThread from '../components/ChatThread.vue'
 import AssistantPanel from '../components/AssistantPanel.vue'
-import GettingStartedChecklist from '../components/GettingStartedChecklist.vue'
 
 const inbox = useInbox()
 const accounts = useAccounts()
@@ -68,7 +67,6 @@ onBeforeUnmount(() => inbox.stopRealtime())
 <template>
   <!-- The persistent nav rail is rendered by App.vue; this is just the inbox panes. -->
   <div class="flex h-full flex-col min-h-0">
-    <GettingStartedChecklist />
     <div class="flex flex-1 min-h-0">
       <!-- INB-02: ChatList/AssistantPanel each own their width now (collapsed
            slim rail vs. full column, and — for AssistantPanel — an inline
