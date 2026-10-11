@@ -41,8 +41,8 @@ All notable changes to this project are documented here. Format follows
   (product photo grid, pending-changes strip), Draft, Channels (per-account
   AI-suggestions switch) and Settings (section nav, technical fields behind
   "Расширенные настройки"). The simulator and the knowledge-base assistant
-  are now two modes of one "Проверка ассистента" page. The font is bundled
-  with the app, so the UI makes no request to Google Fonts.
+  are now two modes of one "Проверка ассистента" page. The app's font
+  (Manrope) is bundled rather than fetched from a CDN.
 
 ### Security
 - Retired the shared default admin password in favor of a one-time,
