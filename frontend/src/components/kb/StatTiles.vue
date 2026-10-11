@@ -10,21 +10,21 @@ const { t } = useI18n()
 
 <template>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    <div class="rounded-xl border border-border bg-card p-5">
-      <div class="text-3xl font-bold leading-none text-emerald-600">{{ counts.added }}</div>
-      <div class="text-sm text-muted-foreground mt-2">{{ t('kb.stats.added') }}</div>
+    <div class="rounded-2xl border border-border bg-card p-5">
+      <div data-testid="stat-value" class="text-[32px] font-extrabold leading-none text-success">{{ counts.added }}</div>
+      <div class="mt-2 text-sm font-semibold text-muted-foreground">{{ t('kb.stats.added') }}</div>
     </div>
-    <div class="rounded-xl border border-border bg-card p-5">
-      <div class="text-3xl font-bold leading-none text-amber-600">{{ counts.updated }}</div>
-      <div class="text-sm text-muted-foreground mt-2">{{ t('kb.stats.updated') }}</div>
+    <div class="rounded-2xl border border-border bg-card p-5">
+      <div data-testid="stat-value" class="text-[32px] font-extrabold leading-none text-warning">{{ counts.updated }}</div>
+      <div class="mt-2 text-sm font-semibold text-muted-foreground">{{ t('kb.stats.updated') }}</div>
     </div>
-    <div class="rounded-xl border border-border bg-card p-5">
-      <div class="text-3xl font-bold leading-none text-destructive">{{ counts.removed }}</div>
-      <div class="text-sm text-muted-foreground mt-2">{{ t('kb.stats.removed') }}</div>
+    <div class="rounded-2xl border border-border bg-card p-5">
+      <div data-testid="stat-value" class="text-[32px] font-extrabold leading-none text-destructive">{{ counts.removed }}</div>
+      <div class="mt-2 text-sm font-semibold text-muted-foreground">{{ t('kb.stats.removed') }}</div>
     </div>
-    <div class="rounded-xl border border-border bg-card p-5">
-      <div class="text-3xl font-bold leading-none">{{ counts.total }}</div>
-      <div class="text-sm text-muted-foreground mt-2">{{ t('kb.stats.total') }}</div>
+    <div class="rounded-2xl border border-border bg-card p-5">
+      <div data-testid="stat-value" class="text-[32px] font-extrabold leading-none">{{ counts.total }}</div>
+      <div class="mt-2 text-sm font-semibold text-muted-foreground">{{ t('kb.stats.total') }}</div>
     </div>
   </div>
 </template>

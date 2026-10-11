@@ -19,7 +19,6 @@ import {
   PanelLeftOpen,
   Radio,
   Settings,
-  Sparkles,
   UsersRound,
   WandSparkles,
 } from 'lucide-vue-next'
@@ -106,8 +105,7 @@ const navClusters = computed<NavItem[][]>(() => [
   ],
   [
     { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base', 'draft'] },
-    { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
-    { name: 'chat', icon: Sparkles, label: t('chat.navLabel'), match: ['chat'] },
+    { name: 'simulator', icon: Bot, label: t('nav.check'), match: ['simulator', 'chat'] },
   ],
   [
     { name: 'channels', icon: Radio, label: t('nav.channels'), match: ['channels'] },

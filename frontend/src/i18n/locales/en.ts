@@ -297,6 +297,11 @@ export default {
     },
     stats: { added: 'Added', updated: 'Updated', removed: 'Removed', total: 'Total' },
     draft: {
+      summary: {
+        title: '{n} change awaiting publication | {n} changes awaiting publication',
+        breakdown: '{added} new · {updated} changed · {removed} removed',
+      },
+      importHeading: 'Add changes',
       pageTitle: 'Draft',
       pageSubtitle: 'What will change in the knowledge base after publishing',
       reviewHeading: 'Draft overview',
@@ -442,9 +447,14 @@ export default {
       updated: 'Has an unpublished change',
       removed: 'Pending deletion in the Draft',
     },
+    pending: {
+      count: '{n} change in the Draft | {n} changes in the Draft',
+      rest: "isn't visible to the assistant yet | aren't visible to the assistant yet",
+      review: 'Review and publish',
+    },
     page: {
       title: 'Knowledge Base',
-      subtitle: 'The final data the assistant uses',
+      subtitle: 'Only this data is used by the assistant in its replies',
       entityGuideTitle: "What's the difference between these tabs?",
       entityGuide: {
         topics: 'General FAQs, policies, and company background.',
@@ -474,8 +484,9 @@ export default {
       emptyZones: 'No delivery zones yet.',
       loading: 'Loading knowledge base…',
       promptTab: 'Prompt',
+      editViaAi: 'Edit with ChatGPT or Claude',
       gapsTab: 'Knowledge gaps',
-      materialsTab: 'Files (materials)',
+      materialsTab: 'Media files',
       materialsHint: 'Materials added through knowledge base integrations are shown here for viewing only.',
       materialsImportNew: 'Import new files / URLs',
       materialsEmpty: 'No materials yet.',
@@ -1073,7 +1084,6 @@ export default {
   // their own knowledge base. Card labels reuse kb.entities.* rather than
   // restating entity names here.
   chat: {
-    navLabel: 'Assistant',
     newChat: 'New chat',
     untitled: 'Untitled',
     noConversations: 'No chats yet',
@@ -1106,14 +1116,12 @@ export default {
   },
   simulator: {
     navLabel: 'Simulator',
-    pageTitle: 'Simulator',
-    pageSubtitle: "Test the assistant's answers to customer questions — without a real messaging channel.",
     // KB-12: the backend sends these through the SAME ingestion path as real
     // traffic, so a test conversation is a real row in the Inbox/CRM until
     // cleared — this notice and the button below make that explicit instead
     // of leaving operators to discover it in the shared inbox.
     dataNotice: 'Test messages here appear in the Inbox and CRM like a real conversation, labelled as Simulator.',
-    newConversation: '+ New conversation',
+    newConversation: 'New conversation',
     clearData: 'Clear simulator data',
     clearingData: 'Clearing…',
     clearDataConfirm: {
@@ -2034,6 +2042,11 @@ export default {
     },
     errors: { generic: 'Something went wrong. Please try again.' },
   },
+  check: {
+    title: 'Test the assistant',
+    modeClient: 'As a customer',
+    modeKb: 'Ask about the knowledge base',
+  },
   nav: {
     inbox: 'Inbox',
     channels: 'Channels',
@@ -2049,6 +2062,7 @@ export default {
     primary: 'Primary navigation',
     home: 'Home',
     setupWizard: 'Setup wizard',
+    check: 'Test',
   },
   login: {
     heroLine1: 'Team inbox',

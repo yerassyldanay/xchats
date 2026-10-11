@@ -5,13 +5,12 @@ import ChangePassword from './views/ChangePassword.vue'
 import Dashboard from './views/Dashboard.vue'
 import Setup from './views/Setup.vue'
 import Chatboard from './views/Chatboard.vue'
-import Chat from './views/Chat.vue'
 import Channels from './views/Channels.vue'
 import Customers from './views/Customers.vue'
 import Followups from './views/Followups.vue'
 import Playground from './views/Playground.vue'
 import KnowledgeBase from './views/KnowledgeBase.vue'
-import Simulator from './views/Simulator.vue'
+import AssistantCheck from './views/AssistantCheck.vue'
 import Campaigns from './views/Campaigns.vue'
 import CampaignWizard from './views/CampaignWizard.vue'
 import CampaignDetail from './views/CampaignDetail.vue'
@@ -40,8 +39,9 @@ const router = createRouter({
     { path: '/chatboard/:chatId?', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     // /chat is the Knowledge Base assistant; /chatboard above is the customer
     // inbox. Different surfaces, one unfortunate letter apart — see
-    // internal/httpapi/chat_assistant.go's header.
-    { path: '/chat', name: 'chat', component: Chat, meta: { requiresAuth: true } },
+    // internal/httpapi/chat_assistant.go's header. /chat and /simulator are the
+    // two modes of one page (AssistantCheck), each keeping its own URL.
+    { path: '/chat', name: 'chat', component: AssistantCheck, meta: { requiresAuth: true } },
     { path: '/channels', name: 'channels', component: Channels, meta: { requiresAuth: true } },
     // /accounts was the legacy path — Channels.vue's own name always matched
     // the product's "Channels" label, only the route itself lagged. Old
@@ -58,7 +58,7 @@ const router = createRouter({
     // bookmarks still land somewhere real instead of a bare 404.
     { path: '/playground', redirect: '/draft' },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
-    { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
+    { path: '/simulator', name: 'simulator', component: AssistantCheck, meta: { requiresAuth: true } },
     { path: '/campaigns', name: 'campaigns', component: Campaigns, meta: { requiresAuth: true } },
     // MUST come before /campaigns/:campaignId — that dynamic segment would
     // otherwise swallow this path with campaignId === "new".

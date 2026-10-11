@@ -149,7 +149,7 @@ describe('DraftKnowledgeBase — empty state', () => {
     expect(wrapper.text()).toContain('Изменено')
     expect(wrapper.text()).toContain('Удалено')
     expect(wrapper.text()).toContain('Всего')
-    const counts = wrapper.findAll('.text-3xl').map((el) => el.text())
+    const counts = wrapper.findAll('[data-testid="stat-value"]').map((el) => el.text())
     expect(counts).toEqual(['0', '0', '0', '0'])
   })
 

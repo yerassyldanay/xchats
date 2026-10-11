@@ -302,6 +302,11 @@ export default {
     },
     stats: { added: 'Добавлено', updated: 'Изменено', removed: 'Удалено', total: 'Всего' },
     draft: {
+      summary: {
+        title: 'нет изменений | {n} изменение ждёт публикации | {n} изменения ждут публикации | {n} изменений ждут публикации',
+        breakdown: '{added} новых · {updated} изменено · {removed} удалено',
+      },
+      importHeading: 'Добавить изменения',
       pageTitle: 'Черновик',
       pageSubtitle: 'Что изменится в базе знаний после публикации',
       reviewHeading: 'Обзор черновика',
@@ -447,9 +452,14 @@ export default {
       updated: 'Есть неопубликованное изменение',
       removed: 'Ожидает удаления в Черновике',
     },
+    pending: {
+      count: 'нет изменений в Черновике | {n} изменение в Черновике | {n} изменения в Черновике | {n} изменений в Черновике',
+      rest: 'ассистент всё видит | ещё не видно ассистенту | ещё не видны ассистенту | ещё не видны ассистенту',
+      review: 'Проверить и опубликовать',
+    },
     page: {
       title: 'База знаний',
-      subtitle: 'Финальные данные, которые использует ассистент',
+      subtitle: 'Только эти данные ассистент использует в ответах',
       entityGuideTitle: 'В чём разница между этими вкладками?',
       entityGuide: {
         topics: 'Общие вопросы, правила и информация о компании.',
@@ -479,8 +489,9 @@ export default {
       emptyZones: 'Зон доставки пока нет.',
       loading: 'Загрузка базы знаний…',
       promptTab: 'Промпт',
+      editViaAi: 'Изменить через ChatGPT или Claude',
       gapsTab: 'Пробелы в базе',
-      materialsTab: 'Файлы (материалы)',
+      materialsTab: 'Медиафайлы',
       materialsHint: 'Материалы, добавленные через интеграции базы знаний, доступны здесь только для просмотра.',
       materialsImportNew: 'Импортировать новые файлы / ссылки',
       materialsEmpty: 'Материалов пока нет.',
@@ -1075,7 +1086,6 @@ export default {
   // their own knowledge base. Card labels reuse kb.entities.* rather than
   // restating entity names here.
   chat: {
-    navLabel: 'Ассистент',
     newChat: 'Новый чат',
     untitled: 'Без названия',
     noConversations: 'Пока нет ни одного чата',
@@ -1112,10 +1122,8 @@ export default {
   // Knowledge base surface.
   simulator: {
     navLabel: 'Симулятор',
-    pageTitle: 'Симулятор',
-    pageSubtitle: 'Проверьте ответы ассистента на вопросы клиента — без реального канала связи.',
     dataNotice: 'Тестовые сообщения здесь попадают в Инбокс и CRM как настоящий диалог, с пометкой «Симулятор».',
-    newConversation: '+ Новая беседа',
+    newConversation: 'Новая беседа',
     clearData: 'Очистить данные симулятора',
     clearingData: 'Очистка…',
     clearDataConfirm: {
@@ -2034,6 +2042,11 @@ export default {
     },
     errors: { generic: 'Что-то пошло не так. Попробуйте ещё раз.' },
   },
+  check: {
+    title: 'Проверка ассистента',
+    modeClient: 'Как клиент',
+    modeKb: 'Вопрос о базе знаний',
+  },
   nav: {
     inbox: 'Инбокс',
     channels: 'Каналы',
@@ -2049,6 +2062,7 @@ export default {
     primary: 'Основная навигация',
     home: 'Главная',
     setupWizard: 'Мастер настройки',
+    check: 'Проверка',
   },
   login: {
     heroLine1: 'Командный инбокс',

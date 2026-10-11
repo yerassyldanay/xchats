@@ -4,6 +4,7 @@ import { usePlayground } from '@/stores/playground'
 import { mountKb, testPinia } from '@/test/mount'
 import KnowledgeBase from './KnowledgeBase.vue'
 import ProductRecord from '@/components/kb/records/ProductRecord.vue'
+import ProductCard from '@/components/kb/records/ProductCard.vue'
 import type { DraftChangeSet, DraftView, KbMaterial, ProductRow, TopicRow } from '@/types'
 
 vi.mock('@/lib/sse', () => ({ connectRealtime: vi.fn(() => vi.fn()) }))
@@ -140,12 +141,45 @@ describe('KnowledgeBase — published rows are read-only', () => {
 // Regression test for "empty media slots are visible" (requirement 1):
 // before MediaStrip dropped its v-if="list.length" root, a product with
 // every media column empty rendered NO media rows at all, label included.
-describe('KnowledgeBase — a product with no media still shows every media slot', () => {
+// Знаний база now lists products as photo tiles, so the full record (which
+// Черновик still renders per staged product) is mounted directly here.
+describe('ProductRecord — a product with no media still shows every media slot', () => {
   it('renders every media label (e.g. «Галерея») and the empty indicator, not nothing', async () => {
-    const { wrapper } = await mountWith(emptyChanges(), emptyLive({ products: [product()] }))
-    await switchTab(wrapper, 'Товары')
+    const wrapper = mountKb(ProductRecord, { props: { row: product(), actions: [] } })
     expect(wrapper.text()).toContain('Галерея')
     expect(wrapper.text()).toContain('Не добавлено')
+  })
+})
+
+describe('KnowledgeBase — products tab is a photo grid', () => {
+  it('shows a tile per product with name, price and stock pill, and the full record only in the edit dialog', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges(),
+      emptyLive({
+        products: [product({ name: 'Кофемашина', price: '289 900 ₸', availability_status: 'in_stock', featured_image: 'img-1' })],
+        materials: [material({ id: 'img-1', filename: 'cm.png', mime_type: 'image/png' })],
+      })
+    )
+    await switchTab(wrapper, 'Товары')
+    const card = wrapper.get('[data-testid="kb-product-card"]')
+    expect(card.text()).toContain('Кофемашина')
+    expect(card.text()).toContain('289 900 ₸')
+    expect(card.text()).toContain('В наличии')
+    expect(card.get('img').attributes('src')).toContain('/kb/materials/img-1/content')
+    // The tile deliberately carries no per-field detail.
+    expect(wrapper.findComponent(ProductRecord).exists()).toBe(false)
+  })
+
+  it('marks a product that has an unpublished change', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges({ products: [product({ id: 'p1', ref: 'coffee-machine', name: 'Новое имя' })] }),
+      emptyLive({ products: [product({ id: 'p1', ref: 'coffee-machine', name: 'Старое имя' })] })
+    )
+    await switchTab(wrapper, 'Товары')
+    const card = wrapper.get('[data-testid="kb-product-card"]')
+    expect(card.text()).toContain('Старое имя')
+    expect(card.text()).not.toContain('Новое имя')
+    expect(card.text()).toContain('Есть неопубликованное изменение')
   })
 })
 
@@ -169,9 +203,9 @@ describe('KnowledgeBase — editing a product\'s media through the picker reache
     // KnowledgeBase.vue keeps every tab's content mounted at once (v-show,
     // not v-if — only the toolbar action itself is conditional), so ALL
     // «Изменить» buttons coexist in the DOM regardless of the active tab,
-    // including Обзор's config field cards. Scope to ProductRecord
+    // including Обзор's config field cards. Scope to the product tile
     // specifically rather than a bare text match on the whole page.
-    const productCard = wrapper.findComponent(ProductRecord)
+    const productCard = wrapper.findComponent(ProductCard)
     expect(productCard.exists()).toBe(true)
     const editBtn = productCard.findAll('button').find((b) => b.text() === 'Изменить')
     expect(editBtn).toBeTruthy()
@@ -307,10 +341,10 @@ describe('KnowledgeBase — singleton toolbars', () => {
 // Файлы (материалы): GET /kb already returns the whole materials table
 // (pg.live.materials) — no separate GET /kb/materials call, no lazy
 // fetch-on-tab-open. See KnowledgeBase.vue's own doc comment on `materials`.
-describe('KnowledgeBase — Файлы (материалы) reads pg.live.materials with no extra fetch', () => {
+describe('KnowledgeBase — Медиафайлы reads pg.live.materials with no extra fetch', () => {
   it('renders filename, size, and a ready image as a thumbnail with no GET /kb/materials call', async () => {
     const { wrapper, api } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
-    await switchTab(wrapper, 'Файлы (материалы)')
+    await switchTab(wrapper, 'Медиафайлы')
 
     expect(wrapper.text()).toContain('product-photo.png')
     expect(wrapper.text()).toContain('204.8 KB')
@@ -324,7 +358,7 @@ describe('KnowledgeBase — Файлы (материалы) reads pg.live.materi
       emptyChanges(),
       emptyLive({ materials: [material({ id: 'mat-2', has_content: false, processing_status: 'uploaded' })] })
     )
-    await switchTab(wrapper, 'Файлы (материалы)')
+    await switchTab(wrapper, 'Медиафайлы')
 
     expect(wrapper.find('img[src*="/kb/materials/mat-2/content"]').exists()).toBe(false)
     expect(wrapper.find('a[href*="/kb/materials/mat-2/content"]').exists()).toBe(false)
@@ -335,7 +369,7 @@ describe('KnowledgeBase — Файлы (материалы) reads pg.live.materi
       emptyChanges(),
       emptyLive({ materials: [material({ id: 'mat-3', filename: 'terms.pdf', mime_type: 'application/pdf' })] })
     )
-    await switchTab(wrapper, 'Файлы (материалы)')
+    await switchTab(wrapper, 'Медиафайлы')
 
     expect(wrapper.text()).toContain('terms.pdf')
     const link = wrapper.find('a[href*="/kb/materials/mat-3/content"]')
@@ -347,7 +381,7 @@ describe('KnowledgeBase — Файлы (материалы) reads pg.live.materi
   // actually importing something. The ingestion panel lives on /draft.
   it('shows an Import New Files / URLs button linking to /draft', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive({ materials: [material()] }))
-    await switchTab(wrapper, 'Файлы (материалы)')
+    await switchTab(wrapper, 'Медиафайлы')
 
     const link = wrapper.find('[data-testid="materials-import-new"]')
     expect(link.exists()).toBe(true)

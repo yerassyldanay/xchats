@@ -9,7 +9,7 @@
 // or cancelled from this page.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, CircleCheck, LoaderCircle, Save, WandSparkles, X } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, WandSparkles, X, ChevronLeft } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useEntityTabs } from '@/composables/useEntityTabs'
@@ -212,25 +212,44 @@ const confirmAcceptKey = computed(() => {
 
 <template>
   <div class="h-full bg-background flex flex-col min-w-0">
-    <header class="px-8 py-4 flex items-center justify-between gap-4 border-b border-border bg-card shrink-0">
-      <div class="min-w-0">
-        <h1 class="text-lg font-bold tracking-tight">{{ t('kb.draft.pageTitle') }}</h1>
-        <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
-      </div>
-      <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="requestDiscardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
-          <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
-          <Save v-else class="w-4 h-4" />
-          {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
-        </Button>
-      </div>
-    </header>
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <div class="mx-auto flex min-h-full w-full max-w-[1120px] flex-col px-10 pb-20 pt-10">
+        <RouterLink :to="{ name: 'knowledge-base' }" class="mb-5 inline-flex w-fit items-center gap-1.5 text-[15px] font-semibold hover:text-primary" data-testid="draft-back-to-kb">
+          <ChevronLeft class="size-[18px]" /> {{ t('nav.knowledgeBase') }}
+        </RouterLink>
+        <header class="mb-7">
+          <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('kb.draft.pageTitle') }}</h1>
+          <p class="text-base text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
+        </header>
 
-    <div class="flex-1 overflow-y-auto flex flex-col">
-      <div class="px-8 pt-6 shrink-0">
-        <KbIngestPanel />
-      </div>
+        <!-- Summary: how much is waiting, and the two bulk actions. -->
+        <section
+          v-if="pg.changes && !isEmpty"
+          class="mb-8 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 rounded-2xl border border-border px-7 py-6 shadow-[0_3px_12px_rgba(0,0,0,0.06)]"
+          data-testid="draft-summary"
+        >
+          <div class="min-w-0">
+            <div class="text-[22px] font-extrabold tracking-tight">{{ t('kb.draft.summary.title', counts.total) }}</div>
+            <div class="mt-0.5 text-[15px] text-muted-foreground">
+              {{ t('kb.draft.summary.breakdown', { added: counts.added, updated: counts.updated, removed: counts.removed }) }}
+            </div>
+          </div>
+          <div class="flex items-center gap-5">
+            <button
+              type="button"
+              class="text-[15px] font-bold underline underline-offset-4 hover:text-destructive disabled:opacity-50"
+              :disabled="pg.busy || pg.approving"
+              data-testid="discard-all"
+              @click="requestDiscardAll"
+            >
+              {{ t('kb.draft.discardAll') }}
+            </button>
+            <Button size="lg" class="px-7" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
+              <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
+              {{ t('kb.draft.publishAll') }}
+            </Button>
+          </div>
+        </section>
 
       <div v-if="loading && !pg.changes" class="flex-1 grid place-items-center p-8">
         <div class="text-center max-w-sm">
@@ -246,7 +265,7 @@ const confirmAcceptKey = computed(() => {
            vanishing, and DraftEmptyState now stands in for the tabs/change
            lists only, not for this whole region (the ingestion panel above
            must stay reachable even with an empty draft). -->
-      <div v-else class="px-8 py-6 space-y-6">
+      <div v-else class="space-y-6">
         <div>
           <h2 class="text-sm font-semibold text-muted-foreground">{{ t('kb.draft.reviewHeading') }}</h2>
         </div>
@@ -255,7 +274,7 @@ const confirmAcceptKey = computed(() => {
 
         <div
           v-if="justPublished && isEmpty"
-          class="rounded-lg border border-wa/30 bg-wa/10 px-4 py-3 flex items-center gap-3 text-sm"
+          class="flex items-center gap-3 rounded-2xl bg-success-soft px-5 py-4 text-sm text-success"
           data-testid="publish-success-banner"
         >
           <CircleCheck class="w-4 h-4 shrink-0 text-wa" />
@@ -422,6 +441,15 @@ const confirmAcceptKey = computed(() => {
         <p v-else-if="pg.error" class="flex items-center gap-2 text-sm text-destructive">
           <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
         </p>
+      </div>
+
+      <!-- Adding changes lives below the review: paste a link, upload files,
+           or hand the job to ChatGPT/Claude. Always reachable, even with an
+           empty draft. -->
+      <section class="mt-14" data-testid="draft-import-section">
+        <h2 class="mb-4 text-2xl font-extrabold tracking-tight">{{ t('kb.draft.importHeading') }}</h2>
+        <KbIngestPanel />
+      </section>
       </div>
     </div>
 

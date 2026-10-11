@@ -294,6 +294,11 @@ export default {
     },
     stats: { added: 'Қосылды', updated: 'Өзгертілді', removed: 'Жойылды', total: 'Барлығы' },
     draft: {
+      summary: {
+        title: 'Жариялауды күтетін {n} өзгеріс',
+        breakdown: '{added} жаңа · {updated} өзгертілген · {removed} жойылған',
+      },
+      importHeading: 'Өзгерістер қосу',
       pageTitle: 'Жоба',
       pageSubtitle: 'Жарияланғаннан кейін білім базасында не өзгереді',
       reviewHeading: 'Жобаға шолу',
@@ -439,9 +444,14 @@ export default {
       updated: 'Жарияланбаған өзгеріс бар',
       removed: 'Жобада жоюды күтуде',
     },
+    pending: {
+      count: 'Жобада {n} өзгеріс',
+      rest: 'көмекшіге әлі көрінбейді',
+      review: 'Тексеріп жариялау',
+    },
     page: {
       title: 'Білім базасы',
-      subtitle: 'Көмекші пайдаланатын түпкілікті деректер',
+      subtitle: 'Көмекші жауаптарда тек осы деректерді пайдаланады',
       entityGuideTitle: 'Бұл қойындылардың айырмашылығы неде?',
       entityGuide: {
         topics: 'Жалпы сұрақтар, ережелер және компания туралы ақпарат.',
@@ -471,8 +481,9 @@ export default {
       emptyZones: 'Әзірге жеткізу аймағы жоқ.',
       loading: 'Білім базасы жүктелуде…',
       promptTab: 'Промпт',
+      editViaAi: 'ChatGPT немесе Claude арқылы өзгерту',
       gapsTab: 'Білімдегі олқылықтар',
-      materialsTab: 'Файлдар (материалдар)',
+      materialsTab: 'Медиафайлдар',
       materialsHint: 'Білім базасының интеграциялары арқылы қосылған материалдар мұнда тек көру үшін қолжетімді.',
       materialsImportNew: 'Жаңа файлдар / сілтемелер импорттау',
       materialsEmpty: 'Әзірге материал жоқ.',
@@ -1067,7 +1078,6 @@ export default {
   // Knowledge base surface.
   // chat.* mirrors ru.ts/en.ts's chat.* key-for-key — see locales.test.ts.
   chat: {
-    navLabel: 'Көмекші',
     newChat: 'Жаңа чат',
     untitled: 'Атаусыз',
     noConversations: 'Әзірге чат жоқ',
@@ -1100,10 +1110,8 @@ export default {
   },
   simulator: {
     navLabel: 'Симулятор',
-    pageTitle: 'Симулятор',
-    pageSubtitle: 'Көмекшінің клиент сұрақтарына жауабын тексеріңіз — нақты байланыс арнасынсыз.',
     dataNotice: 'Мұндағы тест хабарламалары нағыз әңгіме сияқты Инбокс пен CRM-ге түседі, «Симулятор» деп белгіленеді.',
-    newConversation: '+ Жаңа әңгіме',
+    newConversation: 'Жаңа әңгіме',
     clearData: 'Симулятор деректерін тазалау',
     clearingData: 'Тазалануда…',
     clearDataConfirm: {
@@ -1837,6 +1845,11 @@ export default {
     },
     errors: { generic: 'Бірдеңе дұрыс болмады. Қайталап көріңіз.' },
   },
+  check: {
+    title: 'Көмекшіні тексеру',
+    modeClient: 'Клиент ретінде',
+    modeKb: 'Білім базасы туралы сұрақ',
+  },
   nav: {
     inbox: 'Инбокс',
     channels: 'Арналар',
@@ -1852,6 +1865,7 @@ export default {
     primary: 'Негізгі навигация',
     home: 'Басты бет',
     setupWizard: 'Баптау шебері',
+    check: 'Тексеру',
   },
   login: {
     heroLine1: 'Топтық инбокс',
