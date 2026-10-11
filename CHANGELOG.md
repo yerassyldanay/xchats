@@ -31,6 +31,18 @@ All notable changes to this project are documented here. Format follows
 ### Changed
 - Database layer ported from PostgreSQL to SQLite (no separate database
   service to run).
+- Operator UI redesigned (xchats 2.0): a light, Manrope-based design
+  language with a collapsible left sidebar replacing the icon rail; a new
+  sign-in screen; a Главная dashboard (first steps, unread chats, overdue
+  tasks, changes awaiting publication) that is now the landing page after
+  sign-in; a full-screen setup wizard (AI key, WhatsApp/Telegram, ChatGPT or
+  Claude knowledge-base connector, public address / ngrok); restyled Inbox,
+  Customers, Tasks, Campaigns (with a three-step wizard), Knowledge Base
+  (product photo grid, pending-changes strip), Draft, Channels (per-account
+  AI-suggestions switch) and Settings (section nav, technical fields behind
+  "Расширенные настройки"). The simulator and the knowledge-base assistant
+  are now two modes of one "Проверка ассистента" page. The font is bundled
+  with the app, so the UI makes no request to Google Fonts.
 
 ### Security
 - Retired the shared default admin password in favor of a one-time,
