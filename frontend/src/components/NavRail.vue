@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -8,6 +8,7 @@ import {
   Check,
   ChevronsUpDown,
   FlaskConical,
+  GitPullRequestDraft,
   Globe,
   House,
   Inbox,
@@ -24,6 +25,7 @@ import {
 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useCrm } from '../stores/crm'
+import { usePlayground } from '../stores/playground'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -42,6 +44,7 @@ import AccountSecurityDialog from './settings/AccountSecurityDialog.vue'
 const auth = useAuth()
 const settingsStore = useSettings()
 const crm = useCrm()
+const playground = usePlayground()
 const router = useRouter()
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -64,9 +67,23 @@ const LOCALES = [
 // removed mid-session) is an edge case the "no data" state on the page itself covers.
 const evalsAvailable = ref(false)
 onMounted(async () => {
-  evalsAvailable.value = await evalsApi.probeAvailable()
   void crm.loadBuckets()
+  void refreshDraftCount()
+  evalsAvailable.value = await evalsApi.probeAvailable()
 })
+
+// The Черновик item carries the number of staged knowledge-base changes, so a
+// pending review is visible from anywhere (the Dashboard and the KB banner show
+// the same count). Best-effort: a failed fetch just leaves the badge off.
+async function refreshDraftCount() {
+  if (playground.busy || playground.loading) return
+  try {
+    await playground.load()
+  } catch {
+    // no badge
+  }
+}
+watch(() => route.name, () => void refreshDraftCount())
 
 // Collapsible left sidebar (260px open / 77px icon-only). The open state is a
 // per-browser preference, persisted under the same key the design prototype
@@ -93,8 +110,7 @@ function toggleOpen() {
 type NavItem = { name: string; icon: Component; label: string; match: string[]; adminOnly?: boolean }
 
 // Three clusters with a divider between each: daily triage + outreach, the AI's
-// brain (knowledge + testing it), then setup. Draft has no entry of its own —
-// it is the review step of the Knowledge Base, so that item stays lit on it.
+// brain (knowledge, its review Draft, and testing it), then setup.
 const navClusters = computed<NavItem[][]>(() => [
   [
     { name: 'dashboard', icon: House, label: t('nav.home'), match: ['dashboard'] },
@@ -104,7 +120,8 @@ const navClusters = computed<NavItem[][]>(() => [
     { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
   ],
   [
-    { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base', 'draft'] },
+    { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
+    { name: 'draft', icon: GitPullRequestDraft, label: t('nav.draft'), match: ['draft'] },
     { name: 'simulator', icon: Bot, label: t('nav.check'), match: ['simulator', 'chat'] },
   ],
   [
@@ -195,6 +212,14 @@ async function switchOrg(orgId: string) {
               :class="open ? '' : 'absolute left-[30px] top-1.5'"
             >
               {{ overdueCount > 99 ? '99+' : overdueCount }}
+            </span>
+            <span
+              v-if="item.name === 'draft' && playground.pendingTotal > 0"
+              data-testid="nav-draft-badge"
+              class="grid h-5 min-w-5 flex-none place-items-center rounded-full bg-primary-soft px-1.5 text-[11px] font-bold text-primary"
+              :class="open ? '' : 'absolute left-[30px] top-1.5'"
+            >
+              {{ playground.pendingTotal > 99 ? '99+' : playground.pendingTotal }}
             </span>
             <span
               v-if="item.name === 'settings' && settingsStore.hasUnhealthyProvider"

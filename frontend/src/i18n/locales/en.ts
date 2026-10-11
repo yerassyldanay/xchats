@@ -295,7 +295,6 @@ export default {
         status: 'Status',
       },
     },
-    stats: { added: 'Added', updated: 'Updated', removed: 'Removed', total: 'Total' },
     draft: {
       summary: {
         title: '{n} change awaiting publication | {n} changes awaiting publication',
@@ -304,7 +303,6 @@ export default {
       importHeading: 'Add changes',
       pageTitle: 'Draft',
       pageSubtitle: 'What will change in the knowledge base after publishing',
-      reviewHeading: 'Draft overview',
       publishAll: 'Publish all',
       discardAll: 'Discard all',
       publishConfirm: {
@@ -843,6 +841,12 @@ export default {
       footerNote:
         'The QR code is never stored. Tokens are stored encrypted and never shown again. For WhatsApp Cloud API, Instagram and Messenger, configure prerequisites in the Channel setup tab.',
       footerNoteCta: 'Open Channel setup →',
+      footerNoteBasic: 'The QR code is never stored. Tokens are stored encrypted and never shown again.',
+      comingSoon: {
+        title: 'Coming soon',
+        hint: 'The official Meta channels are not available yet. For now, connect WhatsApp by QR code and Telegram bots.',
+        badge: 'Coming soon',
+      },
       whatsapp: {
         name: 'WhatsApp',
         tagline: 'Connect a number via QR code',
@@ -968,6 +972,7 @@ export default {
     page: {
       title: 'Channels',
       subtitle: 'Connect WhatsApp, Telegram, Instagram and Messenger',
+      subtitleBasic: 'Connect WhatsApp by QR code and Telegram bots',
       tabs: {
         accounts: 'Connected accounts',
         setup: 'Channel setup',
@@ -2059,6 +2064,7 @@ export default {
   },
   nav: {
     inbox: 'Inbox',
+    draft: 'Draft',
     channels: 'Channels',
     knowledgeBase: 'Knowledge base',
     testsAndBenchmarks: 'Tests & Benchmarks',
@@ -2075,13 +2081,20 @@ export default {
     check: 'Test',
   },
   login: {
-    heroLine1: 'Team inbox',
-    heroLine2: 'and AI assistant',
-    benefitInbox: 'One WhatsApp inbox',
-    benefitAi: 'AI replies (suggest and send)',
-    benefitSecurity: 'Security and control',
+    heroLine1: 'A team inbox',
+    heroLine2: 'with an AI assistant that never makes things up',
+    heroLead:
+      'xchats brings your WhatsApp and Telegram conversations into one window, keeps customer profiles and follow-ups, and runs bulk campaigns. The AI drafts every reply strictly from your knowledge base — prices, stock and delivery times are filled in by code, not by the model. A person approves each reply by default; auto-reply can be switched on for a schedule.',
+    features: {
+      inbox: { title: 'One shared inbox', desc: 'WhatsApp (by QR code) and Telegram in a single window; assign conversations to teammates.' },
+      kb: { title: 'Answers from your knowledge base', desc: 'The assistant drafts replies from your products, tariffs and delivery rules — and never invents a number.' },
+      crm: { title: 'Customers and follow-ups', desc: 'Customer profiles with status, tags and notes, plus a reminder for every promised next step.' },
+      campaigns: { title: 'Campaigns', desc: 'Bulk messages with pauses between sends and delivery windows.' },
+      review: { title: 'Draft and check', desc: 'Knowledge-base changes land in a Draft first; the simulator tests answers without a real customer.' },
+      privacy: { title: 'Your data stays yours', desc: 'Runs on your computer or server, with no telemetry.' },
+    },
     title: 'Sign in',
-    subtitle: 'Sign in to open your inbox',
+    subtitle: 'Sign in to your team workspace',
     email: 'Email',
     password: 'Password',
     submit: 'Sign in',

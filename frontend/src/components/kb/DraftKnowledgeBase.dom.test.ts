@@ -137,20 +137,17 @@ describe('DraftKnowledgeBase — empty state', () => {
     expect(addButtons).toHaveLength(0)
   })
 
-  // AC4: the review region (heading + StatTiles) must stay visible even
-  // with nothing pending — DraftEmptyState now stands in for the entity
-  // tabs/change lists only, never for the whole region (see
-  // DraftKnowledgeBase.vue's own template comment on this v-if chain).
-  it('AC4: still shows the review heading and all-zero StatTiles alongside the empty state', async () => {
+  // AC4: with nothing pending the page shows the empty state and NO summary
+  // strip (there is nothing to publish or discard), while the ingestion
+  // section below stays reachable — DraftEmptyState stands in for the entity
+  // tabs/change lists only (see DraftKnowledgeBase.vue's own template comment).
+  it('AC4: shows the empty state and the import section, but no summary strip or tabs', async () => {
     const { wrapper } = await mountWith(emptyChanges(), emptyLive({ topics: [topic()] }))
 
-    expect(wrapper.text()).toContain('Обзор черновика')
-    expect(wrapper.text()).toContain('Добавлено')
-    expect(wrapper.text()).toContain('Изменено')
-    expect(wrapper.text()).toContain('Удалено')
-    expect(wrapper.text()).toContain('Всего')
-    const counts = wrapper.findAll('[data-testid="stat-value"]').map((el) => el.text())
-    expect(counts).toEqual(['0', '0', '0', '0'])
+    expect(wrapper.text()).toContain('Нет неопубликованных изменений')
+    expect(wrapper.find('[data-testid="draft-summary"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="draft-section-header"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="draft-import-section"]').exists()).toBe(true)
   })
 
   it('AC1/AC4: the ingestion panel stays reachable while the draft is still loading', async () => {
@@ -226,8 +223,8 @@ describe('DraftKnowledgeBase — tabs', () => {
   })
 })
 
-describe('DraftKnowledgeBase — stat tiles', () => {
-  it('shows Добавлено/Изменено/Удалено/Всего counts', async () => {
+describe('DraftKnowledgeBase — summary strip', () => {
+  it('says how many changes wait and breaks them down into new / changed / removed', async () => {
     const { wrapper } = await mountWith(
       emptyChanges({
         topics: [topic({ id: 'new', slug: 'new' }), topic({ title: 'edited' })],
@@ -238,10 +235,19 @@ describe('DraftKnowledgeBase — stat tiles', () => {
         products: [product({ id: 'gone', ref: 'gone', name: 'T' })],
       })
     )
-    expect(wrapper.text()).toContain('Добавлено')
-    expect(wrapper.text()).toContain('Изменено')
-    expect(wrapper.text()).toContain('Удалено')
-    expect(wrapper.text()).toContain('Всего')
+    const summary = wrapper.get('[data-testid="draft-summary"]')
+    expect(summary.text()).toContain('3 изменения ждут публикации')
+    expect(summary.text()).toContain('1 новых · 1 изменено · 1 удалено')
+    expect(summary.find('[data-testid="publish-all"]').exists()).toBe(true)
+    expect(summary.find('[data-testid="discard-all"]').exists()).toBe(true)
+  })
+
+  it('titles the active tab like the Knowledge Base does, with its pending count', async () => {
+    const { wrapper } = await mountWith(
+      emptyChanges({ topics: [topic({ id: 'a', slug: 'a' }), topic({ id: 'b', slug: 'b' })] }),
+      emptyLive()
+    )
+    expect(wrapper.get('[data-testid="draft-section-header"]').text()).toContain('Темы · 2')
   })
 })
 

@@ -115,10 +115,17 @@ async function installServer(opts: { isAdmin: boolean; state?: Partial<SetupStat
 }
 
 let wrapper: VueWrapper<any> | undefined
-beforeEach(() => vi.clearAllMocks())
+// The Meta channels are switched off by default (lib/featureFlags.ts); every
+// suite below that exercises them turns the flag on, and the dedicated
+// "switched off" suite at the end turns it back off.
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.stubEnv('VITE_ENABLE_META_CHANNELS', 'true')
+})
 afterEach(() => {
   wrapper?.unmount()
   wrapper = undefined
+  vi.unstubAllEnvs()
 })
 
 async function mountChannels(user: User) {
@@ -482,11 +489,11 @@ describe('Channels — per-row AI suggestions switch', () => {
     return { w, api }
   }
 
-  it('shows the account as a row with its AI state, and the switch reflects "on"', async () => {
+  it('shows the account as a card with its AI state, and the switch reflects "on"', async () => {
     const { w } = await mountWith('suggestions')
     const row = w.get('[data-testid="account-row"]')
     expect(row.text()).toContain('Qazan Home · Sales')
-    expect(row.get('[data-testid="account-ai-state"]').text()).toBe('Включено')
+    expect(row.get('[data-testid="account-ai-state"]').text()).toBe('Подсказки')
     expect(row.get('[data-testid="account-ai-toggle"]').attributes('aria-checked')).toBe('true')
   })
 
@@ -495,7 +502,7 @@ describe('Channels — per-row AI suggestions switch', () => {
     await w.get('[data-testid="account-ai-toggle"]').trigger('click')
     await flushPromises()
     expect(api.put).toHaveBeenCalledWith('/accounts/acct-1/automation', { mode: 'off', wait_seconds_override: 10, schedule })
-    expect(w.get('[data-testid="account-ai-state"]').text()).toBe('Выключено')
+    expect(w.get('[data-testid="account-ai-state"]').text()).toBe('Автоматизация выключена')
   })
 
   it('switching back on restores the mode it had before — auto-reply is not silently downgraded', async () => {
@@ -520,5 +527,68 @@ describe('Channels — per-row AI suggestions switch', () => {
     await w.get('[data-testid="account-ai-toggle"]').trigger('click')
     await flushPromises()
     expect(w.get('[data-testid="account-row"]').text()).toContain('Не удалось')
+  })
+})
+
+describe('Channels — Meta channels switched off (default)', () => {
+  function account(channel: Account['channel'], id: string, name: string): Account {
+    return {
+      id,
+      channel,
+      display_name: name,
+      external_handle: 'handle',
+      connection_state: 'connected',
+      assigned: true,
+      last_live_event_at: null,
+      created_at: null,
+      webhook_url: null,
+      webhook_registered_at: null,
+      webhook_last_checked_at: null,
+      webhook_last_error: null,
+      automation: { mode: 'off', wait_seconds: 5, wait_seconds_override: null, default_wait_seconds: 5, schedule: [] },
+    }
+  }
+
+  beforeEach(() => vi.unstubAllEnvs())
+
+  it('hides the Channel setup tab, the Meta filter pills and Meta accounts', async () => {
+    await installServer({ isAdmin: true })
+    const { wrapper: w } = await mountChannels(admin())
+    useAccounts().accounts = [
+      account('whatsapp', 'a-wa', 'Sales WA'),
+      account('instagram', 'a-ig', 'Shop Instagram'),
+      account('messenger', 'a-fb', 'Shop Page'),
+    ]
+    await flushPromises()
+
+    expect(w.text()).toContain('Sales WA')
+    expect(w.text()).not.toContain('Shop Instagram')
+    expect(w.text()).not.toContain('Shop Page')
+    expect(w.text()).not.toContain('Настройка каналов')
+    expect(w.findAll('button').some((b) => b.text().includes('Instagram'))).toBe(false)
+    expect(w.findAll('[data-testid="account-row"]')).toHaveLength(1)
+  })
+
+  it('the connect dialog offers WhatsApp and Telegram, and lists the Meta channels as coming soon', async () => {
+    await installServer({ isAdmin: true })
+    await mountChannels(admin())
+    await openAddDialog()
+
+    const b = body()
+    expect(b.find('[data-testid="meta-coming-soon"]').exists()).toBe(true)
+    expect(b.text()).toContain('Скоро')
+    expect(b.text()).toContain('Instagram')
+    // The Instagram card is informational only — not a button that starts OAuth.
+    expect(b.findAll('button').some((btn) => btn.text().includes('Instagram'))).toBe(false)
+    expect(b.findAll('button').some((btn) => btn.text().includes('Telegram-бот'))).toBe(true)
+  })
+
+  it('refuses a resumed Meta start channel instead of opening its connect flow', async () => {
+    const { api } = await installServer({ isAdmin: true })
+    useAuth().user = admin()
+    wrapper = mountKb(AddAccountDialog, { pinia: testPinia(), props: { startChannel: 'instagram' } })
+    await flushPromises()
+    expect(api.post).not.toHaveBeenCalledWith('/instagram-accounts/oauth/start', {})
+    expect(body().find('[data-testid="meta-coming-soon"]').exists()).toBe(true)
   })
 })

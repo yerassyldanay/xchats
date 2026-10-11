@@ -4,6 +4,7 @@ import { mountKb, testPinia } from '@/test/mount'
 import { useAuth } from '@/stores/auth'
 import { useSettings } from '@/stores/settings'
 import { useCrm } from '@/stores/crm'
+import { usePlayground } from '@/stores/playground'
 import NavRail from './NavRail.vue'
 
 vi.mock('@/api/evals', () => ({ evalsApi: { probeAvailable: vi.fn(async () => false) } }))
@@ -92,7 +93,7 @@ describe('NavRail — collapsible sidebar', () => {
     expect(wrapper.get('[data-testid="nav-overdue-badge"]').text()).toBe('99+')
   })
 
-  it('keeps the Knowledge Base link active while on the Draft page', async () => {
+  it('lights the Draft link, not Knowledge Base, while on the Draft page', async () => {
     const router = testRouter()
     const pinia = testPinia()
     const auth = useAuth()
@@ -100,7 +101,20 @@ describe('NavRail — collapsible sidebar', () => {
     const wrapper = mountKb(NavRail, { pinia, global: { plugins: [router] } })
     await router.push('/draft')
     await wrapper.vm.$nextTick()
-    expect(wrapper.get('a[aria-label="База знаний"]').classes()).toContain('bg-secondary')
+    expect(wrapper.get('a[aria-label="Черновик"]').classes()).toContain('bg-secondary')
+    expect(wrapper.get('a[aria-label="База знаний"]').classes()).not.toContain('bg-secondary')
     expect(wrapper.get('a[aria-label="Инбокс"]').classes()).not.toContain('bg-secondary')
+  })
+
+  it('shows the number of pending Draft changes on the Draft link, capped at 99+', async () => {
+    const { wrapper } = mountNavRail()
+    const pg = usePlayground()
+    expect(wrapper.find('[data-testid="nav-draft-badge"]').exists()).toBe(false)
+    pg.changes = { topics: [{}, {}, {}], deletes: [], config: null } as any
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-testid="nav-draft-badge"]').text()).toBe('3')
+    pg.changes = { topics: Array.from({ length: 120 }, () => ({})), deletes: [], config: null } as any
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('[data-testid="nav-draft-badge"]').text()).toBe('99+')
   })
 })

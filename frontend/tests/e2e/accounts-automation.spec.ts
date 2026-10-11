@@ -92,11 +92,11 @@ test('Channels page shows each account\'s automation badge from GET /accounts', 
 
   await page.goto('/accounts')
 
-  // Each account is a row with its AI state ("ИИ-подсказки" switch + label).
+  // Each account is a card with its AI state badge (and the "ИИ-подсказки" switch).
   const offRow = page.getByTestId('account-row').filter({ hasText: 'Off channel' })
-  await expect(offRow.getByTestId('account-ai-state')).toHaveText('Выключено')
+  await expect(offRow.getByTestId('account-ai-state')).toHaveText('Автоматизация выключена')
   const autoRow = page.getByTestId('account-row').filter({ hasText: 'Auto channel' })
-  await expect(autoRow.getByTestId('account-ai-state')).toHaveText('Авто по расписанию')
+  await expect(autoRow.getByTestId('account-ai-state')).toHaveText('Автоответ по расписанию')
 })
 
 test('the automation dialog opens with the effective defaults from the channel', async ({ page }) => {
@@ -118,7 +118,7 @@ test('switching to Off and saving PUTs the new mode and patches the card in plac
   await put.install()
 
   await page.goto('/accounts')
-  await expect(page.getByTestId('account-ai-state')).toHaveText('Включено')
+  await expect(page.getByTestId('account-ai-state')).toHaveText('Подсказки')
 
   await page.getByTitle('Автоматизация').click()
   await page.getByRole('button', { name: /^Выключено/ }).click()
@@ -128,7 +128,7 @@ test('switching to Off and saving PUTs the new mode and patches the card in plac
   // store patched the account in place (stores/accounts.ts's
   // updateAutomation) rather than needing a page reload to show it.
   await expect(page.getByText('Автоматизация — Sales WA')).toHaveCount(0)
-  await expect(page.getByTestId('account-ai-state')).toHaveText('Выключено')
+  await expect(page.getByTestId('account-ai-state')).toHaveText('Автоматизация выключена')
 
   expect(put.bodies).toEqual([{ mode: 'off', wait_seconds_override: null, schedule: [] }])
 })

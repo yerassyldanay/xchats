@@ -19,6 +19,7 @@ import { useAuth } from '../stores/auth'
 import { useChannelSetup, type GuidedChannel } from '../stores/channelSetup'
 import { ApiError } from '../api/client'
 import { log } from '../lib/logfmt'
+import { isMetaChannel, metaChannelsEnabled } from '../lib/featureFlags'
 import type { AdminContact, ConnectableChannel, SetupKey, WaPairStatus, WhatsAppCloudPhoneNumber } from '../types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -101,6 +102,9 @@ const phoneNumbers = ref<WhatsAppCloudPhoneNumber[]>([])
 const selectedPhoneNumberId = ref('')
 const pin = ref('')
 
+// Read once per dialog: the flag is a build-time constant.
+const metaEnabled = metaChannelsEnabled()
+
 function onOpenChange(v: boolean) {
   if (!v) emit('close')
 }
@@ -115,6 +119,9 @@ function onOpenChange(v: boolean) {
 // opaque Meta error, and a member sees an explanatory message instead of a
 // dead end.
 function pickChannel(c: Channel) {
+  // Meta channels are switched off in the UI (see lib/featureFlags.ts) — also
+  // covers a resumed startChannel, so no flow can reach them by another door.
+  if (isMetaChannel(c) && !metaEnabled) return
   channel.value = c
   error.value = ''
   blockedMissingKey.value = null
@@ -499,6 +506,7 @@ onBeforeUnmount(stopPolling)
             </button>
           </div>
 
+          <template v-if="metaEnabled">
           <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             <Settings2 class="w-3.5 h-3.5" /> {{ t('accounts.dialog.tierAdvanced') }}
           </p>
@@ -584,6 +592,34 @@ onBeforeUnmount(stopPolling)
               </span>
             </button>
           </div>
+          </template>
+          <!-- Official Meta channels are switched off for now (VITE_ENABLE_META_CHANNELS):
+               show what is coming instead of a connect flow. -->
+          <div v-else data-testid="meta-coming-soon">
+            <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Settings2 class="w-3.5 h-3.5" /> {{ t('accounts.dialog.comingSoon.title') }}
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground">{{ t('accounts.dialog.comingSoon.hint') }}</p>
+            <ul class="mt-3 grid gap-3 sm:grid-cols-3">
+              <li
+                v-for="soon in [
+                  { icon: WhatsappIcon, tile: 'bg-teal-600', name: t('accounts.dialog.whatsappCloud.name') },
+                  { icon: InstagramIcon, tile: 'bg-fuchsia-600', name: t('accounts.dialog.instagram.name') },
+                  { icon: MessengerIcon, tile: 'bg-[#0084FF]', name: t('accounts.dialog.messenger.name') },
+                ]"
+                :key="soon.name"
+                class="flex items-center gap-3 rounded-xl border border-dashed border-border p-3 opacity-75"
+              >
+                <span class="grid size-9 shrink-0 place-items-center rounded-[10px] text-white" :class="soon.tile">
+                  <component :is="soon.icon" class="size-5" />
+                </span>
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-semibold">{{ soon.name }}</span>
+                  <span class="block text-xs font-medium text-muted-foreground">{{ t('accounts.dialog.comingSoon.badge') }}</span>
+                </span>
+              </li>
+            </ul>
+          </div>
           <p v-if="error" class="flex items-start gap-2 text-sm text-destructive">
             <CircleAlert class="w-4 h-4 shrink-0 mt-0.5" /> {{ error }}
           </p>
@@ -619,8 +655,8 @@ onBeforeUnmount(stopPolling)
           </div>
 
           <p class="rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-            {{ t('accounts.dialog.footerNote') }}
-            <button type="button" class="font-medium text-primary underline underline-offset-2" @click="emit('open-setup')">
+            {{ t(metaEnabled ? 'accounts.dialog.footerNote' : 'accounts.dialog.footerNoteBasic') }}
+            <button v-if="metaEnabled" type="button" class="font-medium text-primary underline underline-offset-2" @click="emit('open-setup')">
               {{ t('accounts.dialog.footerNoteCta') }}
             </button>
           </p>
