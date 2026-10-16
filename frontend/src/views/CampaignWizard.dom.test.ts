@@ -143,7 +143,7 @@ async function mountWizardInScheduleStep() {
 describe('CampaignWizard — audience-first step order (CAM-15)', () => {
   it('starts on the Audience step with no message field visible yet', async () => {
     const wrapper = await mountWizard()
-    expect(wrapper.find('[data-testid="wizard-step-audience"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="wizard-step-audience"]').attributes('aria-current')).toBe('step')
     expect(wrapper.find('[data-testid="message-textarea"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="paste-recipients"]').exists()).toBe(true)
   })
@@ -170,7 +170,7 @@ describe('CampaignWizard — audience-first step order (CAM-15)', () => {
 
     expect(api.post).toHaveBeenCalledWith('/campaigns', { name: 'Test campaign', account_id: 'acct-1', message_body: '(draft)' })
     expect(api.replaceCampaignRecipients).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="wizard-step-message"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="wizard-step-message"]').attributes('aria-current')).toBe('step')
     expect(wrapper.find('[data-testid="message-textarea"]').exists()).toBe(true)
   })
 
@@ -179,7 +179,7 @@ describe('CampaignWizard — audience-first step order (CAM-15)', () => {
     await wrapper.find('[data-testid="wizard-step-audience"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="wizard-step-audience"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="wizard-step-audience"]').attributes('aria-current')).toBe('step')
     expect((wrapper.find('[data-testid="paste-recipients"]').element as HTMLTextAreaElement).value).toBe('77011234567,Aigul')
   })
 })

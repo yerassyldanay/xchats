@@ -9,7 +9,7 @@
 // or cancelled from this page.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleAlert, CircleCheck, LoaderCircle, Save, WandSparkles, X } from 'lucide-vue-next'
+import { CircleAlert, CircleCheck, LoaderCircle, WandSparkles, X } from 'lucide-vue-next'
 import { usePlayground } from '@/stores/playground'
 import { useDraftChanges } from '@/composables/useDraftChanges'
 import { useEntityTabs } from '@/composables/useEntityTabs'
@@ -18,9 +18,9 @@ import { useDraftSelection, type SelectionTarget } from '@/composables/useDraftS
 import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import type { ChangeEntry, ChangeKind } from '@/composables/draftChanges'
 import type { ContactRow, DeliveryZoneRow, PolicyRow, TariffInfoRow } from '@/types'
+import { RouterLink } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import EntityTabs from './EntityTabs.vue'
-import StatTiles from './StatTiles.vue'
 import ChangeList from './ChangeList.vue'
 import ConfigChangeGroup from './ConfigChangeGroup.vue'
 import DraftEmptyState from './DraftEmptyState.vue'
@@ -92,6 +92,13 @@ const visibleTargets = computed<SelectionTarget[]>(() =>
     : []
 )
 const allVisibleSelected = computed(() => selection.allSelected(visibleTargets.value))
+
+// «Темы · 3» above the active tab's cards — the same heading /knowledge-base
+// puts over its lists, counting what is pending on this tab.
+const sectionTitle = computed(() => {
+  const label = tabs.value.find((tb) => tb.key === active.value)?.label ?? ''
+  return SELECTABLE_KINDS.includes(active.value as ChangeKind) ? `${label} · ${visibleTargets.value.length}` : label
+})
 
 function toggleSelectAll() {
   selection.setMany(visibleTargets.value, !allVisibleSelected.value)
@@ -212,27 +219,49 @@ const confirmAcceptKey = computed(() => {
 
 <template>
   <div class="h-full bg-background flex flex-col min-w-0">
-    <header class="px-8 py-4 flex items-center justify-between gap-4 border-b border-border bg-card shrink-0">
-      <div class="min-w-0">
-        <h1 class="text-lg font-bold tracking-tight">{{ t('kb.draft.pageTitle') }}</h1>
-        <p class="text-sm text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
+    <header class="flex shrink-0 flex-wrap items-start justify-between gap-4 px-10 pb-5 pt-10">
+      <div>
+        <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('kb.draft.pageTitle') }}</h1>
+        <p class="text-base text-muted-foreground">{{ t('kb.draft.pageSubtitle') }}</p>
       </div>
-      <div v-if="!isEmpty" class="flex items-center gap-2 shrink-0">
-        <Button variant="ghost" size="sm" :disabled="pg.busy || pg.approving" data-testid="discard-all" @click="requestDiscardAll">{{ t('kb.draft.discardAll') }}</Button>
-        <Button size="sm" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
-          <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
-          <Save v-else class="w-4 h-4" />
-          {{ t('kb.draft.publishAll') }}<span v-if="counts.total"> · {{ counts.total }}</span>
-        </Button>
-      </div>
+      <Button as-child variant="outline" size="lg" class="px-5 text-[15px]" data-testid="draft-back-to-kb">
+        <RouterLink :to="{ name: 'knowledge-base' }">{{ t('nav.knowledgeBase') }}</RouterLink>
+      </Button>
     </header>
 
-    <div class="flex-1 overflow-y-auto flex flex-col">
-      <div class="px-8 pt-6 shrink-0">
-        <KbIngestPanel />
-      </div>
+    <div class="flex-1 space-y-6 overflow-y-auto px-10 pb-16">
+      <!-- Summary strip, same shape as the one /knowledge-base shows above its
+           tabs: how much is waiting, plus the two bulk actions. -->
+      <section
+        v-if="pg.changes && !isEmpty"
+        class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-2xl bg-primary-soft px-6 py-4 text-base"
+        data-testid="draft-summary"
+        role="status"
+      >
+        <p>
+          <b class="font-bold">{{ t('kb.draft.summary.title', counts.total) }}</b>
+          <span class="text-muted-foreground">
+            · {{ t('kb.draft.summary.breakdown', { added: counts.added, updated: counts.updated, removed: counts.removed }) }}
+          </span>
+        </p>
+        <div class="flex items-center gap-5">
+          <button
+            type="button"
+            class="font-bold underline underline-offset-4 hover:text-destructive disabled:opacity-50"
+            :disabled="pg.busy || pg.approving"
+            data-testid="discard-all"
+            @click="requestDiscardAll"
+          >
+            {{ t('kb.draft.discardAll') }}
+          </button>
+          <Button size="lg" class="px-6" :disabled="pg.busy || pg.approving" data-testid="publish-all" @click="requestPublishAll">
+            <LoaderCircle v-if="pg.approving && !pg.publishingKey" class="w-4 h-4 animate-spin" />
+            {{ t('kb.draft.publishAll') }}
+          </Button>
+        </div>
+      </section>
 
-      <div v-if="loading && !pg.changes" class="flex-1 grid place-items-center p-8">
+      <div v-if="loading && !pg.changes" class="grid place-items-center p-8">
         <div class="text-center max-w-sm">
           <div class="mx-auto w-12 h-12 rounded-xl bg-primary/10 text-primary grid place-items-center mb-3">
             <WandSparkles class="w-6 h-6" />
@@ -241,21 +270,13 @@ const confirmAcceptKey = computed(() => {
         </div>
       </div>
 
-      <!-- Review region: always rendered once loaded, regardless of whether
-           anything is pending — StatTiles reads all zeros rather than
-           vanishing, and DraftEmptyState now stands in for the tabs/change
-           lists only, not for this whole region (the ingestion panel above
-           must stay reachable even with an empty draft). -->
-      <div v-else class="px-8 py-6 space-y-6">
-        <div>
-          <h2 class="text-sm font-semibold text-muted-foreground">{{ t('kb.draft.reviewHeading') }}</h2>
-        </div>
-
-        <StatTiles :counts="counts" />
-
+      <!-- Review region: rendered once loaded. DraftEmptyState stands in for
+           the tabs/change lists only, never for this whole region (the
+           ingestion panel below must stay reachable with an empty draft). -->
+      <div v-else class="space-y-6">
         <div
           v-if="justPublished && isEmpty"
-          class="rounded-lg border border-wa/30 bg-wa/10 px-4 py-3 flex items-center gap-3 text-sm"
+          class="flex items-center gap-3 rounded-2xl bg-success-soft px-5 py-4 text-sm text-success"
           data-testid="publish-success-banner"
         >
           <CircleCheck class="w-4 h-4 shrink-0 text-wa" />
@@ -281,14 +302,21 @@ const confirmAcceptKey = computed(() => {
         <template v-else>
           <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
 
+          <div class="flex flex-wrap items-center justify-between gap-3" data-testid="draft-section-header">
+            <h2 class="text-2xl font-extrabold tracking-tight">{{ sectionTitle }}</h2>
+            <Button v-if="visibleTargets.length" variant="outline" data-testid="bulk-select-all" @click="toggleSelectAll">
+              {{ allVisibleSelected ? t('kb.draft.selection.deselectAll') : t('kb.draft.selection.selectAll') }}
+            </Button>
+          </div>
+
           <!-- Bulk bar: only once something is ticked, so the default review
                view stays exactly as it was. Counts across tabs on purpose. -->
           <div
             v-if="!selection.isEmpty.value"
-            class="flex items-center gap-3 flex-wrap rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5"
+            class="flex items-center gap-3 flex-wrap rounded-2xl border border-primary/40 bg-primary-soft px-5 py-3"
             data-testid="draft-bulk-bar"
           >
-            <span class="text-sm font-medium">{{ t('kb.draft.selection.selected', { count: selection.count.value }) }}</span>
+            <span class="text-sm font-semibold">{{ t('kb.draft.selection.selected', { count: selection.count.value }) }}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -303,11 +331,6 @@ const confirmAcceptKey = computed(() => {
               {{ t('kb.draft.selection.clear') }}
             </Button>
           </div>
-          <div v-if="visibleTargets.length" class="flex">
-            <Button variant="ghost" size="sm" data-testid="bulk-select-all" @click="toggleSelectAll">
-              {{ allVisibleSelected ? t('kb.draft.selection.deselectAll') : t('kb.draft.selection.selectAll') }}
-            </Button>
-          </div>
 
           <div v-show="active === 'config'" class="space-y-3 max-w-3xl" data-testid="draft-tab-config">
             <ConfigChangeGroup />
@@ -316,7 +339,7 @@ const confirmAcceptKey = computed(() => {
           <div v-show="active === 'topics'" class="space-y-3" data-testid="draft-tab-topics">
             <ChangeList kind="topics" />
           </div>
-          <div v-show="active === 'products'" class="space-y-3" data-testid="draft-tab-products">
+          <div v-show="active === 'products'" class="grid gap-x-5 gap-y-8 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]" data-testid="draft-tab-products">
             <ChangeList kind="products" />
           </div>
           <div v-show="active === 'tariffs'" class="space-y-3" data-testid="draft-tab-tariffs">
@@ -423,6 +446,14 @@ const confirmAcceptKey = computed(() => {
           <CircleAlert class="w-4 h-4 shrink-0" /> {{ pg.error }}
         </p>
       </div>
+
+      <!-- Adding changes lives below the review: paste a link, upload files,
+           or hand the job to ChatGPT/Claude. Always reachable, even with an
+           empty draft. -->
+      <section class="pt-6" data-testid="draft-import-section">
+        <h2 class="mb-4 text-2xl font-extrabold tracking-tight">{{ t('kb.draft.importHeading') }}</h2>
+        <KbIngestPanel />
+      </section>
     </div>
 
     <KbModalForms />

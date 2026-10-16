@@ -36,7 +36,7 @@ watch(
 </script>
 
 <template>
-  <SectionShell id="mcp" :eyebrow="t('landing.mcp.eyebrow')" :title="t('landing.mcp.title')" :description="t('landing.mcp.description')" muted>
+  <SectionShell id="mcp" :eyebrow="t('landing.mcp.eyebrow')" :title="t('landing.mcp.title')" :description="t('landing.mcp.description')">
     <div ref="demoRef" class="landing-mcp-demo">
       <p class="landing-bubble landing-bubble--customer landing-bubble--wide">
         {{ t('landing.mcp.userMessage') }}

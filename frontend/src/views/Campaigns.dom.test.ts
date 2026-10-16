@@ -106,7 +106,7 @@ describe('Campaigns — Templates tab (CAM-14)', () => {
 
   it('defaults to the Campaigns tab and shows the campaign list', async () => {
     const wrapper = await mountPage()
-    expect(wrapper.find('[data-testid="campaigns-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="campaigns-tab"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.text()).toContain('Campaign c1')
     expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(false)
   })
@@ -118,7 +118,7 @@ describe('Campaigns — Templates tab (CAM-14)', () => {
     await wrapper.find('[data-testid="templates-tab"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="templates-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="templates-tab"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(true)
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/campaign-templates?'))
     expect(routerReplace).toHaveBeenCalledWith({ query: { tab: 'templates' } })
@@ -129,7 +129,7 @@ describe('Campaigns — Templates tab (CAM-14)', () => {
     const wrapper = await mountPage()
     routeQuery = {}
 
-    expect(wrapper.find('[data-testid="templates-tab"]').classes()).toContain('bg-primary')
+    expect(wrapper.find('[data-testid="templates-tab"]').attributes('aria-selected')).toBe('true')
     expect(wrapper.find('[data-testid="template-search"]').exists()).toBe(true)
   })
 

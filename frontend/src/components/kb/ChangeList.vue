@@ -16,7 +16,7 @@ import { useCancelConfirm } from '@/composables/useCancelConfirm'
 import type { ChangeEntry } from '@/composables/draftChanges'
 import { kbActions } from './records/actions'
 import TopicRecord from './records/TopicRecord.vue'
-import ProductRecord from './records/ProductRecord.vue'
+import ProductCard from './records/ProductCard.vue'
 import TariffRecord from './records/TariffRecord.vue'
 import SpecialistRecord from './records/SpecialistRecord.vue'
 import ServiceRecord from './records/ServiceRecord.vue'
@@ -30,7 +30,7 @@ const selection = useDraftSelection()
 const cancelConfirm = useCancelConfirm()
 const { t } = useI18n()
 
-const COMPONENTS = { topics: TopicRecord, products: ProductRecord, tariffs: TariffRecord, specialists: SpecialistRecord, services: ServiceRecord }
+const COMPONENTS = { topics: TopicRecord, products: ProductCard, tariffs: TariffRecord, specialists: SpecialistRecord, services: ServiceRecord }
 const component = computed(() => COMPONENTS[props.kind])
 const entries = computed(() => entriesFor(props.kind))
 

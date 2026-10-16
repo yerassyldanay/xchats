@@ -99,8 +99,8 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
   <div v-if="!collapsed" class="xl:hidden fixed inset-0 z-30 bg-black/30" @click="collapsed = true" />
 
   <aside
-    class="flex flex-col bg-card min-h-0 shrink-0 border-l border-border transition-[width] duration-200"
-    :class="collapsed ? 'w-11' : 'w-[340px] fixed inset-y-0 right-0 z-40 shadow-2xl xl:static xl:shadow-none xl:z-auto'"
+    class="flex flex-col bg-card min-h-0 shrink-0 border-l border-[#EBEBEB] transition-[width] duration-200"
+    :class="collapsed ? 'w-11' : 'w-[clamp(300px,28vw,340px)] fixed inset-y-0 right-0 z-40 shadow-2xl xl:static xl:shadow-none xl:z-auto'"
   >
     <!-- Collapsed: a slim rail with just the expand toggle and a dot for a
          draft ready behind it, mirroring the chat list's own collapse. -->
@@ -192,12 +192,12 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
         <article
           v-for="(d, i) in inbox.drafts"
           :key="d.id"
-          class="rounded-lg border border-border bg-card overflow-hidden"
+          class="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_6px_20px_rgba(0,0,0,0.06)]"
         >
           <!-- card header -->
           <div class="flex items-center justify-between gap-2 px-4 pt-3.5 pb-2.5">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-[13px] font-semibold truncate">
+              <span class="truncate text-[15px] font-extrabold">
                 {{ i === 0 ? t('assistant.recommended') : t('assistant.variant', { n: d.ordinal }) }}
               </span>
               <Badge v-if="conf(d)" variant="secondary" class="text-[11px] px-2 py-0.5" :class="conf(d)!.cls">
@@ -222,22 +222,22 @@ const hasDrafts = computed(() => inbox.drafts.length > 0)
               v-autosize
               rows="2"
               :placeholder="t('assistant.replyPlaceholder')"
-              class="min-h-0 resize-none overflow-hidden rounded-lg bg-muted/40 text-[14px] leading-snug"
+              class="min-h-0 resize-none overflow-hidden rounded-xl border-border bg-background text-[15px] leading-normal"
               @keydown="onDraftKeydown($event, d)"
             />
           </div>
 
           <!-- actions -->
           <div class="flex items-center gap-2 px-4 py-3 mt-1">
-            <Button size="sm" class="flex-1" :disabled="busy[d.id] || !vm(d).text.trim()" @click="approve(d)">
+            <Button class="flex-1" :disabled="busy[d.id] || !vm(d).text.trim()" @click="approve(d)">
               <LoaderCircle v-if="busy[d.id]" class="w-4 h-4 animate-spin" />
               <Send v-else class="w-4 h-4" />
               {{ busy[d.id] ? t('inbox.sending') : t('inbox.send') }}
             </Button>
             <Button
               variant="outline"
-              size="sm"
-              class="px-2.5"
+              size="icon"
+              class="size-11 border-border"
               :disabled="inbox.suggesting"
               :title="t('assistant.regenerate')"
               @click="inbox.regenerate()"

@@ -6,7 +6,7 @@
 // below reflect that runtime guarantee, not an unchecked assumption.
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleCheck, LoaderCircle } from 'lucide-vue-next'
+import { ChevronDown, CircleCheck, LoaderCircle } from 'lucide-vue-next'
 import { useSettings } from '@/stores/settings'
 import { ApiError } from '@/api/client'
 import { CURATED_MODELS, CURATED_STT_MODELS, CURATED_VISION_MODELS } from '@/lib/curatedModels'
@@ -62,6 +62,7 @@ watch(
   },
 )
 
+const showAdvanced = ref(false)
 const busy = ref(false)
 const error = ref('')
 const saved = ref(false)
@@ -87,15 +88,15 @@ async function submit() {
 
 <template>
   <div class="space-y-6">
-    <div class="rounded-lg border border-border bg-card p-5 space-y-4">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-5">
       <div>
-        <h3 class="font-semibold">{{ t('settings.aiEngine.title') }}</h3>
+        <h3 class="text-[22px] font-extrabold tracking-tight">{{ t('settings.aiEngine.title') }}</h3>
         <p class="text-sm text-muted-foreground">{{ t('settings.aiEngine.subtitle') }}</p>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.defaultProvider') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.defaultProvider') }}</label>
           <Select v-model="form.default_provider">
             <SelectTrigger class="mt-1.5" data-testid="ai-engine-default-provider">
               <SelectValue />
@@ -108,7 +109,7 @@ async function submit() {
           </Select>
         </div>
         <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.defaultModel') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.defaultModel') }}</label>
           <Combobox
             v-model="form.default_model"
             :options="CURATED_MODELS[form.default_provider] ?? []"
@@ -117,43 +118,16 @@ async function submit() {
             data-testid="ai-engine-default-model"
           />
         </div>
-        <div class="sm:col-span-2">
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.visionModel') }}</label>
-          <Combobox
-            v-model="form.vision_model"
-            :options="CURATED_VISION_MODELS[form.default_provider] ?? []"
-            :placeholder="t('settings.aiEngine.defaultModelHint')"
-            class="mt-1.5"
-            data-testid="ai-engine-vision-model"
-          />
-          <p class="mt-1 text-[11px] text-muted-foreground">{{ t('settings.aiEngine.visionModelHint') }}</p>
-        </div>
-        <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.maxTokens') }}</label>
-          <Input v-model.number="form.max_tokens" type="number" min="1" class="mt-1.5" />
-        </div>
-        <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.temperature') }}</label>
-          <Input v-model.number="form.temperature" type="number" min="0" max="2" step="0.1" class="mt-1.5" />
-        </div>
-        <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.timeoutSeconds') }}</label>
-          <Input v-model.number="form.timeout_seconds" type="number" min="1" class="mt-1.5" />
-        </div>
-        <div class="flex items-center gap-2 pt-5">
-          <Switch v-model="form.retry" />
-          <span class="text-sm">{{ t('settings.aiEngine.retry') }}</span>
-        </div>
       </div>
 
-      <div class="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
+      <div class="space-y-4 rounded-2xl border border-border bg-secondary/60 p-5">
         <div>
           <h4 class="text-sm font-semibold">{{ t('settings.aiEngine.stt.title') }}</h4>
           <p class="text-xs text-muted-foreground">{{ t('settings.aiEngine.stt.subtitle') }}</p>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.stt.provider') }}</label>
+            <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.stt.provider') }}</label>
             <Select v-model="sttProviderSelectValue">
               <SelectTrigger class="mt-1.5" data-testid="ai-engine-stt-provider">
                 <SelectValue />
@@ -168,7 +142,7 @@ async function submit() {
           </div>
           <template v-if="form.stt_provider">
             <div>
-              <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.stt.model') }}</label>
+              <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.stt.model') }}</label>
               <Combobox
                 v-model="form.stt_model"
                 :options="CURATED_STT_MODELS[form.stt_provider] ?? []"
@@ -178,7 +152,7 @@ async function submit() {
               />
             </div>
             <div>
-              <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.stt.language') }}</label>
+              <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.stt.language') }}</label>
               <Select v-model="form.stt_language">
                 <SelectTrigger class="mt-1.5" data-testid="ai-engine-stt-language">
                   <SelectValue />
@@ -194,7 +168,7 @@ async function submit() {
               </Select>
             </div>
             <div class="sm:col-span-2">
-              <label class="text-xs font-medium text-muted-foreground">{{ t('settings.aiEngine.stt.vocabulary') }}</label>
+              <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.stt.vocabulary') }}</label>
               <Textarea
                 v-model="form.stt_vocabulary"
                 rows="2"
@@ -207,6 +181,54 @@ async function submit() {
         </div>
         <div v-if="form.stt_provider" class="space-y-3 pt-1">
           <ProviderCredentialCard v-for="p in sttCredentialProviders.filter((p) => p.id === form.stt_provider)" :key="p.id" :provider="p" />
+        </div>
+      </div>
+
+      <!-- Technical knobs: almost never changed, so they sit collapsed. v-show,
+           not v-if — the fields stay mounted and part of the form's single Save. -->
+      <div class="border-t border-[#EBEBEB] pt-5">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between gap-3 text-left"
+          :aria-expanded="showAdvanced"
+          aria-controls="ai-engine-advanced"
+          data-testid="ai-engine-advanced-toggle"
+          @click="showAdvanced = !showAdvanced"
+        >
+          <span>
+            <span class="block text-base font-extrabold">{{ t('settings.aiEngine.advanced.title') }}</span>
+            <span class="block text-sm text-muted-foreground">{{ t('settings.aiEngine.advanced.hint') }}</span>
+          </span>
+          <ChevronDown class="size-5 shrink-0 transition-transform" :class="showAdvanced ? 'rotate-180' : ''" />
+        </button>
+        <div v-show="showAdvanced" id="ai-engine-advanced" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.visionModel') }}</label>
+          <Combobox
+            v-model="form.vision_model"
+            :options="CURATED_VISION_MODELS[form.default_provider] ?? []"
+            :placeholder="t('settings.aiEngine.defaultModelHint')"
+            class="mt-1.5"
+            data-testid="ai-engine-vision-model"
+          />
+          <p class="mt-1 text-[11px] text-muted-foreground">{{ t('settings.aiEngine.visionModelHint') }}</p>
+        </div>
+        <div>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.maxTokens') }}</label>
+          <Input v-model.number="form.max_tokens" type="number" min="1" class="mt-1.5" />
+        </div>
+        <div>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.temperature') }}</label>
+          <Input v-model.number="form.temperature" type="number" min="0" max="2" step="0.1" class="mt-1.5" />
+        </div>
+        <div>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.aiEngine.timeoutSeconds') }}</label>
+          <Input v-model.number="form.timeout_seconds" type="number" min="1" class="mt-1.5" />
+        </div>
+        <div class="flex items-center gap-2 pt-5">
+          <Switch v-model="form.retry" />
+          <span class="text-sm">{{ t('settings.aiEngine.retry') }}</span>
+        </div>
         </div>
       </div>
 

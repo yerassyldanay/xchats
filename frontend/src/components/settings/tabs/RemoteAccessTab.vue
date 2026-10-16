@@ -72,7 +72,7 @@ async function saveOptions() {
 
     <ProviderCredentialCard v-if="ngrok" :provider="ngrok" />
 
-    <div class="rounded-lg border border-border bg-card p-5 space-y-4">
+    <div class="rounded-2xl border border-border bg-card p-6 space-y-4">
       <div class="flex items-center justify-between">
         <h3 class="font-semibold">{{ t('settings.remoteAccess.tunnelTitle') }}</h3>
         <Badge :variant="store.tunnel?.running ? 'default' : 'secondary'">
@@ -102,11 +102,11 @@ async function saveOptions() {
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-border">
         <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.remoteAccess.region') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.remoteAccess.region') }}</label>
           <Input v-model="region" :placeholder="t('settings.remoteAccess.regionPlaceholder')" class="mt-1.5" />
         </div>
         <div>
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.remoteAccess.domain') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.remoteAccess.domain') }}</label>
           <Input v-model="domain" :placeholder="t('settings.remoteAccess.domainPlaceholder')" class="mt-1.5" />
         </div>
       </div>

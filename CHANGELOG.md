@@ -31,6 +31,37 @@ All notable changes to this project are documented here. Format follows
 ### Changed
 - Database layer ported from PostgreSQL to SQLite (no separate database
   service to run).
+- Operator UI redesigned (xchats 2.0): a light, Manrope-based design
+  language with a collapsible left sidebar replacing the icon rail; a new
+  sign-in screen; a Главная dashboard (first steps, unread chats, overdue
+  tasks, changes awaiting publication) that is now the landing page after
+  sign-in; a full-screen setup wizard (AI key, WhatsApp/Telegram, ChatGPT or
+  Claude knowledge-base connector, public address / ngrok); restyled Inbox,
+  Customers, Tasks, Campaigns (with a three-step wizard), Knowledge Base
+  (product photo grid, pending-changes strip), Draft, Channels (per-account
+  AI-suggestions switch) and Settings (section nav, technical fields behind
+  "Расширенные настройки"). The simulator and the knowledge-base assistant
+  are now two modes of one "Проверка ассистента" page. The app's font
+  (Manrope) is bundled rather than fetched from a CDN.
+- The official Meta channels (WhatsApp Cloud API, Instagram Direct,
+  Messenger) are switched off in the UI for now and shown as "Coming soon";
+  the backend, stores and API client are untouched. Build the frontend with
+  `VITE_ENABLE_META_CHANNELS=true` to bring them back.
+- Channels: accounts are cards again, each with its channel's icon and brand
+  colour, connection and automation badges and the quick AI switch.
+- Draft has the same page anatomy as the Knowledge Base (summary strip, tabs,
+  "Section · N" heading, product photo cards with before/after captions) and
+  its own sidebar entry with a pending-changes badge.
+- Sign-in page and the public landing page now describe the whole product
+  (nine app sections, the draft-and-approve flow, supported channels). The
+  landing page and the standalone Netlify visit-card use the app's design
+  language; `frontend/visit-card/index.html` is generated from the landing
+  page's stylesheet and copy by `npm run build:visit-card` (a test fails when
+  it is stale).
+- `make screenshots` now captures every app page (login, dashboard, setup,
+  inbox and customer panel, customers, follow-ups, campaigns and wizard,
+  knowledge base and overview, draft and connector, assistant check, channels,
+  connect and automation dialogs, settings and team) into `docs/images/`.
 
 ### Security
 - Retired the shared default admin password in favor of a one-time,

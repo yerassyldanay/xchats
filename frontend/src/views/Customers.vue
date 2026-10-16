@@ -10,6 +10,7 @@ import { channelIcon, channelText } from '../lib/channelBrand'
 import type { Customer, CustomerIdentity } from '../types'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Chip } from '@/components/ui/chip'
 import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -196,15 +197,15 @@ function assigneeName(id: string | null): string {
 
 <template>
   <div class="flex flex-col h-full min-h-0">
-    <header class="px-6 pt-5 pb-3 border-b border-border shrink-0">
-      <div class="flex items-center justify-between gap-3">
-        <h1 class="text-[19px] font-bold tracking-tight">{{ t('crm.list.title') }}</h1>
+    <header class="shrink-0 px-10 pb-2 pt-10">
+      <div class="mb-6 flex items-center justify-between gap-4">
+        <h1 class="text-[32px] font-extrabold leading-tight tracking-tight">{{ t('crm.list.title') }}</h1>
         <div class="flex items-center gap-2">
-          <div class="flex items-center rounded-lg border border-border p-0.5" role="group" :aria-label="t('crm.list.viewToggle.groupLabel')">
+          <div class="flex items-center rounded-full border border-border p-1" role="group" :aria-label="t('crm.list.viewToggle.groupLabel')">
             <button
               type="button"
-              class="rounded-md p-1.5 transition"
-              :class="viewMode === 'grid' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              class="rounded-full p-2 transition-colors"
+              :class="viewMode === 'grid' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
               :aria-pressed="viewMode === 'grid'"
               :title="t('crm.list.viewToggle.grid')"
               @click="viewMode = 'grid'"
@@ -213,8 +214,8 @@ function assigneeName(id: string | null): string {
             </button>
             <button
               type="button"
-              class="rounded-md p-1.5 transition"
-              :class="viewMode === 'list' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+              class="rounded-full p-2 transition-colors"
+              :class="viewMode === 'list' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'"
               :aria-pressed="viewMode === 'list'"
               :title="t('crm.list.viewToggle.list')"
               @click="viewMode = 'list'"
@@ -225,23 +226,22 @@ function assigneeName(id: string | null): string {
           <Button
             v-if="selected.length === 2"
             variant="outline"
-            size="sm"
             @click="showMerge = true"
           >
             <Merge class="w-4 h-4" /> {{ t('crm.list.merge.action') }}
           </Button>
-          <Button size="sm" @click="createCustomer">
+          <Button @click="createCustomer">
             <Plus class="w-4 h-4" /> {{ t('crm.list.newCustomer') }}
           </Button>
         </div>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <div class="relative flex-1 min-w-[240px]">
-          <Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+      <div class="mb-[18px] flex flex-wrap items-stretch overflow-hidden rounded-[28px] border border-border shadow-[0_3px_12px_rgba(0,0,0,0.08)] sm:rounded-full">
+        <div class="relative h-[60px] min-w-[240px] flex-1">
+          <Search class="pointer-events-none absolute left-6 top-1/2 size-[18px] -translate-y-1/2" />
           <Input
             v-model="crm.query"
-            class="pl-9 h-9"
+            class="h-full rounded-none border-0 bg-transparent pl-[54px] text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             :placeholder="t('crm.list.search')"
             @input="onSearch"
           />
@@ -251,7 +251,7 @@ function assigneeName(id: string | null): string {
           :model-value="crm.statusFilter ?? ANY"
           @update:model-value="(v) => { crm.statusFilter = v === ANY ? null : (v as string); crm.loadCustomers() }"
         >
-          <SelectTrigger class="h-9 w-[160px] text-[13px]">
+          <SelectTrigger class="h-[60px] w-[170px] rounded-none border-0 border-l border-border px-5 text-sm font-semibold shadow-none focus:ring-0 focus:ring-offset-0">
             <SelectValue :placeholder="t('crm.list.filters.anyStatus')" />
           </SelectTrigger>
           <SelectContent>
@@ -264,7 +264,7 @@ function assigneeName(id: string | null): string {
           :model-value="crm.tagFilter ?? ANY"
           @update:model-value="(v) => { crm.tagFilter = v === ANY ? null : (v as string); crm.loadCustomers() }"
         >
-          <SelectTrigger class="h-9 w-[150px] text-[13px]">
+          <SelectTrigger class="h-[60px] w-[160px] rounded-none border-0 border-l border-border px-5 text-sm font-semibold shadow-none focus:ring-0 focus:ring-offset-0">
             <SelectValue :placeholder="t('crm.list.filters.anyTag')" />
           </SelectTrigger>
           <SelectContent>
@@ -277,7 +277,7 @@ function assigneeName(id: string | null): string {
           :model-value="crm.channelFilter ?? ANY"
           @update:model-value="(v) => { crm.channelFilter = v === ANY ? null : (v as string); crm.loadCustomers() }"
         >
-          <SelectTrigger class="h-9 w-[150px] text-[13px]">
+          <SelectTrigger class="h-[60px] w-[160px] rounded-none border-0 border-l border-border px-5 text-sm font-semibold shadow-none focus:ring-0 focus:ring-offset-0">
             <SelectValue :placeholder="t('crm.list.filters.anyChannel')" />
           </SelectTrigger>
           <SelectContent>
@@ -292,20 +292,10 @@ function assigneeName(id: string | null): string {
         </Select>
       </div>
 
-      <div class="mt-2.5 flex flex-wrap gap-1.5">
-        <button
-          v-for="f in QUICK"
-          :key="f.key"
-          class="px-2.5 py-1 rounded-full text-[12px] border transition"
-          :class="
-            activeQuickFilter === f.key
-              ? 'bg-primary text-primary-foreground border-primary'
-              : 'border-border text-muted-foreground hover:text-foreground'
-          "
-          @click="setQuickFilter(f.key)"
-        >
+      <div class="mb-6 flex flex-wrap gap-2">
+        <Chip v-for="f in QUICK" :key="f.key" :active="activeQuickFilter === f.key" @click="setQuickFilter(f.key)">
           {{ t(f.label) }}
-        </button>
+        </Chip>
       </div>
     </header>
 
@@ -319,7 +309,7 @@ function assigneeName(id: string | null): string {
         </p>
       </div>
 
-      <ul v-else-if="viewMode === 'list'" class="divide-y divide-border">
+      <ul v-else-if="viewMode === 'list'" class="divide-y divide-[#EBEBEB] px-4">
         <li
           v-for="c in crm.customers"
           :key="c.id"
@@ -361,7 +351,7 @@ function assigneeName(id: string | null): string {
               >
                 {{ c.status.name }}
               </Badge>
-              <Badge v-for="tg in c.tags.slice(0, 3)" :key="tg.id" variant="secondary" class="text-[11px]">
+              <Badge v-for="tg in c.tags.slice(0, 3)" :key="tg.id" variant="secondary" class="px-2.5 py-1 text-[13px] font-semibold">
                 {{ tg.name }}
               </Badge>
             </div>
@@ -376,11 +366,11 @@ function assigneeName(id: string | null): string {
            handles, tags and assignee at a glance, with each connected
            channel directly clickable to jump to THAT conversation rather
            than always the customer's newest one regardless of channel. -->
-      <div v-else class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-6">
+      <div v-else class="grid gap-5 px-10 pb-10 pt-2 [grid-template-columns:repeat(auto-fill,minmax(320px,1fr))]">
         <div
           v-for="c in crm.customers"
           :key="c.id"
-          class="relative rounded-lg border border-border bg-card p-4 transition hover:shadow-pop"
+          class="relative rounded-[20px] border border-border bg-card p-[22px] transition-shadow hover:shadow-[0_6px_20px_rgba(0,0,0,0.1)]"
           :class="{ 'border-primary/50 bg-primary/5': selected.includes(c.id) }"
         >
           <input
@@ -390,38 +380,38 @@ function assigneeName(id: string | null): string {
             :aria-label="c.display_name"
             @change="toggleSelect(c.id)"
           />
-          <button class="flex items-start gap-3 w-full text-left pr-6" @click="openCustomer(c)">
-            <Avatar class="w-10 h-10 shrink-0">
-              <AvatarFallback :class="colorFor(c.id)">{{ initials(c.display_name) }}</AvatarFallback>
+          <button class="flex w-full items-center gap-3.5 pr-6 text-left" @click="openCustomer(c)">
+            <Avatar class="size-[52px] shrink-0">
+              <AvatarFallback :class="colorFor(c.id)" class="text-base font-bold">{{ initials(c.display_name) }}</AvatarFallback>
             </Avatar>
-            <div class="min-w-0 flex-1 pt-0.5">
-              <div class="font-medium truncate">{{ c.display_name || '—' }}</div>
-              <div class="text-[12px] text-muted-foreground truncate">
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[17px] font-bold">{{ c.display_name || '—' }}</div>
+              <div class="truncate text-sm text-muted-foreground">
                 {{ c.phone || c.email || c.identities[0]?.phone || c.identities[0]?.username || '—' }}
               </div>
             </div>
           </button>
 
-          <div v-if="c.status || c.tags.length" class="mt-3 flex flex-wrap gap-1.5">
+          <div v-if="c.status || c.tags.length" class="mt-4 flex flex-wrap gap-1.5">
             <Badge
               v-if="c.status"
               variant="secondary"
-              class="text-[11px]"
+              class="bg-transparent px-2.5 py-1 text-[13px] font-bold"
               :style="c.status.color ? { borderColor: c.status.color, color: c.status.color } : undefined"
             >
               {{ c.status.name }}
             </Badge>
-            <Badge v-for="tg in c.tags.slice(0, 3)" :key="tg.id" variant="secondary" class="text-[11px]">
+            <Badge v-for="tg in c.tags.slice(0, 3)" :key="tg.id" variant="secondary" class="px-2.5 py-1 text-[13px] font-semibold">
               {{ tg.name }}
             </Badge>
           </div>
 
-          <div class="mt-3 flex flex-wrap gap-1.5">
+          <div class="mt-3.5 flex flex-wrap gap-1.5">
             <button
               v-for="ident in c.identities"
               :key="ident.id"
               type="button"
-              class="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] transition hover:bg-muted"
+              class="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[13px] transition-colors hover:bg-secondary"
               :title="t('crm.list.openChannelChat')"
               @click="openChannelChat(c, ident)"
             >
@@ -430,14 +420,14 @@ function assigneeName(id: string | null): string {
             </button>
           </div>
 
-          <div class="mt-3 flex items-center justify-between border-t border-border pt-2.5 text-[11px] text-muted-foreground">
+          <div class="mt-3.5 flex items-center justify-between border-t border-[#EBEBEB] pt-3.5 text-sm text-muted-foreground">
             <span class="truncate">{{ assigneeName(c.assignee_user_id) }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <footer class="px-6 py-2 border-t border-border text-[12px] text-muted-foreground shrink-0">
+    <footer class="shrink-0 border-t border-[#EBEBEB] px-10 py-3 text-sm text-muted-foreground">
       {{ t('crm.list.total', { count: crm.customersTotal }) }}
     </footer>
 

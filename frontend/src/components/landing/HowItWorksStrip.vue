@@ -20,9 +20,9 @@ const STEPS = [
 </script>
 
 <template>
-  <section id="how-it-works" ref="root" class="landing-section">
-    <div class="blog-shell landing-reveal" :class="{ 'is-visible': visible }">
-      <div class="landing-section__head landing-section__head--center">
+  <section id="how-it-works" ref="root" class="landing-section landing-section--muted">
+    <div class="landing-shell landing-reveal" :class="{ 'is-visible': visible }">
+      <div class="landing-section__head">
         <h2 class="landing-section__title">{{ t('landing.how.title') }}</h2>
       </div>
       <div class="landing-steps">

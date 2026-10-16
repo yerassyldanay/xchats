@@ -12,12 +12,12 @@
 // like an operator running one test conversation at a time from Playground.
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bot, CircleAlert, LoaderCircle, Plus, SendHorizontal, Trash2 } from 'lucide-vue-next'
+import { Bot, LoaderCircle, Trash2 } from 'lucide-vue-next'
 import { api, ApiError } from '@/api/client'
 import { useAuth } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SegmentedToggle } from '@/components/ui/segmented-toggle'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
 import type { AiDraft, Message } from '@/types'
 
@@ -223,39 +223,33 @@ async function send(text?: unknown) {
 
 <template>
   <div class="h-full bg-background flex flex-col min-w-0">
-    <header class="px-8 py-4 border-b border-border bg-card shrink-0 flex items-start justify-between gap-4">
-      <div>
-        <h1 class="text-lg font-bold tracking-tight">{{ t('simulator.pageTitle') }}</h1>
-        <p class="text-sm text-muted-foreground">{{ t('simulator.pageSubtitle') }}</p>
-        <p class="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground max-w-md">
-          <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ t('simulator.dataNotice') }}
-        </p>
-      </div>
-      <div class="flex flex-col items-end gap-2 shrink-0">
-        <div class="flex items-center gap-2">
-          <Button variant="outline" size="sm" data-testid="simulator-new-conversation" @click="newConversation">
-            <Plus class="w-3.5 h-3.5" /> {{ t('simulator.newConversation') }}
-          </Button>
-          <Button variant="outline" size="sm" class="text-muted-foreground" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
-            <Trash2 class="w-3.5 h-3.5" /> {{ t('simulator.clearData') }}
-          </Button>
-        </div>
-        <div class="text-right">
-          <label class="block text-[11px] font-medium text-muted-foreground mb-1">{{ t('simulator.environmentLabel') }}</label>
-          <Tabs :model-value="environment" @update:model-value="(v) => (environment = v as 'live' | 'draft')">
-            <TabsList>
-              <TabsTrigger value="live" data-testid="simulator-env-live">{{ t('simulator.environmentLive') }}</TabsTrigger>
-              <TabsTrigger value="draft" data-testid="simulator-env-draft">{{ t('simulator.environmentDraft') }}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </div>
-    </header>
+    <!-- Controls row (the page title and mode switch live in the AssistantCheck
+         wrapper above): which knowledge base to test against, a fresh thread,
+         and wiping the test data. -->
+    <div class="flex shrink-0 flex-wrap items-center justify-end gap-3 border-b border-[#EBEBEB] px-10 py-3.5">
+      <span class="text-sm text-muted-foreground">{{ t('simulator.environmentLabel') }}</span>
+      <SegmentedToggle
+        :model-value="environment"
+        :options="[
+          { value: 'live', label: t('simulator.environmentLive'), testid: 'simulator-env-live' },
+          { value: 'draft', label: t('simulator.environmentDraft'), testid: 'simulator-env-draft' },
+        ]"
+        :aria-label="t('simulator.environmentLabel')"
+        class="border border-border bg-background"
+        @update:model-value="(v) => (environment = v)"
+      />
+      <Button variant="outline" class="h-10 rounded-full px-5" data-testid="simulator-new-conversation" @click="newConversation">
+        {{ t('simulator.newConversation') }}
+      </Button>
+      <Button variant="ghost" size="icon" class="rounded-full text-muted-foreground" :title="t('simulator.clearData')" :aria-label="t('simulator.clearData')" data-testid="simulator-clear-data" @click="clearConfirmOpen = true">
+        <Trash2 class="size-4" />
+      </Button>
+    </div>
 
-    <p v-if="clearResult" class="px-8 pt-3 text-xs text-emerald-600" data-testid="simulator-clear-success">{{ clearResult }}</p>
-    <p v-else-if="clearError" class="px-8 pt-3 text-xs text-destructive" data-testid="simulator-clear-error">{{ clearError }}</p>
+    <p v-if="clearResult" class="px-10 pt-3 text-xs text-success" data-testid="simulator-clear-success">{{ clearResult }}</p>
+    <p v-else-if="clearError" class="px-10 pt-3 text-xs text-destructive" data-testid="simulator-clear-error">{{ clearError }}</p>
 
-    <div ref="listEl" class="flex-1 overflow-y-auto px-8 py-6 space-y-4" data-testid="simulator-messages">
+    <div ref="listEl" class="flex-1 space-y-4 overflow-y-auto px-10 py-6" data-testid="simulator-messages">
       <div v-if="loadingHistory" class="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
         <LoaderCircle class="w-4 h-4 animate-spin" /> {{ t('simulator.loadingHistory') }}
       </div>
@@ -263,24 +257,21 @@ async function send(text?: unknown) {
       <!-- Rich onboarding hero (TODO.md: "replace the plain empty text with a
            rich visual card") — only for a genuinely fresh thread; a restored
            one with real history never shows this even briefly. -->
-      <div v-else-if="!messages.length" class="max-w-lg mx-auto text-center py-8" data-testid="simulator-hero">
-        <div class="mx-auto w-14 h-14 rounded-2xl bg-violet-500/10 text-violet-600 grid place-items-center">
-          <Bot class="w-7 h-7" />
+      <div v-else-if="!messages.length" class="mx-auto max-w-xl py-10 text-center" data-testid="simulator-hero">
+        <div class="mx-auto grid size-16 place-items-center rounded-[20px] bg-primary-soft text-primary">
+          <Bot class="size-7" />
         </div>
-        <h2 class="mt-4 text-base font-semibold">{{ t('simulator.hero.title') }}</h2>
-        <p class="mt-1.5 text-sm text-muted-foreground">{{ t('simulator.hero.body') }}</p>
-        <p class="mt-4 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-2 text-left text-xs text-muted-foreground">
-          <CircleAlert class="w-3.5 h-3.5 shrink-0 mt-0.5" /> {{ t('simulator.dataNotice') }}
-        </p>
-        <div class="mt-5">
-          <p class="mb-2 text-xs font-medium text-muted-foreground">{{ t('simulator.hero.suggestionsLabel') }}</p>
+        <h2 class="mt-6 text-2xl font-extrabold tracking-tight">{{ t('simulator.hero.title') }}</h2>
+        <p class="mt-2.5 text-base leading-normal text-muted-foreground">{{ t('simulator.hero.body') }}</p>
+        <div class="mt-7">
+          <p class="mb-3 text-sm text-muted-foreground">{{ t('simulator.hero.suggestionsLabel') }}</p>
           <div class="flex flex-wrap justify-center gap-2">
             <button
               v-for="s in suggestions"
               :key="s"
               type="button"
               data-testid="simulator-hero-suggestion"
-              class="rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-left transition hover:bg-muted"
+              class="rounded-full border border-border bg-background px-[18px] py-3 text-left text-[15px] font-medium transition-colors hover:bg-secondary"
               @click="send(s)"
             >
               {{ s }}
@@ -294,10 +285,10 @@ async function send(text?: unknown) {
         :key="i"
         data-testid="simulator-message"
         :data-role="m.role"
-        class="max-w-2xl rounded-lg border p-3 text-sm whitespace-pre-wrap wrap-break-word"
-        :class="m.role === 'user' ? 'ml-auto border-primary/30 bg-primary/5' : 'mr-auto border-border bg-card'"
+        class="max-w-2xl whitespace-pre-wrap wrap-break-word rounded-[18px] px-4 py-3 text-[15px] leading-normal"
+        :class="m.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'mr-auto bg-secondary'"
       >
-        <div class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
+        <div class="mb-1 flex items-center gap-1.5 text-xs font-semibold" :class="m.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'">
           <span>{{ m.role === 'user' ? t('simulator.you') : t('simulator.assistant') }}</span>
           <span
             v-if="m.role === 'assistant' && m.usedDraft"
@@ -316,22 +307,24 @@ async function send(text?: unknown) {
       </div>
     </div>
 
-    <p v-if="error" class="px-8 pb-2 text-sm text-destructive" data-testid="simulator-error">{{ error }}</p>
+    <p v-if="error" class="px-10 pb-2 text-sm text-destructive" data-testid="simulator-error">{{ error }}</p>
 
-    <div class="p-4 border-t border-border bg-card shrink-0 flex items-end gap-2">
-      <Textarea
-        v-model="input"
-        :placeholder="t('simulator.inputPlaceholder')"
-        rows="2"
-        class="min-h-0 text-[14px]"
-        data-testid="simulator-input"
-        @keydown.enter.exact.prevent="send"
-      />
-      <Button :disabled="!input.trim() || sending" data-testid="simulator-send" @click="send">
-        <LoaderCircle v-if="sending" class="w-4 h-4 animate-spin" />
-        <SendHorizontal v-else class="w-4 h-4" />
-        {{ t('simulator.send') }}
-      </Button>
+    <div class="shrink-0 px-10 pb-5 pt-3">
+      <div class="mx-auto flex max-w-3xl items-end gap-2 rounded-[28px] border border-border bg-background py-1.5 pl-5 pr-1.5 shadow-[0_3px_12px_rgba(0,0,0,0.06)] transition-colors focus-within:border-foreground">
+        <Textarea
+          v-model="input"
+          :placeholder="t('simulator.inputPlaceholder')"
+          rows="1"
+          class="max-h-40 min-h-0 flex-1 resize-none rounded-none border-0 bg-transparent px-0 py-2.5 text-[15px] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          data-testid="simulator-input"
+          @keydown.enter.exact.prevent="send"
+        />
+        <Button class="h-11 shrink-0 rounded-full px-6" :disabled="!input.trim() || sending" data-testid="simulator-send" @click="send">
+          <LoaderCircle v-if="sending" class="w-4 h-4 animate-spin" />
+          {{ t('simulator.send') }}
+        </Button>
+      </div>
+      <p class="mx-auto mt-3 max-w-3xl text-center text-[13px] text-muted-foreground">{{ t('simulator.dataNotice') }}</p>
     </div>
 
     <ConfirmDeleteDialog

@@ -11,9 +11,9 @@ const { t } = useI18n()
 // suggestions as informational, scheduled_auto as active — the same
 // tone vocabulary Accounts.vue's own connection-state badge already uses.
 const toneMeta: Record<AutomationMode, { badge: string; dot: string; labelKey: string }> = {
-  off: { badge: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground', labelKey: 'automation.badge.off' },
-  suggestions: { badge: 'bg-sky-500/10 text-sky-600 dark:text-sky-400', dot: 'bg-sky-500', labelKey: 'automation.badge.suggestions' },
-  scheduled_auto: { badge: 'bg-wa/10 text-wa', dot: 'bg-wa', labelKey: 'automation.badge.scheduledAuto' },
+  off: { badge: 'bg-secondary text-muted-foreground', dot: 'bg-muted-foreground', labelKey: 'automation.badge.off' },
+  suggestions: { badge: 'bg-primary/10 text-primary', dot: 'bg-primary', labelKey: 'automation.badge.suggestions' },
+  scheduled_auto: { badge: 'bg-success-soft text-success', dot: 'bg-success', labelKey: 'automation.badge.scheduledAuto' },
 }
 
 const meta = computed(() => toneMeta[props.mode])

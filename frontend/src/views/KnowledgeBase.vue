@@ -18,6 +18,8 @@ import type { ContactRow, KbMaterial, PolicyRow, TariffInfoRow } from '@/types'
 import { CONFIG_SECTIONS } from '@/components/kb/kbEntities'
 import { kbActions, LIVE_CONFIG_ACTIONS } from '@/components/kb/records/actions'
 import { kindOfMime, materialContentURL } from '@/components/kb/records/shared'
+import { RouterLink } from 'vue-router'
+import { useAuth } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import PromptTab from '@/components/kb/PromptTab.vue'
@@ -27,6 +29,8 @@ import RecordList from '@/components/kb/RecordList.vue'
 import SpecialistsTab from '@/components/kb/SpecialistsTab.vue'
 import ServicesTab from '@/components/kb/ServicesTab.vue'
 import DraftBanner from '@/components/kb/DraftBanner.vue'
+import DraftPendingBanner from '@/components/kb/DraftPendingBanner.vue'
+import ProductCard from '@/components/kb/records/ProductCard.vue'
 import DeliveryZoneRecord from '@/components/kb/records/DeliveryZoneRecord.vue'
 import ContactsRecord from '@/components/kb/records/ContactsRecord.vue'
 import PoliciesRecord from '@/components/kb/records/PoliciesRecord.vue'
@@ -36,6 +40,7 @@ import KbModalForms from '@/components/kb/forms/KbModalForms.vue'
 import ConfirmDeleteDialog from '@/components/kb/forms/ConfirmDeleteDialog.vue'
 
 const pg = usePlayground()
+const auth = useAuth()
 const { t } = useI18n()
 const modal = useKbModal()
 const { markFor } = usePendingIndex()
@@ -56,9 +61,9 @@ onBeforeUnmount(() => pg.stopRealtime())
 const { tabs, active } = useEntityTabs({
   source: 'live',
   extra: [
+    { key: 'materials', label: t('kb.page.materialsTab'), icon: FileText },
     { key: 'prompt', label: t('kb.page.promptTab'), icon: WandSparkles },
     { key: 'gaps', label: t('kb.page.gapsTab'), icon: TriangleAlert },
-    { key: 'materials', label: t('kb.page.materialsTab'), icon: FileText },
   ],
 })
 
@@ -106,6 +111,24 @@ const toolbar = computed(() => {
   }
 })
 
+// --- section heading above the active tab's content: «Товары · 5», with the
+// tab's contextual button on the right. Only the tabs that list records (or
+// have one primary action) get one — Обзор/Промпт/Пробелы/Медиафайлы carry
+// their own headings.
+const sectionTitle = computed(() => {
+  const a = active.value
+  const live = pg.live
+  const label = tabs.value.find((x) => x.key === a)?.label ?? ''
+  const counts: Record<string, number | undefined> = {
+    topics: live?.topics.length,
+    products: live?.products.length,
+    tariffs: live?.tariffs.length,
+    delivery_zones: live?.zones.length,
+  }
+  return counts[a] !== undefined ? `${label} · ${counts[a]}` : label
+})
+const showSectionHeader = computed(() => !['config', 'prompt', 'gaps', 'materials', 'specialists', 'services'].includes(active.value))
+
 // --- delete flow (topics/tariffs/products/delivery_zones only — contacts/
 // policies have no delete affordance, kbActions already drops it). Deletes
 // straight from ai_* (deleteLiveEntity, KB-13) — no draft/publish detour. --
@@ -142,11 +165,14 @@ watch(active, (a) => {
 
 <template>
   <div class="h-full bg-background flex flex-col min-w-0">
-    <header class="px-8 py-4 flex items-center justify-between border-b border-border bg-card shrink-0">
+    <header class="flex shrink-0 flex-wrap items-start justify-between gap-4 px-10 pb-5 pt-10">
       <div>
-        <h1 class="text-lg font-bold tracking-tight">{{ t('kb.page.title') }}</h1>
-        <p class="text-sm text-muted-foreground">{{ t('kb.page.subtitle') }}</p>
+        <h1 class="mb-1.5 text-[32px] font-extrabold leading-tight tracking-tight">{{ t('kb.page.title') }}</h1>
+        <p class="text-base text-muted-foreground">{{ t('kb.page.subtitle') }}</p>
       </div>
+      <Button v-if="auth.isAdmin" as-child variant="outline" size="lg" class="px-5 text-[15px]" data-testid="kb-edit-via-ai">
+        <RouterLink :to="{ name: 'setup', query: { step: 'kb' } }">{{ t('kb.page.editViaAi') }}</RouterLink>
+      </Button>
     </header>
 
     <div v-if="pg.liveLoading && !pg.live" class="flex-1 grid place-items-center p-8">
@@ -158,12 +184,15 @@ watch(active, (a) => {
       </div>
     </div>
 
-    <div v-else class="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+    <div v-else class="flex-1 space-y-6 overflow-y-auto px-10 pb-16">
       <DraftBanner :show="bannerVisible" @close="bannerVisible = false" />
+      <DraftPendingBanner />
 
-      <div class="flex flex-wrap items-center gap-2">
-        <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" class="flex-1" />
-        <Button v-if="toolbar" size="sm" variant="outline" class="border-dashed border-primary/50 text-primary hover:bg-primary/5" @click="toolbar.action">
+      <EntityTabs :tabs="tabs" :active="active" @update:active="(k) => (active = k)" />
+
+      <div v-if="showSectionHeader" class="flex flex-wrap items-center justify-between gap-3" data-testid="kb-section-header">
+        <h2 class="text-2xl font-extrabold tracking-tight">{{ sectionTitle }}</h2>
+        <Button v-if="toolbar" @click="toolbar.action">
           <Plus class="w-4 h-4" /> {{ toolbar.label }}
         </Button>
       </div>
@@ -171,8 +200,8 @@ watch(active, (a) => {
       <!-- KB-06: a new operator sees six tabs and no explanation of when a
            fact belongs under Topics vs Products vs Policies — collapsed by
            default so it never competes with the tab strip for attention. -->
-      <details class="rounded-md border border-border p-2.5 text-xs text-muted-foreground max-w-2xl" data-testid="entity-guide">
-        <summary class="cursor-pointer font-medium text-foreground">{{ t('kb.page.entityGuideTitle') }}</summary>
+      <details class="max-w-2xl rounded-xl border border-border px-4 py-3 text-sm text-muted-foreground" data-testid="entity-guide">
+        <summary class="cursor-pointer font-semibold text-foreground">{{ t('kb.page.entityGuideTitle') }}</summary>
         <dl class="mt-2 space-y-1.5">
           <div v-for="kind in ENTITY_GUIDE_KINDS" :key="kind">
             <dt class="inline font-medium text-foreground">{{ t(`kb.entities.${kind}.singular`) }}:</dt>
@@ -199,9 +228,20 @@ watch(active, (a) => {
         <RecordList kind="topics" @delete="(key) => askDelete('topics', key)" />
       </div>
 
-      <div v-show="active === 'products'" class="space-y-3" data-testid="live-tab-products">
-        <p v-if="!pg.live?.products.length" class="text-sm text-muted-foreground py-6 text-center">{{ t('kb.page.emptyProducts') }}</p>
-        <RecordList kind="products" @delete="(key) => askDelete('products', key)" />
+      <div v-show="active === 'products'" data-testid="live-tab-products">
+        <p v-if="!pg.live?.products.length" class="py-6 text-center text-sm text-muted-foreground">{{ t('kb.page.emptyProducts') }}</p>
+        <div v-else class="grid gap-x-5 gap-y-8 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
+          <ProductCard
+            v-for="p in pg.live?.products"
+            :key="p.id"
+            :row="p"
+            :pending-mark="markFor('products', p.id)"
+            :actions="kbActions({ page: 'live' })"
+            :busy="pg.busy"
+            @edit="modal.openEdit('products', p, LIVE)"
+            @delete="askDelete('products', p.id)"
+          />
+        </div>
       </div>
 
       <div v-show="active === 'tariffs'" class="space-y-3" data-testid="live-tab-tariffs">

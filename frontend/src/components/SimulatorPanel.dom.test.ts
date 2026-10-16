@@ -84,8 +84,7 @@ describe('SimulatorPanel — test environment toggle (KB-02)', () => {
     expect(api.post).toHaveBeenLastCalledWith('/simulator/messages', expect.objectContaining({ use_draft: false }))
     expect(wrapper.find('[data-testid="simulator-message-draft-badge"]').exists()).toBe(false)
 
-    // reka-ui's TabsTrigger selects on mousedown, not click.
-    await wrapper.find('[data-testid="simulator-env-draft"]').trigger('mousedown', { button: 0 })
+    await wrapper.find('[data-testid="simulator-env-draft"]').trigger('click')
     await flushPromises()
     await wrapper.find('[data-testid="simulator-input"]').setValue('Ещё вопрос')
     await wrapper.find('[data-testid="simulator-send"]').trigger('click')

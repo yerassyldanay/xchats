@@ -92,10 +92,11 @@ test('Channels page shows each account\'s automation badge from GET /accounts', 
 
   await page.goto('/accounts')
 
-  await expect(page.getByText('Off channel')).toBeVisible()
-  await expect(page.getByText('Автоматизация выключена')).toBeVisible()
-  await expect(page.getByText('Auto channel')).toBeVisible()
-  await expect(page.getByText('Автоответ по расписанию')).toBeVisible()
+  // Each account is a card with its AI state badge (and the "ИИ-подсказки" switch).
+  const offRow = page.getByTestId('account-row').filter({ hasText: 'Off channel' })
+  await expect(offRow.getByTestId('account-ai-state')).toHaveText('Автоматизация выключена')
+  const autoRow = page.getByTestId('account-row').filter({ hasText: 'Auto channel' })
+  await expect(autoRow.getByTestId('account-ai-state')).toHaveText('Автоответ по расписанию')
 })
 
 test('the automation dialog opens with the effective defaults from the channel', async ({ page }) => {
@@ -117,17 +118,17 @@ test('switching to Off and saving PUTs the new mode and patches the card in plac
   await put.install()
 
   await page.goto('/accounts')
-  await expect(page.getByText('Подсказки')).toBeVisible()
+  await expect(page.getByTestId('account-ai-state')).toHaveText('Подсказки')
 
   await page.getByTitle('Автоматизация').click()
   await page.getByRole('button', { name: /^Выключено/ }).click()
   await page.getByRole('button', { name: 'Сохранить' }).click()
 
-  // The dialog closes and the card's badge reflects the save — proof the
+  // The dialog closes and the row's AI state reflects the save — proof the
   // store patched the account in place (stores/accounts.ts's
   // updateAutomation) rather than needing a page reload to show it.
   await expect(page.getByText('Автоматизация — Sales WA')).toHaveCount(0)
-  await expect(page.getByText('Автоматизация выключена')).toBeVisible()
+  await expect(page.getByTestId('account-ai-state')).toHaveText('Автоматизация выключена')
 
   expect(put.bodies).toEqual([{ mode: 'off', wait_seconds_override: null, schedule: [] }])
 })

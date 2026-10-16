@@ -34,6 +34,7 @@ const CARDS = [
     :eyebrow="t('landing.desktop.eyebrow')"
     :title="t('landing.desktop.title')"
     :description="t('landing.desktop.description')"
+    muted
   >
     <div class="landing-arch-grid">
       <div v-for="card in CARDS" :key="card.key" class="landing-link-card">
@@ -43,8 +44,8 @@ const CARDS = [
           <code class="landing-desktop__exe">{{ t(`landing.desktop.${card.key}InstallerExe`) }}</code>
         </div>
         <p class="landing-link-card__desc">{{ t(`landing.desktop.${card.key}Desc`) }}</p>
-        <a :href="DOWNLOAD_BASE + card.installer" target="_blank" rel="noreferrer" class="landing-link-card__cta">
-          {{ t('landing.desktop.downloadCta') }} <ArrowRight class="w-3.5 h-3.5" />
+        <a :href="DOWNLOAD_BASE + card.installer" target="_blank" rel="noreferrer" class="landing-btn landing-btn--primary landing-btn--sm landing-link-card__download">
+          {{ t('landing.desktop.downloadCta') }} <ArrowRight aria-hidden="true" />
         </a>
         <a :href="DOWNLOAD_BASE + card.portable" target="_blank" rel="noreferrer" class="landing-link-card__cta-secondary">
           {{ t('landing.desktop.portableCta') }} <code class="landing-desktop__exe">{{ t(`landing.desktop.${card.key}PortableExe`) }}</code>

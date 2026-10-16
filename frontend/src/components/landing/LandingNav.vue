@@ -1,9 +1,8 @@
 <script setup lang="ts">
-// Structurally distinct from the blog's SiteNav.vue (that one is SSR
-// props-driven with no RouterLink/i18n runtime — see blog.css's header
-// comment for why the blog ships zero client JS), but built on the exact
-// same chrome.css classes, so the two read as one design system rather
-// than two.
+// The landing page's own top bar — built from the app's design language (the
+// sidebar's logo + wordmark, ink-on-white links, an indigo primary button) so
+// the public page and the signed-in app read as one product. The blog's
+// SiteNav.vue is a separate, SSR-only component and stays untouched.
 import { useI18n } from 'vue-i18n'
 import { Github } from 'lucide-vue-next'
 import LandingLangSwitcher from './LandingLangSwitcher.vue'
@@ -18,27 +17,27 @@ const auth = useAuth()
 </script>
 
 <template>
-  <header class="site-nav">
-    <div class="blog-shell site-nav__inner">
-      <RouterLink :to="{ name: 'home' }" class="site-nav__brand">
-        <span class="site-nav__mark" aria-hidden="true">x</span>
+  <header class="landing-nav">
+    <div class="landing-shell landing-nav__inner">
+      <RouterLink :to="{ name: 'home' }" class="landing-nav__brand">
+        <img src="/logo.png" alt="" class="landing-nav__logo" />
         <span>xchats</span>
       </RouterLink>
 
-      <nav class="site-nav__primary" aria-label="landing">
-        <a href="#platforms" class="site-nav__link">{{ t('landing.nav.features') }}</a>
-        <a href="#showcase" class="site-nav__link">{{ t('landing.nav.tour') }}</a>
-        <a href="#desktop" class="site-nav__link">{{ t('landing.nav.desktop') }}</a>
-        <a href="#architecture" class="site-nav__link">{{ t('landing.nav.architecture') }}</a>
-        <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="site-nav__link">{{
+      <nav class="landing-nav__links" aria-label="landing">
+        <a href="#features" class="landing-nav__link">{{ t('landing.nav.features') }}</a>
+        <a href="#how-it-works" class="landing-nav__link">{{ t('landing.nav.howItWorks') }}</a>
+        <a href="#showcase" class="landing-nav__link">{{ t('landing.nav.tour') }}</a>
+        <a href="#desktop" class="landing-nav__link">{{ t('landing.nav.desktop') }}</a>
+        <a href="https://github.com/yerassyldanay/xchats/tree/master/docs" target="_blank" rel="noreferrer" class="landing-nav__link">{{
           t('landing.nav.docs')
         }}</a>
       </nav>
 
-      <div class="site-nav__right">
+      <div class="landing-nav__right">
         <a
           href="https://github.com/yerassyldanay/xchats"
-          class="site-nav__github"
+          class="landing-nav__github"
           target="_blank"
           rel="noreferrer"
           :aria-label="t('landing.nav.github')"
@@ -47,8 +46,8 @@ const auth = useAuth()
           <span>{{ t('landing.nav.github') }}</span>
         </a>
         <LandingLangSwitcher />
-        <RouterLink v-if="auth.isAuthed" :to="{ name: 'chatboard' }" class="site-nav__cta">{{ t('landing.nav.goToInbox') }}</RouterLink>
-        <RouterLink v-else :to="{ name: 'login' }" class="site-nav__cta">{{ t('landing.nav.login') }}</RouterLink>
+        <RouterLink v-if="auth.isAuthed" :to="{ name: 'dashboard' }" class="landing-btn landing-btn--primary">{{ t('landing.nav.openApp') }}</RouterLink>
+        <RouterLink v-else :to="{ name: 'login' }" class="landing-btn landing-btn--primary">{{ t('landing.nav.login') }}</RouterLink>
       </div>
     </div>
   </header>

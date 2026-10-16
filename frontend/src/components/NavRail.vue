@@ -1,26 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  Blocks,
   Bot,
   CalendarClock,
   Check,
+  ChevronsUpDown,
   FlaskConical,
+  GitPullRequestDraft,
   Globe,
+  House,
   Inbox,
   KeyRound,
   Library,
   LogOut,
   Megaphone,
+  PanelLeftClose,
+  PanelLeftOpen,
   Radio,
   Settings,
-  Sparkles,
   UsersRound,
+  WandSparkles,
 } from 'lucide-vue-next'
 import { useAuth } from '../stores/auth'
 import { useCrm } from '../stores/crm'
+import { usePlayground } from '../stores/playground'
 import { useSettings } from '../stores/settings'
 import { initials, colorFor } from '../lib/format'
 import { evalsApi } from '../api/evals'
@@ -31,7 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import AccountSecurityDialog from './settings/AccountSecurityDialog.vue'
 
@@ -40,6 +44,7 @@ import AccountSecurityDialog from './settings/AccountSecurityDialog.vue'
 const auth = useAuth()
 const settingsStore = useSettings()
 const crm = useCrm()
+const playground = usePlayground()
 const router = useRouter()
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -62,31 +67,68 @@ const LOCALES = [
 // removed mid-session) is an edge case the "no data" state on the page itself covers.
 const evalsAvailable = ref(false)
 onMounted(async () => {
-  evalsAvailable.value = await evalsApi.probeAvailable()
   void crm.loadBuckets()
+  void refreshDraftCount()
+  evalsAvailable.value = await evalsApi.probeAvailable()
 })
 
-// Four functional clusters, each rendered as its own group with a divider
-// between them (TODO.md "Reorganize sidebar into logical functional
-// groups"): daily triage tools stay in the first, always-visible screenful;
-// setup/config tools (Channels, Settings, language, avatar) sink to the
-// bottom cluster below, out of the way of the workflow above it.
-const dailyOpsNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
-  { name: 'chatboard', icon: Inbox, label: t('nav.inbox'), match: ['chatboard'] },
-  { name: 'customers', icon: UsersRound, label: t('crm.nav.customers'), match: ['customers'] },
-  { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
+// The Черновик item carries the number of staged knowledge-base changes, so a
+// pending review is visible from anywhere (the Dashboard and the KB banner show
+// the same count). Best-effort: a failed fetch just leaves the badge off.
+async function refreshDraftCount() {
+  if (playground.busy || playground.loading) return
+  try {
+    await playground.load()
+  } catch {
+    // no badge
+  }
+}
+watch(() => route.name, () => void refreshDraftCount())
+
+// Collapsible left sidebar (260px open / 77px icon-only). The open state is a
+// per-browser preference, persisted under the same key the design prototype
+// used; storage can throw (private mode, blocked site data), so every access
+// is guarded and the sidebar simply starts open.
+const NAV_OPEN_KEY = 'xchats-nav-open'
+function readOpen(): boolean {
+  try {
+    return localStorage.getItem(NAV_OPEN_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+const open = ref(readOpen())
+function toggleOpen() {
+  open.value = !open.value
+  try {
+    localStorage.setItem(NAV_OPEN_KEY, open.value ? '1' : '0')
+  } catch {
+    // Best-effort — the preference just doesn't survive a reload.
+  }
+}
+
+type NavItem = { name: string; icon: Component; label: string; match: string[]; adminOnly?: boolean }
+
+// Three clusters with a divider between each: daily triage + outreach, the AI's
+// brain (knowledge, its review Draft, and testing it), then setup.
+const navClusters = computed<NavItem[][]>(() => [
+  [
+    { name: 'dashboard', icon: House, label: t('nav.home'), match: ['dashboard'] },
+    { name: 'chatboard', icon: Inbox, label: t('nav.inbox'), match: ['chatboard'] },
+    { name: 'customers', icon: UsersRound, label: t('crm.nav.customers'), match: ['customers'] },
+    { name: 'followups', icon: CalendarClock, label: t('crm.nav.followups'), match: ['followups'] },
+    { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
+  ],
+  [
+    { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
+    { name: 'draft', icon: GitPullRequestDraft, label: t('nav.draft'), match: ['draft'] },
+    { name: 'simulator', icon: Bot, label: t('nav.check'), match: ['simulator', 'chat'] },
+  ],
+  [
+    { name: 'channels', icon: Radio, label: t('nav.channels'), match: ['channels'] },
+    { name: 'settings', icon: Settings, label: t('nav.settings'), match: ['settings'], adminOnly: true },
+  ],
 ])
-const growthNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
-  { name: 'campaigns', icon: Megaphone, label: t('campaigns.navLabel'), match: ['campaigns', 'campaign-new', 'campaign-detail'] },
-])
-const aiBrainNav = computed<{ name: string; icon: Component; label: string; match: string[] }[]>(() => [
-  { name: 'knowledge-base', icon: Library, label: t('nav.knowledgeBase'), match: ['knowledge-base'] },
-  { name: 'draft', icon: Blocks, label: t('kb.draft.pageTitle'), match: ['draft'] },
-  { name: 'simulator', icon: Bot, label: t('simulator.navLabel'), match: ['simulator'] },
-  { name: 'chat', icon: Sparkles, label: t('chat.navLabel'), match: ['chat'] },
-])
-// Rendered as one group with dividers between clusters — see the template.
-const navClusters = computed(() => [dailyOpsNav.value, growthNav.value, aiBrainNav.value])
 
 // The overdue count rides on the Задачи icon: an overdue follow-up is the one
 // piece of CRM state that has to be visible from anywhere in the app, not only
@@ -122,166 +164,150 @@ async function switchOrg(orgId: string) {
 </script>
 
 <template>
-  <nav class="w-[68px] bg-slate-900 flex flex-col items-center py-4 shrink-0">
-    <TooltipProvider :delay-duration="300">
-      <RouterLink :to="{ name: 'home' }" class="w-10 h-10 rounded-lg bg-transparent overflow-hidden grid place-items-center hover:opacity-80 transition">
-        <img src="/logo.png" alt="xchats logo" class="w-full h-full object-contain" />
+  <nav
+    class="relative flex h-full shrink-0 flex-col overflow-hidden border-r border-[#EBEBEB] bg-background transition-[width] duration-200 ease-out"
+    :class="open ? 'w-[260px]' : 'w-[77px]'"
+    :aria-label="t('nav.primary')"
+  >
+    <div class="flex h-20 shrink-0 items-center gap-2.5 px-4" :class="open ? 'justify-between' : 'justify-center'">
+      <RouterLink v-if="open" :to="{ name: 'dashboard' }" class="flex min-w-0 flex-1 items-center gap-2.5 text-foreground">
+        <img src="/logo.png" alt="xchats logo" class="size-9 flex-none rounded-[10px] bg-slate-900 object-contain" />
+        <span class="text-[21px] font-extrabold tracking-tight">xchats</span>
       </RouterLink>
+      <button
+        type="button"
+        data-testid="nav-toggle"
+        :aria-label="open ? t('nav.collapseMenu') : t('nav.expandMenu')"
+        :aria-expanded="open"
+        :title="open ? t('nav.collapseMenu') : t('nav.expandMenu')"
+        class="grid size-10 flex-none place-items-center rounded-full text-foreground transition-colors hover:bg-secondary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        @click="toggleOpen"
+      >
+        <component :is="open ? PanelLeftClose : PanelLeftOpen" class="size-5" />
+      </button>
+    </div>
 
-      <div class="mt-6 flex flex-col gap-2">
-        <template v-for="(cluster, ci) in navClusters" :key="ci">
-          <div v-if="ci > 0" class="h-px w-8 bg-white/10 my-1 self-center" aria-hidden="true" />
-          <Tooltip v-for="item in cluster" :key="item.name">
-            <TooltipTrigger as-child>
-              <RouterLink
-                :to="{ name: item.name }"
-                :aria-label="item.label"
-                class="relative w-11 h-11 rounded-lg grid place-items-center transition"
-                :class="isActive(item.match) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-              >
-                <component :is="item.icon" class="w-5 h-5" />
-                <span
-                  v-if="item.name === 'followups' && overdueCount > 0"
-                  class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold grid place-items-center"
-                >
-                  {{ overdueCount > 99 ? '99+' : overdueCount }}
-                </span>
-              </RouterLink>
-            </TooltipTrigger>
-            <TooltipContent side="right">{{ item.label }}</TooltipContent>
-          </Tooltip>
+    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-3 py-1">
+      <template v-for="(cluster, ci) in navClusters" :key="ci">
+        <div v-if="ci > 0" class="mx-1.5 my-2.5 h-px flex-none bg-[#EBEBEB]" aria-hidden="true" />
+        <template v-for="item in cluster" :key="item.name">
+          <RouterLink
+            v-if="!item.adminOnly || auth.isAdmin"
+            :to="{ name: item.name }"
+            :aria-label="item.label"
+            :title="item.name === 'settings' && settingsStore.hasUnhealthyProvider ? `${item.label} ${t('nav.needsAttention')}` : item.label"
+            class="relative flex h-12 flex-none items-center gap-3.5 whitespace-nowrap rounded-xl px-3.5 text-[15px] transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            :class="
+              isActive(item.match)
+                ? 'bg-secondary font-bold text-foreground'
+                : 'font-semibold text-muted-foreground hover:bg-secondary hover:text-foreground'
+            "
+          >
+            <component :is="item.icon" class="size-5 flex-none" />
+            <span v-if="open" class="flex-1 truncate">{{ item.label }}</span>
+            <span
+              v-if="item.name === 'followups' && overdueCount > 0"
+              data-testid="nav-overdue-badge"
+              class="grid h-5 min-w-5 flex-none place-items-center rounded-full bg-nav-badge px-1.5 text-[11px] font-bold text-white"
+              :class="open ? '' : 'absolute left-[30px] top-1.5'"
+            >
+              {{ overdueCount > 99 ? '99+' : overdueCount }}
+            </span>
+            <span
+              v-if="item.name === 'draft' && playground.pendingTotal > 0"
+              data-testid="nav-draft-badge"
+              class="grid h-5 min-w-5 flex-none place-items-center rounded-full bg-primary-soft px-1.5 text-[11px] font-bold text-primary"
+              :class="open ? '' : 'absolute left-[30px] top-1.5'"
+            >
+              {{ playground.pendingTotal > 99 ? '99+' : playground.pendingTotal }}
+            </span>
+            <span
+              v-if="item.name === 'settings' && settingsStore.hasUnhealthyProvider"
+              data-testid="nav-health-dot"
+              class="size-2 flex-none rounded-full bg-destructive"
+              :class="open ? '' : 'absolute right-3 top-3'"
+              aria-hidden="true"
+            />
+          </RouterLink>
         </template>
-      </div>
+      </template>
+    </div>
 
-      <!-- Management cluster: Channels, Settings (admin only), Globe, Avatar —
-           TODO.md's 4th cluster. One divider separates it from the workflow
-           clusters above; these four read as one "setup & you" group. -->
-      <div class="mt-auto flex flex-col items-center gap-3">
-        <div class="h-px w-8 bg-white/10" aria-hidden="true" />
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <RouterLink
-              :to="{ name: 'channels' }"
-              :aria-label="t('nav.channels')"
-              class="w-11 h-11 rounded-lg grid place-items-center transition"
-              :class="isActive(['channels']) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-            >
-              <Radio class="w-5 h-5" />
-            </RouterLink>
-          </TooltipTrigger>
-          <TooltipContent side="right">{{ t('nav.channels') }}</TooltipContent>
-        </Tooltip>
-
-        <template v-if="auth.isAdmin">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <RouterLink
-                :to="{ name: 'settings' }"
-                :aria-label="t('nav.settings')"
-                class="relative w-11 h-11 rounded-lg grid place-items-center transition"
-                :class="isActive(['settings']) ? 'bg-primary text-primary-foreground' : 'text-slate-400 hover:text-white hover:bg-white/10'"
-              >
-                <Settings class="w-5 h-5" />
-                <span
-                  v-if="settingsStore.hasUnhealthyProvider"
-                  class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-destructive ring-2 ring-slate-900"
-                  aria-hidden="true"
-                />
-              </RouterLink>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {{ t('nav.settings') }}
-              <span v-if="settingsStore.hasUnhealthyProvider" class="text-destructive">{{ t('nav.needsAttention') }}</span>
-            </TooltipContent>
-          </Tooltip>
-        </template>
-
-        <!-- Dedicated Globe language switcher (TODO.md "Add Globe icon language
-             switcher button") — was buried a click deeper inside the avatar
-             menu; now one click from any page, right next to Settings. -->
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              type="button"
-              :aria-label="t('nav.language')"
-              :title="t('nav.language')"
-              class="w-11 h-11 rounded-lg grid place-items-center transition text-slate-400 hover:text-white hover:bg-white/10 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40"
-            >
-              <Globe class="w-5 h-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="end" class="w-44">
-            <DropdownMenuItem
-              v-for="l in LOCALES"
-              :key="l.code"
-              class="justify-between gap-2"
-              @select="locale = l.code"
-            >
-              <span class="truncate">{{ l.label }}</span>
-              <Check v-if="locale === l.code" class="w-4 h-4 shrink-0" />
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <button
-              class="rounded-full ring-2 ring-white/15 transition hover:ring-white/30 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-white/40"
-            >
-              <Avatar size="base" class="text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
-                <AvatarFallback class="bg-transparent text-xs font-semibold">
-                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
-                </AvatarFallback>
-              </Avatar>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="end" class="w-60">
-            <div class="flex items-center gap-3 px-1 py-1">
-              <Avatar size="base" class="text-white shrink-0" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
-                <AvatarFallback class="bg-transparent text-sm font-semibold">
-                  {{ initials(auth.user?.name || auth.user?.email || '?') }}
-                </AvatarFallback>
-              </Avatar>
-              <div class="min-w-0">
-                <div class="text-sm font-semibold truncate">{{ auth.user?.name || '—' }}</div>
-                <div class="text-xs text-muted-foreground truncate">{{ auth.user?.email }}</div>
-              </div>
-            </div>
-            <template v-if="auth.orgs.length > 1">
-              <div class="text-xs text-muted-foreground mt-1 px-1">{{ t('nav.organization') }}</div>
-              <DropdownMenuItem
-                v-for="o in auth.orgs"
-                :key="o.id"
-                class="justify-between gap-2"
-                :disabled="switchingOrg"
-                @select="switchOrg(o.id)"
-              >
-                <span class="truncate">{{ o.name }}</span>
-                <Check v-if="o.id === auth.org?.id" class="w-4 h-4 shrink-0" />
-              </DropdownMenuItem>
+    <div class="flex-none border-t border-[#EBEBEB] p-3">
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <button
+            type="button"
+            data-testid="nav-account"
+            :title="auth.user?.email"
+            class="flex w-full items-center gap-3 rounded-xl p-2 text-left transition-colors hover:bg-secondary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Avatar size="sm" class="flex-none text-white" :style="{ backgroundColor: colorFor(auth.user?.id || 'x') }">
+              <AvatarFallback class="bg-transparent text-xs font-bold">
+                {{ initials(auth.user?.name || auth.user?.email || '?') }}
+              </AvatarFallback>
+            </Avatar>
+            <template v-if="open">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-bold text-foreground">{{ auth.user?.name || '—' }}</span>
+                <span class="block truncate text-xs text-muted-foreground">{{ auth.user?.email }}</span>
+              </span>
+              <ChevronsUpDown class="size-4 flex-none text-muted-foreground" />
             </template>
-            <div v-else class="text-xs text-muted-foreground mt-1 mb-1 px-1 truncate">{{ auth.org?.name }}</div>
-            <DropdownMenuSeparator />
-            <!-- Language switching now lives on the dedicated Globe button next
-                 to Settings — see the rail's bottom cluster. -->
-            <DropdownMenuItem @select="router.push({ name: 'evals' })">
-              <FlaskConical class="w-4 h-4" /> {{ t('nav.testsAndBenchmarks') }}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem @select="showAccountSecurity = true">
-              <KeyRound class="w-4 h-4" /> {{ t('accountSecurity.menuItem') }}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="end" class="w-[260px]">
+          <div class="border-b border-[#EBEBEB] px-3 pb-3 pt-2">
+            <div class="truncate text-[15px] font-bold">{{ auth.user?.name || '—' }}</div>
+            <div class="truncate text-[13px] text-muted-foreground">{{ auth.user?.email }}</div>
+          </div>
+          <template v-if="auth.orgs.length > 1">
+            <div class="mt-1 px-3 pt-2 text-xs text-muted-foreground">{{ t('nav.organization') }}</div>
             <DropdownMenuItem
-              class="text-destructive focus:bg-destructive/10 focus:text-destructive font-medium"
-              @select="logout"
+              v-for="o in auth.orgs"
+              :key="o.id"
+              class="justify-between gap-2"
+              :disabled="switchingOrg"
+              @select="switchOrg(o.id)"
             >
-              <LogOut class="w-4 h-4" /> {{ t('nav.logout') }}
+              <span class="truncate">{{ o.name }}</span>
+              <Check v-if="o.id === auth.org?.id" class="size-4 shrink-0" />
             </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </TooltipProvider>
+          </template>
+          <div v-else-if="auth.org?.name" class="truncate px-3 pt-2 text-xs text-muted-foreground">{{ auth.org.name }}</div>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem v-if="auth.isAdmin" @select="router.push({ name: 'settings' })">
+            <Settings class="size-[18px]" /> {{ t('nav.settings') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem v-if="auth.isAdmin" @select="router.push({ name: 'setup' })">
+            <WandSparkles class="size-[18px]" /> {{ t('nav.setupWizard') }}
+          </DropdownMenuItem>
+          <div class="flex items-center gap-2 px-3 pb-1 pt-2 text-xs font-semibold text-muted-foreground">
+            <Globe class="size-4" /> {{ t('nav.language') }}
+          </div>
+          <DropdownMenuItem
+            v-for="l in LOCALES"
+            :key="l.code"
+            class="justify-between gap-2"
+            @select="locale = l.code"
+          >
+            <span class="truncate">{{ l.label }}</span>
+            <Check v-if="locale === l.code" class="size-4 shrink-0" />
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem @select="router.push({ name: 'evals' })">
+            <FlaskConical class="size-[18px]" /> {{ t('nav.testsAndBenchmarks') }}
+          </DropdownMenuItem>
+          <DropdownMenuItem @select="showAccountSecurity = true">
+            <KeyRound class="size-[18px]" /> {{ t('accountSecurity.menuItem') }}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem class="font-semibold" @select="logout">
+            <LogOut class="size-[18px]" /> {{ t('nav.logout') }}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
     <AccountSecurityDialog v-if="showAccountSecurity" @close="showAccountSecurity = false" />
   </nav>
 </template>

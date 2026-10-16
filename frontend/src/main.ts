@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'
+import '@fontsource-variable/manrope'
 import './style.css'
 
 // Theme: default light; honor a persisted 'dark' preference. No UI toggle in v1 —

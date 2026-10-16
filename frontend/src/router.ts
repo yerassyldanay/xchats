@@ -2,14 +2,15 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Home from './views/Home.vue'
 import Login from './views/Login.vue'
 import ChangePassword from './views/ChangePassword.vue'
+import Dashboard from './views/Dashboard.vue'
+import Setup from './views/Setup.vue'
 import Chatboard from './views/Chatboard.vue'
-import Chat from './views/Chat.vue'
 import Channels from './views/Channels.vue'
 import Customers from './views/Customers.vue'
 import Followups from './views/Followups.vue'
 import Playground from './views/Playground.vue'
 import KnowledgeBase from './views/KnowledgeBase.vue'
-import Simulator from './views/Simulator.vue'
+import AssistantCheck from './views/AssistantCheck.vue'
 import Campaigns from './views/Campaigns.vue'
 import CampaignWizard from './views/CampaignWizard.vue'
 import CampaignDetail from './views/CampaignDetail.vue'
@@ -26,14 +27,21 @@ const router = createRouter({
     { path: '/login', name: 'login', component: Login },
     { path: '/change-password', name: 'change-password', component: ChangePassword, meta: { requiresAuth: true } },
     { path: '/', name: 'home', component: Home },
+    // The signed-in landing page. Distinct from 'home' above, which is the
+    // public marketing page at '/'.
+    { path: '/home', name: 'dashboard', component: Dashboard, meta: { requiresAuth: true } },
+    // Full-screen onboarding questionnaire — no sidebar (meta.fullscreen), and
+    // admin-only because every step writes settings/channels.
+    { path: '/setup', name: 'setup', component: Setup, meta: { requiresAuth: true, requiresAdmin: true, fullscreen: true } },
     // :chatId is optional (INB-16) — the open conversation lives in the URL so
     // it survives a refresh and can be bookmarked/shared/restored via Back-
     // Forward, instead of only ever existing in the Pinia store.
     { path: '/chatboard/:chatId?', name: 'chatboard', component: Chatboard, meta: { requiresAuth: true } },
     // /chat is the Knowledge Base assistant; /chatboard above is the customer
     // inbox. Different surfaces, one unfortunate letter apart — see
-    // internal/httpapi/chat_assistant.go's header.
-    { path: '/chat', name: 'chat', component: Chat, meta: { requiresAuth: true } },
+    // internal/httpapi/chat_assistant.go's header. /chat and /simulator are the
+    // two modes of one page (AssistantCheck), each keeping its own URL.
+    { path: '/chat', name: 'chat', component: AssistantCheck, meta: { requiresAuth: true } },
     { path: '/channels', name: 'channels', component: Channels, meta: { requiresAuth: true } },
     // /accounts was the legacy path — Channels.vue's own name always matched
     // the product's "Channels" label, only the route itself lagged. Old
@@ -50,7 +58,7 @@ const router = createRouter({
     // bookmarks still land somewhere real instead of a bare 404.
     { path: '/playground', redirect: '/draft' },
     { path: '/knowledge-base', name: 'knowledge-base', component: KnowledgeBase, meta: { requiresAuth: true } },
-    { path: '/simulator', name: 'simulator', component: Simulator, meta: { requiresAuth: true } },
+    { path: '/simulator', name: 'simulator', component: AssistantCheck, meta: { requiresAuth: true } },
     { path: '/campaigns', name: 'campaigns', component: Campaigns, meta: { requiresAuth: true } },
     // MUST come before /campaigns/:campaignId — that dynamic segment would
     // otherwise swallow this path with campaignId === "new".
@@ -70,7 +78,7 @@ router.beforeEach(async (to) => {
   const auth = useAuth()
   if (!auth.ready) await auth.fetchMe()
   if (to.meta.requiresAuth && !auth.isAuthed) return { name: 'login' }
-  if (to.name === 'login' && auth.isAuthed) return { name: 'chatboard' }
+  if (to.name === 'login' && auth.isAuthed) return { name: 'dashboard' }
   // A1: force through the change-password screen before any other
   // authenticated page — mirrors the backend's requirePasswordChanged gate
   // (server.go), which blocks the underlying API calls regardless; this
@@ -83,9 +91,9 @@ router.beforeEach(async (to) => {
   // And the reverse: nothing to do on /change-password once it's resolved
   // (or if navigated to directly without ever needing it).
   if (to.name === 'change-password' && !auth.mustChangePassword) {
-    return { name: 'chatboard' }
+    return { name: 'dashboard' }
   }
-  if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'chatboard' }
+  if (to.meta.requiresAdmin && !auth.isAdmin) return { name: 'dashboard' }
   return true
 })
 

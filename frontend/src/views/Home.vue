@@ -1,17 +1,19 @@
 <script setup lang="ts">
-// The public landing page (/) — positions xchats as a free, open-source AI
-// assistant that connects to multiple social platforms, eliminates
-// hallucinations via strict template-based responses, and is configurable
-// directly from ChatGPT/Claude over MCP. Deliberately built on the blog's
-// visual language (landing.css imports the SAME tokens.css/chrome.css the
-// prerendered blog uses — see landing.css's own header comment) rather
-// than the authenticated app's Tailwind/shadcn one: this page and the blog
-// are the two public-facing surfaces, and now read as one design system.
+// The public landing page (/) — says what xchats is (a free, open-source team
+// inbox for WhatsApp and Telegram with an AI assistant that answers only from
+// your knowledge base), walks through every section of the app, then covers
+// channels, roles, the no-made-up-numbers guarantee, MCP setup, downloads and
+// architecture. It is built in the signed-in app's own visual language —
+// Manrope, ink on white, bordered cards, pills, underline tabs — via
+// landing.css, so the public page and the app read as one product. (The
+// prerendered blog is a separate surface and keeps its own sheet.)
 import '@/components/landing/landing.css'
 import LandingNav from '@/components/landing/LandingNav.vue'
 import LandingHero from '@/components/landing/LandingHero.vue'
-import PlatformsSection from '@/components/landing/PlatformsSection.vue'
+import OverviewSection from '@/components/landing/OverviewSection.vue'
+import FeaturesSection from '@/components/landing/FeaturesSection.vue'
 import ProductShowcase from '@/components/landing/ProductShowcase.vue'
+import PlatformsSection from '@/components/landing/PlatformsSection.vue'
 import TeamSection from '@/components/landing/TeamSection.vue'
 import TemplatesSection from '@/components/landing/TemplatesSection.vue'
 import McpSection from '@/components/landing/McpSection.vue'
@@ -28,8 +30,10 @@ import LandingFooter from '@/components/landing/LandingFooter.vue'
     <LandingNav />
     <main>
       <LandingHero />
-      <PlatformsSection />
+      <OverviewSection />
+      <FeaturesSection />
       <ProductShowcase />
+      <PlatformsSection />
       <TeamSection />
       <TemplatesSection />
       <McpSection />

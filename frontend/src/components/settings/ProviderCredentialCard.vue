@@ -73,7 +73,7 @@ function toggleDisabled(v: boolean) {
 </script>
 
 <template>
-  <div class="rounded-lg border border-border bg-card p-5 space-y-4" :data-testid="`integration-card-${provider.id}`">
+  <div class="rounded-2xl border border-border bg-card p-6 space-y-4" :data-testid="`integration-card-${provider.id}`">
     <div class="flex items-start justify-between gap-3">
       <div>
         <div class="flex items-center gap-2">
@@ -98,7 +98,7 @@ function toggleDisabled(v: boolean) {
     <template v-else>
       <div v-if="editingCredential" class="space-y-3">
         <div v-for="f in provider.fields" :key="f.key">
-          <label class="text-xs font-medium text-muted-foreground">{{ f.label }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ f.label }}</label>
           <MaskedSecretInput v-model="fieldValues[f.key]" :placeholder="t('settings.integration.fieldPlaceholder')" :disabled="busy" class="mt-1.5" />
         </div>
         <p v-if="needsForce" class="text-sm text-amber-600 dark:text-amber-400">{{ t('settings.integration.forceHint') }}</p>
@@ -131,11 +131,11 @@ function toggleDisabled(v: boolean) {
 
       <div v-if="(provider.has_base_url || provider.has_model) && !editingCredential" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-border">
         <div v-if="provider.has_base_url">
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.integration.baseUrl') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.integration.baseUrl') }}</label>
           <Input v-model="baseURL" :placeholder="t('settings.integration.baseUrlPlaceholder')" class="mt-1.5" />
         </div>
         <div v-if="provider.has_model">
-          <label class="text-xs font-medium text-muted-foreground">{{ t('settings.integration.defaultModel') }}</label>
+          <label class="text-[13px] font-semibold text-muted-foreground">{{ t('settings.integration.defaultModel') }}</label>
           <Combobox v-model="defaultModel" :options="CURATED_MODELS[provider.id] ?? []" class="mt-1.5" />
         </div>
         <Button v-if="settingsDirty" size="sm" variant="outline" class="sm:col-span-2 w-fit" :disabled="busy" @click="saveProviderSettings">

@@ -80,13 +80,17 @@ export const usePlayground = defineStore('playground', {
     pendingTotal(s): number {
       const c = s.changes
       if (!c) return 0
+      // Optional chaining: the nav rail reads this on every page, so a partial
+      // payload (an older server, a malformed response) must read as "nothing
+      // pending" rather than throw out of the shell.
       const rows =
-        c.topics.length + c.tariffs.length + c.products.length + c.specialists.length + c.services.length +
-        c.contacts.length + c.policies.length + c.tariff_info.length + c.zones.length
+        (c.topics?.length ?? 0) + (c.tariffs?.length ?? 0) + (c.products?.length ?? 0) + (c.specialists?.length ?? 0) +
+        (c.services?.length ?? 0) + (c.contacts?.length ?? 0) + (c.policies?.length ?? 0) + (c.tariff_info?.length ?? 0) +
+        (c.zones?.length ?? 0)
       const configFields = c.config
         ? (['persona', 'mission', 'guardrails', 'language_policy', 'reply_max_words'] as const).filter((k) => c.config![k] !== undefined).length
         : 0
-      return rows + c.deletes.length + configFields
+      return rows + (c.deletes?.length ?? 0) + configFields
     },
     // materialsById indexes GET /kb's `materials` array (kbstore.LiveView
     // already returns the org's whole kbd_materials table — see

@@ -10,7 +10,7 @@ const DEFAULT_PASSWORD = process.env.E2E_PASSWORD || 'xchat-admin-change-me'
 // FIRST time it satisfies the forced first-login change
 // (0014_force_default_admin_password_change.up.sql: the documented default
 // now carries must_change_password = 1, so a fresh database's very first
-// login lands on /change-password, not /chatboard). The backend/database is
+// login lands on /change-password, not /home). The backend/database is
 // shared across the whole suite run (workers: 1, one persisted DB — see
 // playwright.config.ts and this file's own README), so every login() call
 // after the first one in a given run finds the password ALREADY rotated —
@@ -19,11 +19,11 @@ const DEFAULT_PASSWORD = process.env.E2E_PASSWORD || 'xchat-admin-change-me'
 // database is in.
 const ROTATED_PASSWORD = process.env.E2E_PASSWORD_ROTATED || 'xchat-admin-e2e-rotated-1!'
 
-// log in via the real Login screen → lands on the chatboard. Two forks off
+// log in via the real Login screen → lands on the dashboard (/home). Two forks off
 // the plain "type creds, submit" path, both self-healing (no test needs to
 // know or care which state the shared database is in):
 //   - the very first login of a fresh database's forced change (A1) lands on
-//     /change-password instead of /chatboard — completeForcedChange resolves
+//     /change-password instead of /home — completeForcedChange resolves
 //     it to ROTATED_PASSWORD and continues.
 //   - a LATER run against the same already-migrated database rejects
 //     DEFAULT_PASSWORD outright (it was already rotated by an earlier
@@ -51,14 +51,14 @@ export async function login(page: Page) {
 
   if (page.url().includes('/login')) {
     await submitLogin(page, ROTATED_PASSWORD)
-    await expect(page).toHaveURL('/chatboard')
+    await expect(page).toHaveURL('/home')
     return
   }
   if (page.url().includes('/change-password')) {
     await completeForcedChange(page, DEFAULT_PASSWORD, ROTATED_PASSWORD)
     return
   }
-  await expect(page).toHaveURL('/chatboard')
+  await expect(page).toHaveURL('/home')
 }
 
 async function submitLogin(page: Page, password: string) {
@@ -85,5 +85,5 @@ async function completeForcedChange(page: Page, currentPassword: string, newPass
   await newPasswordInputs.nth(0).fill(newPassword)
   await newPasswordInputs.nth(1).fill(newPassword)
   await page.getByRole('button', { name: 'Сменить пароль' }).click()
-  await expect(page).toHaveURL('/chatboard')
+  await expect(page).toHaveURL('/home')
 }

@@ -1,12 +1,9 @@
 <script setup lang="ts">
-// SectionShell is the repeating wrapper for each of the four MCP/platforms/
-// team/templates showcase sections: a fade-up reveal (useRevealOnScroll)
-// around an eyebrow badge, a title, an optional description, and whatever
-// demo content the caller slots in. Every showcase's content block
-// (.landing-platforms, .landing-team-card, .landing-chat-demo,
-// .landing-mcp-demo — see landing.css) is itself centered, so the head is
-// centered too rather than offering a left-aligned variant nothing here
-// uses.
+// SectionShell is the repeating wrapper for each landing section: a fade-up
+// reveal (useRevealOnScroll) around an eyebrow pill, a title, an optional
+// description, and whatever content the caller slots in. The head is always
+// centered; `muted` puts the section on the app's #F7F7F7 surface band so
+// white cards stand out against it.
 import { ref } from 'vue'
 import { useRevealOnScroll } from '@/composables/useRevealOnScroll'
 
@@ -21,9 +18,9 @@ const { visible } = useRevealOnScroll(root)
 
 <template>
   <section :id="id" ref="root" class="landing-section" :class="{ 'landing-section--muted': muted }">
-    <div class="blog-shell landing-reveal" :class="{ 'is-visible': visible }">
-      <div class="landing-section__head landing-section__head--center">
-        <span class="badge badge--category landing-section__eyebrow">{{ eyebrow }}</span>
+    <div class="landing-shell landing-reveal" :class="{ 'is-visible': visible }">
+      <div class="landing-section__head">
+        <span class="landing-pill landing-pill--soft landing-section__eyebrow">{{ eyebrow }}</span>
         <h2 class="landing-section__title">{{ title }}</h2>
         <p v-if="description" class="landing-section__description">{{ description }}</p>
       </div>

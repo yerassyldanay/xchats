@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
+import { isMetaChannel, metaChannelsEnabled } from '../lib/featureFlags'
 import type {
   Account,
   AccountAutomationPatch,
@@ -39,6 +40,11 @@ export const useAccounts = defineStore('accounts', {
     // that shape silently mis-offered every new channel added since.
     composableAccounts: (s) => s.accounts.filter((a) => a.channel === 'whatsapp' || a.channel === 'simulator'),
     telegramAccounts: (s) => s.accounts.filter((a) => a.channel === 'telegram'),
+    // visibleAccounts is what the channel-management screens list: with the
+    // official Meta channels switched off in the UI (lib/featureFlags.ts) their
+    // rows are hidden there. The accounts themselves, and their conversations
+    // in the Inbox, are untouched.
+    visibleAccounts: (s) => (metaChannelsEnabled() ? s.accounts : s.accounts.filter((a) => !isMetaChannel(a.channel))),
   },
   actions: {
     async load() {

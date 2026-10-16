@@ -4,7 +4,7 @@
 // sole place a MANUAL change can originate from (a model-driven one comes
 // from KbIngestPanel, right above this in DraftKnowledgeBase's own review
 // region — this component only ever replaces the tabs/lists area below
-// StatTiles, never that panel).
+// the summary strip, never that panel).
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { Library, WandSparkles } from 'lucide-vue-next'

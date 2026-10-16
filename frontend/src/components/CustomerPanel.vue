@@ -199,20 +199,20 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
     </div>
 
     <div v-else class="flex-1 overflow-y-auto min-h-0">
-      <!-- identity header -->
-      <div class="px-4 pt-4 pb-3 flex items-start gap-3">
-        <Avatar class="w-10 h-10 shrink-0">
-          <AvatarFallback :class="colorFor(customer.id)">{{ initials(customer.display_name) }}</AvatarFallback>
+      <!-- identity header: centered profile (avatar, editable name, channel handles) -->
+      <div class="flex flex-col items-center gap-1 px-5 pb-4 pt-6 text-center">
+        <Avatar class="size-[72px] shrink-0">
+          <AvatarFallback :class="colorFor(customer.id)" class="text-[22px] font-bold">{{ initials(customer.display_name) }}</AvatarFallback>
         </Avatar>
-        <div class="min-w-0 flex-1">
+        <div class="mt-2 w-full min-w-0">
           <Input
             v-model="nameDraft"
-            class="h-8 px-2 -ml-2 font-semibold border-transparent bg-transparent hover:bg-muted/50 focus:bg-background"
+            class="h-9 border-transparent bg-transparent px-2 text-center text-lg font-extrabold hover:bg-muted/50 focus:bg-background"
             :placeholder="t('crm.panel.name')"
             @blur="flush('display_name', nameDraft)"
             @keyup.enter="flush('display_name', nameDraft)"
           />
-          <div class="mt-1 flex flex-wrap items-center gap-1.5">
+          <div class="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
             <span
               v-if="isSimulatorCustomer"
               class="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-violet-600 dark:text-violet-400"
@@ -222,9 +222,9 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
             <span
               v-for="ident in customer.identities"
               :key="ident.id"
-              class="inline-flex items-center gap-1 text-[11px] text-muted-foreground"
+              class="inline-flex items-center gap-1 text-sm text-muted-foreground"
             >
-              <component :is="channelIcon(ident.channel)" class="w-3.5 h-3.5" :class="channelText(ident.channel)" />
+              <component :is="channelIcon(ident.channel)" class="size-3.5" :class="channelText(ident.channel)" />
               {{ identityHandle(ident.username, ident.phone, ident.external_id) }}
             </span>
           </div>
@@ -234,19 +234,19 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
       <!-- contact fields -->
       <div class="px-4 pb-3 space-y-2">
         <label class="block">
-          <span class="text-[11px] uppercase tracking-wide text-muted-foreground">{{ t('crm.panel.phone') }}</span>
+          <span class="text-[13px] text-muted-foreground">{{ t('crm.panel.phone') }}</span>
           <Input
             v-model="phoneDraft"
-            class="mt-0.5 h-8 text-[13px]"
+            class="mt-1 h-10 text-[15px]"
             @blur="flush('phone', phoneDraft)"
             @keyup.enter="flush('phone', phoneDraft)"
           />
         </label>
         <label class="block">
-          <span class="text-[11px] uppercase tracking-wide text-muted-foreground">{{ t('crm.panel.email') }}</span>
+          <span class="text-[13px] text-muted-foreground">{{ t('crm.panel.email') }}</span>
           <Input
             v-model="emailDraft"
-            class="mt-0.5 h-8 text-[13px]"
+            class="mt-1 h-10 text-[15px]"
             @blur="flush('email', emailDraft)"
             @keyup.enter="flush('email', emailDraft)"
           />
@@ -255,9 +255,9 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- status -->
       <div class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.status') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1">{{ t('crm.panel.status') }}</div>
         <Select :model-value="customer.status_id ?? NO_STATUS" @update:model-value="(v) => setStatus(v as string)">
-          <SelectTrigger class="h-8 text-[13px]">
+          <SelectTrigger class="h-10 text-[15px]">
             <SelectValue :placeholder="t('crm.panel.noStatus')" />
           </SelectTrigger>
           <SelectContent>
@@ -269,7 +269,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- tags -->
       <div class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.tags') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1">{{ t('crm.panel.tags') }}</div>
         <div class="flex flex-wrap items-center gap-1.5">
           <Badge
             v-for="tg in customer.tags"
@@ -322,12 +322,12 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- assignee -->
       <div class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.assignee') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1">{{ t('crm.panel.assignee') }}</div>
         <Select
           :model-value="customer.assignee_user_id ?? UNASSIGNED"
           @update:model-value="(v) => setAssignee(v as string)"
         >
-          <SelectTrigger class="h-8 text-[13px]">
+          <SelectTrigger class="h-10 text-[15px]">
             <SelectValue :placeholder="t('crm.panel.unassigned')" />
           </SelectTrigger>
           <SelectContent>
@@ -339,7 +339,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- next step -->
       <div class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.followup') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1">{{ t('crm.panel.followup') }}</div>
         <div
           v-if="crm.profile?.next_followup"
           class="rounded-lg border border-border p-2.5 text-[13px] flex items-start gap-2"
@@ -368,14 +368,14 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
             </div>
           </div>
         </div>
-        <Button v-else variant="outline" size="sm" class="w-full h-8 text-[13px]" @click="showFollowupDialog = true">
+        <Button v-else variant="outline" size="sm" class="w-full h-10 text-[15px]" @click="showFollowupDialog = true">
           <CalendarClock class="w-3.5 h-3.5" /> {{ t('crm.panel.addFollowup') }}
         </Button>
       </div>
 
       <!-- note -->
       <div class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">{{ t('crm.panel.note') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1">{{ t('crm.panel.note') }}</div>
         <div v-if="crm.profile?.latest_note" class="rounded-lg bg-muted/40 p-2.5 text-[13px]">
           <p class="whitespace-pre-wrap break-words">{{ crm.profile.latest_note.body }}</p>
           <p class="text-[11px] text-muted-foreground mt-1">
@@ -428,7 +428,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- other conversations, channel context preserved -->
       <div v-if="otherConversations.length" class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+        <div class="text-[13px] text-muted-foreground mb-1">
           {{ t('crm.panel.conversations') }}
         </div>
         <ul class="space-y-1">
@@ -447,7 +447,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- custom fields -->
       <div v-if="crm.customFields.length" class="px-4 pb-3">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
+        <div class="text-[13px] text-muted-foreground mb-1">
           {{ t('crm.panel.customFields') }}
         </div>
         <div class="space-y-2">
@@ -460,7 +460,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
                 custom_fields: { ...customer!.custom_fields, [f.key]: v },
               })"
             >
-              <SelectTrigger class="mt-0.5 h-8 text-[13px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger class="mt-1 h-10 text-[15px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem v-for="opt in f.options" :key="opt" :value="opt">{{ opt }}</SelectItem>
               </SelectContent>
@@ -469,7 +469,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
               v-else
               :type="f.field_type === 'number' ? 'number' : f.field_type === 'date' ? 'date' : 'text'"
               :model-value="String(customer.custom_fields[f.key] ?? '')"
-              class="mt-0.5 h-8 text-[13px]"
+              class="mt-1 h-10 text-[15px]"
               @blur="(e: FocusEvent) => crm.patchCustomer(customer!.id, {
                 custom_fields: { ...customer!.custom_fields, [f.key]: (e.target as HTMLInputElement).value },
               })"
@@ -480,7 +480,7 @@ const isSimulatorCustomer = computed(() => (customer.value?.identities ?? []).so
 
       <!-- timeline -->
       <div class="px-4 pb-6">
-        <div class="text-[11px] uppercase tracking-wide text-muted-foreground mb-1.5">{{ t('crm.panel.timeline') }}</div>
+        <div class="text-[13px] text-muted-foreground mb-1.5">{{ t('crm.panel.timeline') }}</div>
         <ol v-if="crm.timeline.length" class="space-y-2 border-l border-border pl-3">
           <li v-for="e in crm.timeline" :key="e.source + e.id" class="relative">
             <span class="absolute -left-[17px] top-1.5 w-1.5 h-1.5 rounded-full bg-border" />

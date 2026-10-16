@@ -12,6 +12,7 @@ import { ArrowUpRight } from 'lucide-vue-next'
 import { RouterLink } from 'vue-router'
 import { useAccounts } from '@/stores/accounts'
 import { connStatus, type ConnTone } from '@/lib/format'
+import { metaChannelsEnabled } from '@/lib/featureFlags'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import WhatsappIcon from '@/components/icons/WhatsappIcon.vue'
@@ -22,6 +23,8 @@ import type { Account } from '@/types'
 
 const accounts = useAccounts()
 const { t } = useI18n()
+
+const metaEnabled = metaChannelsEnabled()
 
 onMounted(() => accounts.load())
 
@@ -48,8 +51,8 @@ const stats = computed(() => {
   const healthy = (x: Account) => x.connection_state === 'connected'
   const waiting = (x: Account) => ['qr_required', 'connecting', 'disconnect_pending'].includes(x.connection_state)
   return {
-    connected: accounts.accounts.filter(healthy).length,
-    waiting: accounts.accounts.filter(waiting).length,
+    connected: accounts.visibleAccounts.filter(healthy).length,
+    waiting: accounts.visibleAccounts.filter(waiting).length,
   }
 })
 </script>
@@ -66,7 +69,7 @@ const stats = computed(() => {
       </RouterLink>
     </div>
 
-    <div class="rounded-lg border border-border bg-card p-4 flex items-center justify-between gap-3">
+    <div v-if="metaEnabled" class="rounded-lg border border-border bg-card p-4 flex items-center justify-between gap-3">
       <div class="min-w-0">
         <h4 class="text-sm font-medium">{{ t('settings.channels.setupPointer.title') }}</h4>
         <p class="text-xs text-muted-foreground">{{ t('settings.channels.setupPointer.subtitle') }}</p>
@@ -77,8 +80,8 @@ const stats = computed(() => {
     </div>
 
     <div class="rounded-lg border border-border bg-card divide-y divide-border">
-      <p v-if="!accounts.accounts.length" class="px-5 py-8 text-center text-sm text-muted-foreground">{{ t('settings.channels.empty') }}</p>
-      <div v-for="a in accounts.accounts" :key="a.id" class="px-5 py-3 flex items-center gap-3">
+      <p v-if="!accounts.visibleAccounts.length" class="px-5 py-8 text-center text-sm text-muted-foreground">{{ t('settings.channels.empty') }}</p>
+      <div v-for="a in accounts.visibleAccounts" :key="a.id" class="px-5 py-3 flex items-center gap-3">
         <component :is="channelIcon(a)" class="w-5 h-5 shrink-0" />
         <div class="min-w-0 flex-1">
           <div class="text-sm font-medium truncate">{{ a.display_name }}</div>
@@ -91,7 +94,7 @@ const stats = computed(() => {
       </div>
     </div>
 
-    <div v-if="accounts.accounts.length" class="flex items-center gap-4 text-xs text-muted-foreground">
+    <div v-if="accounts.visibleAccounts.length" class="flex items-center gap-4 text-xs text-muted-foreground">
       <span>{{ stats.connected }} {{ t('settings.channels.connected') }}</span>
       <span v-if="stats.waiting">{{ stats.waiting }} {{ t('settings.channels.waiting') }}</span>
     </div>
