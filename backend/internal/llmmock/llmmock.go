@@ -159,7 +159,11 @@ func (c *Client) Stream(ctx context.Context, req llm.ChatRequest, onDelta func(s
 // escalation, and — deliberately — no {{table.ref.column}} catalog
 // placeholders and an empty media_files_to_send, since a generic mock has
 // no real catalog/media tokens to reference correctly and either would fail
-// ValidateResponseV7's own catalog cross-check.
+// ValidateResponseV7's own catalog cross-check. The exception is catalogReply
+// (catalog.go), tried first for every organization outside the two hard-coded
+// verticals below: it copies only tokens the rendered prompt itself lists, so
+// it can answer with real placeholders and media; when it finds nothing to
+// say, the generic greeting stays the answer.
 func customerResponse(prompt string) llm.ChatResponse {
 	lastMsg := prompt
 	if idx := strings.LastIndex(prompt, "Клиент пишет: "); idx != -1 {
@@ -169,6 +173,12 @@ func customerResponse(prompt string) llm.ChatResponse {
 	isZarina := strings.Contains(prompt, "Zarina") || strings.Contains(prompt, "zarina") || strings.Contains(prompt, "перманент") || strings.Contains(prompt, "ботокс") || strings.Contains(prompt, "филлер")
 	isLion := strings.Contains(prompt, "Lion Barbershop") || strings.Contains(prompt, "барбер")
 	reply := "Здравствуйте! Чем я могу вам помочь?"
+
+	if !isZarina && !isLion {
+		if r, ok := catalogReply(prompt); ok {
+			return catalogResponse(prompt, r)
+		}
+	}
 
 	if isZarina {
 		switch {
@@ -229,6 +239,28 @@ func customerResponse(prompt string) llm.ChatResponse {
 		"escalation_reason":   "",
 		"confidence":          0.95,
 	})
+	return llm.ChatResponse{
+		Text: string(raw), FinishReason: "stop",
+		PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(string(raw)),
+	}
+}
+
+// catalogResponse marshals a catalogReply into the same v7 JSON shape
+// customerResponse returns, adding the optional kb_gap diagnostic on an
+// escalation so the KB-gap report sees mock traffic the way it sees a model's.
+func catalogResponse(prompt string, r mockReply) llm.ChatResponse {
+	body := map[string]any{
+		"reply_text":          r.Text,
+		"reply_language":      r.Lang,
+		"media_files_to_send": r.Media,
+		"escalate":            r.Escalate,
+		"escalation_reason":   r.Reason,
+		"confidence":          0.9,
+	}
+	if r.Escalate && r.GapReason != "" {
+		body["kb_gap"] = map[string]any{"reason_code": r.GapReason}
+	}
+	raw, _ := json.Marshal(body)
 	return llm.ChatResponse{
 		Text: string(raw), FinishReason: "stop",
 		PromptTokens: estimateTokens(prompt), CompletionTokens: estimateTokens(string(raw)),
