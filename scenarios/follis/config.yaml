@@ -1,0 +1,25 @@
+# Boot config for the Follis pilot rehearsal (see README.md). run.sh starts the
+# backend from scenarios/follis/out/, so every path below lands in that
+# gitignored directory — a fresh SQLite database on every run.
+server:
+  http_addr: ":8080"
+  api_base_url: ""
+  frontend_base_url: "http://localhost:5173"
+  cors_origins:
+    - "http://localhost:5173"
+  trusted_proxies: []
+  secure_cookies: false
+
+storage:
+  database_target: "./data/follis.db"
+  wa_device_database_target: "./data/whatsmeow.db"
+  blob_dir: "./blobdata"
+
+system:
+  log_level: "info"
+  log_format: "logfmt"
+  queue_workers: 4
+  session_ttl_hours: 720
+  min_password_len: 8
+  simulator_enabled: true
+  customer_message_wait_seconds: 0

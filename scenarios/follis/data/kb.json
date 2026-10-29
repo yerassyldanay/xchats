@@ -1,0 +1,68 @@
+{
+  "_notice": "ТЕСТОВЫЕ ДАННЫЕ. Каталог, цены, телефоны и медиа придуманы для репетиции пилота и не являются прайс-листом Follis.",
+  "assistant": {
+    "persona": "Ты — консультант магазина Follis в Шымкенте: автоинструменты и оборудование для автосервиса. Общаешься дружелюбно и по делу, как опытный продавец, который сам работал в сервисе.",
+    "mission": "Помогай подобрать инструмент и оборудование: называй цены и наличие из каталога, отправляй фото и видео, подсказывай доставку и помогай оформить заказ. Сложные, оптовые и монтажные вопросы передавай менеджеру.",
+    "guardrails": "Не выдумывай цены, сроки, наличие и характеристики — только то, что есть в базе знаний. Не обещай скидок. Оптовые условия, счета для юрлиц и монтаж оборудования — только через менеджера.",
+    "language_policy": "Отвечай на языке клиента: по-русски или по-казахски, даже если клиент пишет по-казахски русскими буквами.",
+    "reply_max_words": 120
+  },
+  "contacts": {
+    "address": "ул. Жибек жолы, 114/2, Шымкент",
+    "phone": "+7 700 000 11 22",
+    "whatsapp": "+7 700 000 11 22",
+    "working_hours": "Пн–Сб 09:00–19:00, Вс 10:00–17:00",
+    "instagram": "@follis.test",
+    "callback_time": "Перезваниваем в рабочее время в течение часа"
+  },
+  "policies": {
+    "prepayment": "Для оборудования (подъёмники, станки) — предоплата при оформлении заказа.",
+    "installment": "Рассрочка Kaspi Red на инструмент и оборудование.",
+    "warranty": "Гарантия производителя на весь инструмент и оборудование.",
+    "free_delivery_from": "150 000 ₸",
+    "return_period_in_days": "14",
+    "outside_zones_note": "За пределы Казахстана не доставляем."
+  },
+  "zones": [
+    {"ref": "kazakhstan", "name": "Казахстан (другие города)", "zone_level": "country", "parent_ref": "", "delivery_available": true, "delivery_cost": "9 000 ₸", "delivery_in_days": "3–5", "notes": "Транспортной компанией до терминала."},
+    {"ref": "turkestan-region", "name": "Туркестанская область", "zone_level": "region", "parent_ref": "kazakhstan", "delivery_available": true, "delivery_cost": "5 000 ₸", "delivery_in_days": "1–2", "notes": ""},
+    {"ref": "shymkent", "name": "Шымкент", "zone_level": "city", "parent_ref": "turkestan-region", "delivery_available": true, "delivery_cost": "2 000 ₸", "delivery_in_days": "1", "notes": "Курьером до двери или до вашего СТО."}
+  ],
+  "topics": [
+    {"slug": "address", "title": "Адрес магазина и как добраться", "body_md": "Мы находимся по адресу: ул. Жибек жолы, 114/2, Шымкент. У входа есть парковка, крупное оборудование можно забрать на грузовом авто."},
+    {"slug": "opening", "title": "Открытие магазина", "body_md": "Магазин Follis открывается в октябре 2026 года. До открытия консультируем и принимаем заказы в WhatsApp, а оборудование для автосервиса можно заказать заранее."},
+    {"slug": "payment", "title": "Оплата и рассрочка", "body_md": "Оплата наличными, банковской картой или через Kaspi; доступна рассрочка Kaspi Red. Для юрлиц и СТО оплата по счёту — счёт готовит менеджер."},
+    {"slug": "warranty", "title": "Гарантия и возврат", "body_md": "На весь инструмент и оборудование действует гарантия производителя. Вернуть инструмент можно, если он не был в работе и сохранил товарный вид."},
+    {"slug": "installation", "title": "Установка оборудования для автосервиса", "body_md": "Подъёмники, шиномонтажные и балансировочные станки устанавливают и запускают наши специалисты. Стоимость монтажа менеджер рассчитывает после осмотра помещения."},
+    {"slug": "wholesale", "title": "Оснащение СТО и оптовые заказы", "body_md": "Для СТО и автосервисов собираем комплект оборудования под ключ и готовим индивидуальное предложение. Такие запросы ведёт менеджер."}
+  ],
+  "products": [
+    {"ref": "tool-set-108", "name": "Набор инструментов 108 предметов", "brand": "Force", "category": "Наборы инструментов", "price": "38 500 ₸", "description": "Универсальный набор головок 1/4\" и 1/2\", ключей и бит в кейсе. Хватает для большинства работ по легковому авто.", "best_for": "Автовладельцам и небольшим СТО", "availability_status": "in_stock", "icon": "toolset", "media": {"images": 2, "video": true}},
+    {"ref": "tool-set-216", "name": "Набор инструментов 216 предметов", "brand": "Jonnesway", "category": "Наборы инструментов", "price": "92 000 ₸", "description": "Профессиональный набор для автосервиса: головки трёх размеров, удлинители, кардан и комбинированные ключи.", "best_for": "Профессиональным мастерам", "availability_status": "in_stock", "icon": "toolset", "media": {"images": 2}},
+    {"ref": "impact-sockets-1-2", "name": "Набор ударных головок 1/2\" 10–32 мм", "brand": "Force", "category": "Наборы инструментов", "price": "24 900 ₸", "description": "Ударные головки под пневмо- и электрогайковёрты, хром-молибден.", "availability_status": "in_stock", "icon": "socket", "media": {"images": 1}},
+    {"ref": "torque-wrench-1-2", "name": "Динамометрический ключ 1/2\" 28–210 Нм", "brand": "Jonnesway", "category": "Ручной инструмент", "price": "21 500 ₸", "description": "Щелчковый динамометрический ключ для затяжки колёсных болтов и узлов двигателя.", "availability_status": "in_stock", "icon": "wrench", "media": {"images": 2, "video": true}},
+    {"ref": "combo-wrenches-14", "name": "Набор комбинированных ключей 8–24 мм, 14 шт", "brand": "Force", "category": "Ручной инструмент", "price": "16 800 ₸", "description": "Рожково-накидные ключи с трещоткой в накидной части.", "availability_status": "in_stock", "icon": "wrench", "media": {"images": 1}},
+    {"ref": "screwdriver-set-12", "name": "Набор отвёрток 12 шт", "brand": "Ombra", "category": "Ручной инструмент", "price": "6 900 ₸", "description": "Шлицевые и крестовые отвёртки с магнитным наконечником.", "availability_status": "in_stock", "icon": "screwdriver", "media": {"images": 1}},
+    {"ref": "air-impact-wrench", "name": "Пневмогайковёрт ударный 1/2\"", "brand": "Jonnesway", "category": "Пневмоинструмент", "price": "54 000 ₸", "description": "Мощный ударный гайковёрт для шиномонтажа и ходовой. Работает от компрессора от 50 литров.", "availability_status": "in_stock", "icon": "impact", "media": {"images": 2, "video": true}},
+    {"ref": "air-hose-reel-15", "name": "Шланг пневматический на катушке 15 м", "brand": "Force", "category": "Пневмоинструмент", "price": "18 500 ₸", "description": "Самосматывающаяся катушка с полиуретановым шлангом и быстросъёмами.", "availability_status": "in_stock", "icon": "hose", "media": {"images": 1}},
+    {"ref": "compressor-100l", "name": "Компрессор масляный 100 л", "brand": "Ombra", "category": "Компрессоры", "price": "189 000 ₸", "description": "Поршневой компрессор на 220 В для пневмоинструмента и покраски.", "best_for": "СТО и шиномонтажу", "availability_status": "in_stock", "icon": "compressor", "media": {"images": 2}},
+    {"ref": "compressor-50l", "name": "Компрессор масляный 50 л", "brand": "Ombra", "category": "Компрессоры", "price": "98 000 ₸", "description": "Компактный поршневой компрессор для гаража и небольшого сервиса.", "availability_status": "in_stock", "icon": "compressor", "media": {"images": 1}},
+    {"ref": "trolley-jack-3t", "name": "Домкрат подкатной 3 т, низкопрофильный", "brand": "Force", "category": "Домкраты и подъёмники", "price": "64 000 ₸", "description": "Подкатной домкрат с двумя плунжерами: быстро поднимает даже заниженные авто.", "best_for": "Легковым авто и кроссоверам", "availability_status": "in_stock", "icon": "jack", "media": {"images": 2, "video": true}},
+    {"ref": "bottle-jack-10t", "name": "Домкрат бутылочный 10 т", "brand": "Ombra", "category": "Домкраты и подъёмники", "price": "14 500 ₸", "description": "Гидравлический бутылочный домкрат для грузовиков и внедорожников.", "availability_status": "in_stock", "icon": "bottlejack", "media": {"images": 1}},
+    {"ref": "axle-stands-3t", "name": "Подставки страховочные 3 т, пара", "brand": "Force", "category": "Домкраты и подъёмники", "price": "17 900 ₸", "description": "Регулируемые подставки под авто для безопасной работы снизу.", "availability_status": "in_stock", "icon": "stands", "media": {"images": 1}},
+    {"ref": "lift-2post-4t", "name": "Подъёмник двухстоечный 4 т", "brand": "Ombra", "category": "Домкраты и подъёмники", "price": "1 450 000 ₸", "description": "Электрогидравлический двухстоечный подъёмник для СТО, 380 В.", "best_for": "Автосервисам", "availability_status": "preorder", "availability_note": "Поставка по предзаказу после предоплаты, монтаж — нашими специалистами.", "icon": "lift", "media": {"images": 1}},
+    {"ref": "lift-scissor-3t", "name": "Подъёмник ножничный 3 т", "brand": "Ombra", "category": "Домкраты и подъёмники", "price": "980 000 ₸", "description": "Ножничный подъёмник для шиномонтажа и кузовного ремонта.", "availability_status": "unavailable", "icon": "lift", "media": {"images": 0}},
+    {"ref": "tire-changer", "name": "Шиномонтажный станок полуавтомат 10–24\"", "brand": "Ombra", "category": "Шиномонтажное оборудование", "price": "520 000 ₸", "description": "Полуавтоматический шиномонтажный станок для легковых колёс, 220 В.", "best_for": "Шиномонтажу и СТО", "availability_status": "in_stock", "installation_terms": "Установку и запуск выполняют наши специалисты.", "icon": "tire", "media": {"images": 2, "video": true}},
+    {"ref": "wheel-balancer", "name": "Балансировочный станок 10–24\"", "brand": "Ombra", "category": "Шиномонтажное оборудование", "price": "465 000 ₸", "description": "Станок для балансировки легковых колёс с автоматическим вводом размеров.", "availability_status": "in_stock", "icon": "balancer", "media": {"images": 1}},
+    {"ref": "obd-scanner-launch", "name": "Диагностический сканер OBD-II", "brand": "Launch", "category": "Диагностика", "price": "85 000 ₸", "description": "Мультимарочный сканер: чтение и сброс ошибок, живые данные, сервисные сбросы.", "availability_status": "in_stock", "icon": "scanner", "media": {"images": 2}},
+    {"ref": "battery-tester-12v", "name": "Тестер аккумуляторов 12 В", "brand": "Launch", "category": "Диагностика", "price": "19 900 ₸", "description": "Проверка состояния аккумулятора, стартера и генератора.", "availability_status": "on_demand", "availability_note": "Привозим под заказ со склада поставщика.", "icon": "tester", "media": {"images": 1}},
+    {"ref": "tool-cabinet-7", "name": "Тележка инструментальная 7 ящиков", "brand": "Jonnesway", "category": "Гаражное оборудование", "price": "115 000 ₸", "description": "Металлическая тележка с замком и ящиками на направляющих.", "availability_status": "in_stock", "icon": "cabinet", "media": {"images": 1}},
+    {"ref": "workbench-steel", "name": "Верстак слесарный с тумбой", "brand": "Follis", "category": "Гаражное оборудование", "price": "145 000 ₸", "description": "Сварной верстак со столешницей из металла и тумбой с ящиками.", "availability_status": "on_demand", "icon": "workbench", "media": {"images": 0}},
+    {"ref": "oil-drain-80l", "name": "Установка для слива масла 80 л", "brand": "Ombra", "category": "Гаражное оборудование", "price": "79 000 ₸", "description": "Передвижная ёмкость с воронкой для слива отработанного масла.", "availability_status": "in_stock", "icon": "oil", "media": {"images": 1}}
+  ],
+  "draft_change": {
+    "ref": "tool-set-108",
+    "price": "36 900 ₸",
+    "why": "Цена к открытию — менеджер готовит изменение в Черновике, владелец проверяет и публикует."
+  }
+}

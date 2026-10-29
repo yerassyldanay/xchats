@@ -1,0 +1,29 @@
+{
+  "_notice": "ТЕСТОВЫЕ ДАННЫЕ: сотрудники, почты и пароли придуманы для репетиции пилота.",
+  "organization": {
+    "name": "Follis",
+    "timezone": "Asia/Almaty",
+    "about": "Магазин по продаже автоинструментов и оборудования для автосервиса. Улица Жибек жолы, 114/2, Шымкент. Откроется в октябре."
+  },
+  "bootstrap_admin": {
+    "email": "admin@xchat.kz",
+    "default_password": "xchat-admin-change-me",
+    "new_password": "Follis-setup-2026!"
+  },
+  "staff": [
+    {"key": "erlan", "name": "Ерлан Сапаров", "email": "erlan@follis.test", "password": "Follis-erlan-2026!", "role": "admin", "position": "Владелец"},
+    {"key": "aigerim", "name": "Айгерим Жумабаева", "email": "aigerim@follis.test", "password": "Follis-aigerim-2026!", "role": "admin", "position": "Управляющая магазином"},
+    {"key": "nurlan", "name": "Нурлан Ахметов", "email": "nurlan@follis.test", "password": "Follis-nurlan-2026!", "role": "member", "position": "Продавец-консультант (инструмент)"},
+    {"key": "dinara", "name": "Динара Касымова", "email": "dinara@follis.test", "password": "Follis-dinara-2026!", "role": "member", "position": "Продавец-консультант (диагностика)"},
+    {"key": "baurzhan", "name": "Бауыржан Омаров", "email": "baurzhan@follis.test", "password": "Follis-baurzhan-2026!", "role": "member", "position": "Специалист по оборудованию СТО"},
+    {"key": "asel", "name": "Асель Нурланова", "email": "asel@follis.test", "password": "Follis-asel-2026!", "role": "member", "position": "Оператор WhatsApp (рус/каз)"}
+  ],
+  "tags": [
+    {"name": "СТО", "color": "#2563eb"},
+    {"name": "Опт", "color": "#7c3aed"},
+    {"name": "Розница", "color": "#16a34a"},
+    {"name": "Юрлицо", "color": "#0f766e"},
+    {"name": "Қазақша", "color": "#ea580c"},
+    {"name": "Предзаказ", "color": "#db2777"}
+  ]
+}

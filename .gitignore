@@ -114,3 +114,7 @@ scripts/load/xchats-load
 real-usecases/
 beauty-industry/
 release-v1.1.0-executables/
+# Follis pilot rehearsal output (fresh database, logs, screenshots, report);
+# its data/ is the scenario's own input, not a runtime database.
+scenarios/follis/out/
+!scenarios/follis/data/
